@@ -1,8 +1,8 @@
-# SlideWrightCLEAN
+# Slide-Wright
 
 **Change what I asked. Preserve everything else. Prove it.**
 
-An AI presentation intelligence system for PowerPoint files that already exist and already matter.
+An AI-native presentation intelligence and editing system that understands, modifies and improves PowerPoint presentations — and will eventually create them — while preserving the user's existing work.
 
 ---
 
@@ -18,7 +18,7 @@ The result is a specific absurdity: **the decks that matter most are the ones AI
 
 ## What this is
 
-SlideWrightCLEAN reads a real `.pptx`, understands its structure and meaning, changes exactly what was asked, and returns a genuinely editable PowerPoint — with a verifiable account of what changed and what did not.
+Slide-Wright reads a real `.pptx`, understands its structure and meaning, changes exactly what was asked, and returns a genuinely editable PowerPoint — with a verifiable account of what changed and what did not.
 
 Generation is one capability inside that system. It is not the point of it.
 
