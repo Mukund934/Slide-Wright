@@ -18,7 +18,7 @@ secrets/
 # Generated corpus fixtures. The generator is the source of truth
 # (src/engine/slide_wright/corpus/synthesize.py), so the binaries are
 # reproducible and do not belong in history.
-/tests/corpus/synthetic-*.pptx
+/tests/corpus/*.pptx
 
 # ── Customer material — decks are confidential by default ────────────────────
 # Real customer/test decks must never enter history. Fixtures live in
