@@ -1,0 +1,16 @@
+# Normalise line endings so diffs stay clean across machines.
+* text=auto eol=lf
+
+# Binary — never diff or normalise. Test decks must stay byte-exact:
+# the whole product is about byte fidelity, so Git must not touch them.
+*.pptx  binary
+*.potx  binary
+*.ppsx  binary
+*.xlsx  binary
+*.docx  binary
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.webp  binary
+*.ttf   binary
+*.otf   binary
