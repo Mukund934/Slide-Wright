@@ -10,6 +10,7 @@ one, and the loop is what needs proving.
     slide-wright edit     deck.pptx --set 3:5/r1/c1:9.4x=11.8x -o out.pptx
     slide-wright profile  deck.pptx [deck.pptx ...]
     slide-wright refresh  deck.pptx --source comps.csv -o out.pptx
+    slide-wright brand    house.potx deck.pptx
 """
 
 from __future__ import annotations
@@ -126,6 +127,20 @@ def cmd_refresh(args) -> int:
     if args.output:
         print(f"\nwrote {session.export(args.output)}")
     return EXIT_OK
+
+
+def cmd_brand(args) -> int:
+    from slide_wright.brand import check_conformance, read_profile
+
+    profile = read_profile(args.template)
+    if args.deck is None:
+        print(profile.render())
+        return EXIT_OK
+    report = check_conformance(inspect(args.deck), profile, Path(args.deck).name)
+    print(report.render())
+    print()
+    print(f"  conformance {report.score:.1f}% of {report.checked_runs} text run(s)")
+    return EXIT_OK if report.conforms else EXIT_FINDINGS
 
 
 def cmd_verify(args) -> int:
@@ -257,6 +272,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workspace", help="where versions are kept")
     p.add_argument("--dry-run", action="store_true", help="show the plan and stop")
     p.set_defaults(func=cmd_refresh)
+
+    p = sub.add_parser("brand", help="check a deck against a template")
+    p.add_argument("template", help=".potx or .pptx whose theme is the authority")
+    p.add_argument("deck", nargs="?", help="deck to check; omit to just show the profile")
+    p.set_defaults(func=cmd_brand)
 
     p = sub.add_parser("verify", help="compare an output against its source")
     p.add_argument("source")
