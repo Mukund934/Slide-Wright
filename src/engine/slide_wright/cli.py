@@ -92,8 +92,29 @@ def cmd_edit(args) -> int:
             return EXIT_ERROR
         changeset.add(change)
 
+    if args.instruct:
+        from slide_wright.llm.client import default_provider
+        from slide_wright.planner import plan
+
+        provider = default_provider()
+        result = plan(
+            session.deck(), args.instruct,
+            deck_path=str(session.current.path), provider=provider,
+        )
+        if result.is_stub:
+            print(
+                "note: no ANTHROPIC_API_KEY set, so no model was consulted. "
+                "Use --set to make changes directly.",
+                file=sys.stderr,
+            )
+        for raw, reason in result.dropped:
+            print(f"note: dropped proposed change ({raw.get('op', '?')}): {reason}",
+                  file=sys.stderr)
+        for change in result.changeset.changes:
+            changeset.add(change)
+
     if not changeset.changes:
-        print("error: no changes given (use --set)", file=sys.stderr)
+        print("error: no changes (use --set, or --instruct with a key)", file=sys.stderr)
         return EXIT_ERROR
 
     print(changeset.render())
@@ -174,6 +195,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("deck")
     p.add_argument("--set", action="append", metavar="SLIDE:TARGET:BEFORE=AFTER",
                    help="a change; repeatable")
+    p.add_argument("--instruct", metavar="TEXT",
+                   help="describe the change in plain language (needs a model key)")
     p.add_argument("--lock", action="append", metavar="SCOPE[:TARGET]",
                    help="protect content, e.g. numbers, slide:4, shape:7")
     p.add_argument("-o", "--output", help="write the verified deck here")

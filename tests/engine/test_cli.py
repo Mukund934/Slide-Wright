@@ -111,7 +111,7 @@ class TestEdit:
     def test_no_changes_is_a_usage_error(self, adversarial_deck, tmp_path, capsys):
         code = main(["edit", str(adversarial_deck), "--workspace", str(tmp_path / "ws")])
         assert code == EXIT_ERROR
-        assert "no changes given" in capsys.readouterr().err
+        assert "no changes" in capsys.readouterr().err
 
 
 class TestVerify:
