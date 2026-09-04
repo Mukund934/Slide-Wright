@@ -53,3 +53,7 @@ tmp/
 *.log
 .DS_Store
 Thumbs.db
+
+# Vendored upstream engine. Large, not ours, and reproducible from
+# scripts/vendor_engine.py plus vendor/pin.json.
+/vendor/ppt-master/
