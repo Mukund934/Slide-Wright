@@ -126,6 +126,16 @@ class Session:
         except ApplyError as exc:
             raise SessionError(f"apply refused: {exc}") from exc
 
+        # A change that could not be written is a failure, not a quiet no-op.
+        # Without this, an applier that matched nothing would produce an
+        # unchanged file and a report saying "verified" — the worst possible
+        # outcome, because it looks like success.
+        if result.failed:
+            detail = "; ".join(f"{c.id}: {why}" for c, why in result.failed)
+            raise SessionError(f"{len(result.failed)} change(s) could not be applied: {detail}")
+        if not result.applied:
+            raise SessionError("no changes were applied; refusing to commit a no-op version")
+
         report = self.verify(self.current.path, target, cs)
         self.last_report = report
 
