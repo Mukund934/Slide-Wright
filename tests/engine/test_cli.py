@@ -157,3 +157,83 @@ class TestRefusals:
 
     def test_missing_file_is_refused(self, tmp_path, capsys):
         assert main(["inspect", str(tmp_path / "nope.pptx")]) == EXIT_ERROR
+
+
+class TestRefresh:
+    def test_updates_figures_from_a_csv(self, adversarial_deck, tmp_path, capsys):
+        source = tmp_path / "comps.csv"
+        source.write_text(
+            "Company,EV/EBITDA,Margin,Growth\n"
+            "Alpha Corp,11.8x,22.1%,18%\n"
+            "Beta Industries,11.2x,19.8%,12%\n"
+            "Gamma Holdings,8.7x,24.5%,21%\n",
+            encoding="utf-8",
+        )
+        out = tmp_path / "refreshed.pptx"
+        code = main([
+            "refresh", str(adversarial_deck), "--source", str(source),
+            "-o", str(out), "--workspace", str(tmp_path / "ws"),
+        ])
+        captured = capsys.readouterr().out
+        assert code == EXIT_OK
+        assert "comps.csv!B2" in captured, "every update must cite its source cell"
+        assert "VERIFIED" in captured
+        assert "11.8x" in inspect(out).slide(3).text
+
+    def test_dry_run_shows_the_plan_only(self, adversarial_deck, tmp_path, capsys):
+        source = tmp_path / "comps.csv"
+        source.write_text("Company,EV/EBITDA\nAlpha Corp,11.8x\nBeta Industries,11.2x\n",
+                          encoding="utf-8")
+        before = adversarial_deck.read_bytes()
+        code = main([
+            "refresh", str(adversarial_deck), "--source", str(source),
+            "--dry-run", "--workspace", str(tmp_path / "ws"),
+        ])
+        assert code == EXIT_OK
+        assert "dry run" in capsys.readouterr().out
+        assert adversarial_deck.read_bytes() == before
+
+    def test_numbers_lock_blocks_a_refresh(self, adversarial_deck, tmp_path, capsys):
+        source = tmp_path / "comps.csv"
+        source.write_text("Company,EV/EBITDA\nAlpha Corp,11.8x\nBeta Industries,11.2x\n",
+                          encoding="utf-8")
+        code = main([
+            "refresh", str(adversarial_deck), "--source", str(source),
+            "--lock", "numbers", "--workspace", str(tmp_path / "ws"),
+        ])
+        assert code == EXIT_FINDINGS
+
+    def test_unreadable_source_is_an_error(self, adversarial_deck, tmp_path, capsys):
+        code = main([
+            "refresh", str(adversarial_deck), "--source", str(tmp_path / "nope.csv"),
+            "--workspace", str(tmp_path / "ws"),
+        ])
+        assert code == EXIT_ERROR
+        assert "error" in capsys.readouterr().err
+
+
+class TestBrand:
+    def test_shows_the_profile_when_no_deck_is_given(self, adversarial_deck, capsys):
+        assert main(["brand", str(adversarial_deck)]) == EXIT_OK
+        assert "BRAND PROFILE" in capsys.readouterr().out
+
+    def test_a_deck_conforms_to_its_own_template(self, adversarial_deck, capsys):
+        assert main(["brand", str(adversarial_deck), str(adversarial_deck)]) == EXIT_OK
+        assert "CONFORMS" in capsys.readouterr().out
+
+    def test_off_template_deck_exits_nonzero(self, adversarial_deck, minimal_deck, tmp_path, capsys):
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+        run = box.text_frame.paragraphs[0].add_run()
+        run.text = "Off-brand text"
+        run.font.name = "Comic Sans MS"
+        run.font.size = Pt(18)
+        off = tmp_path / "off.pptx"
+        prs.save(str(off))
+
+        assert main(["brand", str(adversarial_deck), str(off)]) == EXIT_FINDINGS
+        assert "Comic Sans MS" in capsys.readouterr().out
