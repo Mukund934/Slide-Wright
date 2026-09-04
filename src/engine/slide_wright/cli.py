@@ -9,6 +9,7 @@ one, and the loop is what needs proving.
     slide-wright verify   original.pptx edited.pptx
     slide-wright edit     deck.pptx --set 3:5/r1/c1:9.4x=11.8x -o out.pptx
     slide-wright profile  deck.pptx [deck.pptx ...]
+    slide-wright refresh  deck.pptx --source comps.csv -o out.pptx
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from pathlib import Path
 
 from slide_wright import __version__
 from slide_wright.apply import ApplyError
+from slide_wright.audit import audit as audit_deck
 from slide_wright.changeset import Change, Op
 from slide_wright.corpus.profile import format_table, profile_many
 from slide_wright.gate import check
@@ -59,9 +61,71 @@ def cmd_inspect(args) -> int:
 
 
 def cmd_audit(args) -> int:
-    result = check(inspect(args.deck))
-    print(result.render())
-    return EXIT_OK if result.passed else EXIT_FINDINGS
+    deck = inspect(args.deck)
+    if args.gate_only:
+        result = check(deck)
+        print(result.render())
+        return EXIT_OK if result.passed else EXIT_FINDINGS
+
+    report = audit_deck(deck, Path(args.deck).name)
+    print(report.render())
+    if report.gate and report.gate.findings:
+        print()
+        print(report.gate.render())
+    clean = not report.observations and (report.gate is None or report.gate.passed)
+    return EXIT_OK if clean else EXIT_FINDINGS
+
+
+def cmd_refresh(args) -> int:
+    from slide_wright.refresh import plan_refresh
+    from slide_wright.sources import SourceError, SourceSet, load
+
+    sources = SourceSet()
+    for spec in args.source:
+        try:
+            for table in load(spec):
+                sources.add(table)
+        except SourceError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+
+    session = Session.open(args.deck, workspace=args.workspace)
+    plan = plan_refresh(session.deck(), sources)
+    print(plan.render())
+    print()
+
+    if not plan.updates:
+        print("nothing to update — every matched figure already agrees with the source")
+        return EXIT_OK
+    if args.dry_run:
+        print("dry run — nothing was applied")
+        return EXIT_OK
+
+    changeset = session.propose("refresh figures from source")
+    for lock in args.lock or []:
+        scope, _, target = lock.partition(":")
+        changeset.lock(scope, target)
+    for change in plan.to_changeset(str(session.current.path)).changes:
+        changeset.add(change)
+    changeset.approve_all()
+
+    if not changeset.approved:
+        print("all updates were blocked by locks; nothing to apply", file=sys.stderr)
+        return EXIT_FINDINGS
+
+    try:
+        report = session.apply()
+    except (SessionError, ApplyError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(report.render())
+    if not report.deliverable:
+        print("\nnot delivered — verification failed", file=sys.stderr)
+        return EXIT_FINDINGS
+    if args.output:
+        print(f"\nwrote {session.export(args.output)}")
+    return EXIT_OK
 
 
 def cmd_verify(args) -> int:
@@ -178,9 +242,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-v", "--verbose", action="store_true", help="list every shape")
     p.set_defaults(func=cmd_inspect)
 
-    p = sub.add_parser("audit", help="run the deterministic quality gate")
+    p = sub.add_parser("audit", help="what is wrong with this deck")
     p.add_argument("deck")
+    p.add_argument("--gate-only", action="store_true",
+                   help="only the delivery gate, not the structural audit")
     p.set_defaults(func=cmd_audit)
+
+    p = sub.add_parser("refresh", help="update figures from a spreadsheet, with citations")
+    p.add_argument("deck")
+    p.add_argument("--source", action="append", required=True, metavar="FILE",
+                   help=".csv or .xlsx; repeatable")
+    p.add_argument("--lock", action="append", metavar="SCOPE[:TARGET]")
+    p.add_argument("-o", "--output", help="write the verified deck here")
+    p.add_argument("--workspace", help="where versions are kept")
+    p.add_argument("--dry-run", action="store_true", help="show the plan and stop")
+    p.set_defaults(func=cmd_refresh)
 
     p = sub.add_parser("verify", help="compare an output against its source")
     p.add_argument("source")
