@@ -58,21 +58,55 @@ Failing closed is correct here. Delivering a quietly corrupted board deck is far
 
 ## Granularity: what we actually promise
 
-Honesty matters more than marketing here, because the measured behaviour is **per-slide**, not per-object:
+There are two paths, and they promise different things. Both are measured.
+
+### In-place path — text, table cells, geometry, font size
+
+`apply.py` patches the target run directly in the slide XML and copies every
+other part byte-for-byte. Measured on the corpus deck, changing a table cell
+from `9.4x` to `11.8x`:
+
+```
+EDITED SLIDE, character-level
+  source chars     3706
+  identical chars  3704   (99.95% of the slide preserved)
+  distinct edits   2      '9' -> '11'   and   '4' -> '8'
+  text runs        17 -> 17
+```
+
+**Two character substitutions.** Not a rebuilt slide that happens to look the
+same — the same bytes, with two numbers different.
+
+So on this path the promise is the strong one:
+
+> **"Every byte of your file is identical except the characters you asked to change."**
+
+This is enforced in tests (`test_apply.py::TestNarrowness`), which fail if an
+edit produces more than three diff hunks or preserves less than 99% of the
+edited slide.
+
+### Round-trip path — structural and visual change
+
+Anything the in-place applier cannot do precisely — restructuring, redesign,
+regenerated layouts — routes through the engine, which **rebuilds** each slide
+it touches from the intermediate representation:
 
 ```
 Round-trip export summary: passthrough=18  rebuilt=1
 ```
 
-An edited slide is **rebuilt from the IR**, not surgically patched. Untouched slides pass through byte-identical.
+Untouched slides remain byte-identical; the edited slide is re-serialised. The
+promise there is the weaker, still-useful one:
 
-So the accurate promise is:
+> **"Slides you did not target are byte-for-byte identical. On a slide we did
+> change, every object you did not target is preserved and verified."**
 
-> **"Slides you did not target are byte-for-byte identical. On slides we did change, every object you did not target is preserved and verified — and we show you the object-level account."**
+### The rule
 
-Not: *"we only touch the bytes you asked about."* That would be false, and it would break the first time someone checked.
-
-**This is also a product opportunity.** Object-level patching — mutating only the target run inside an otherwise untouched slide XML — would upgrade the guarantee from slide-level to object-level. It is hard, it is not upstream today, and it is the single most valuable thing we could contribute to the engine. Backlogged, not assumed.
+**Prefer the in-place path, and refuse rather than widen.** `apply.py` raises
+`ApplyError` on any operation it cannot perform surgically instead of silently
+falling back to a rebuild. Widening the blast radius without telling the user is
+exactly the failure this product exists to prevent.
 
 ---
 
