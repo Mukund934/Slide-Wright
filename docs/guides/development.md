@@ -2,6 +2,23 @@
 
 **Status:** Phase 0 — no application code exists yet. This describes conventions, not a build.
 
+## Naming
+
+The product is **Slide-Wright** — capital S, capital W, hyphenated. That is the only form that appears in UI copy, documentation prose, commit messages, or anything a customer reads.
+
+Machine-readable variants are permitted **only** where an ecosystem cannot accept a hyphen:
+
+| Context | Identifier |
+|---|---|
+| Repository / directory | `Slide-Wright` |
+| npm package, CLI binary, Docker image, URL slug | `slide-wright` |
+| Python package / module | `slide_wright` (PEP 8 forbids hyphens in importable names) |
+| JS/TS identifiers, JSON keys | `slideWright` |
+| Environment variables | `SLIDE_WRIGHT_` prefix |
+| Postgres identifiers | `slide_wright` |
+
+These are technical spellings, not brand variants. Never write `SlideWright` unhyphenated as the product name.
+
 ## Repository conventions
 
 | Path | Tracked | Contents |
