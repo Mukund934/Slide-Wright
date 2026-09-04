@@ -35,15 +35,65 @@ Slide-Wright starts from the opposite premise. **Your file is evidence, not inpu
 ## What works today
 
 ```bash
-slide-wright inspect  deck.pptx              # structural summary
-slide-wright audit    deck.pptx              # deterministic quality findings
-slide-wright profile  deck.pptx              # how adversarial is this deck?
-slide-wright verify   before.pptx after.pptx # part-level fidelity report
+slide-wright inspect  deck.pptx                     # structural summary
+slide-wright audit    deck.pptx                     # what is wrong with this deck
+slide-wright brand    house.potx deck.pptx          # where it departs from the template
+slide-wright refresh  deck.pptx --source comps.csv  # update figures, with citations
+slide-wright verify   before.pptx after.pptx        # part-level fidelity report
+slide-wright profile  deck.pptx                     # how adversarial is this deck?
 slide-wright edit     deck.pptx \
     --set "3:5/r1/c1:9.4x=11.8x" \
     --lock numbers \
     -o out.pptx
 ```
+
+### Refresh a recurring deck from a workbook
+
+Last quarter's deck plus this quarter's numbers. **No model is involved** —
+values are matched by row and column *label*, never by position or resemblance,
+and a figure that cannot be justified with a coordinate is not changed.
+
+```
+REFRESH PLAN
+
+  2 figure(s) to update · 7 already correct · 0 not found in the source
+
+  Updates
+    · slide 3 r1c1: '9.4x' -> '11.8x'
+        from comps.csv!B2
+    · slide 3 r2c2: '19.8%' -> '21.4%'
+        from comps.csv!C3
+```
+
+Knowing seven figures are *still correct* is as useful as knowing two moved.
+
+### Audit a deck you have just inherited
+
+```
+DECK AUDIT — pitchbook.pptx
+  19 slides · 1449 words · 76 words per slide
+
+  NARRATIVE
+    · 5 slides (3–15): 5 titles name a topic rather than state a finding
+        replace "Results" with the result — a reader should get the argument
+        from the titles alone
+  EVIDENCE
+    · slide 5, 12, 13: 3 slide(s) present a table or chart with no source line
+        add a source note; an unattributed figure cannot be checked later
+```
+
+### Check it against the house template
+
+```
+BRAND CONFORMANCE — deck.pptx
+  · [font]   'Aptos' is not a template typeface        slide 1, 2, 3, 5, 6
+  · [colour] #FFC000 is not in the template palette    slide 5, 6
+
+  conformance 73.5% of 102 text run(s)
+```
+
+The template's theme is the authority. A deck that uniformly ignores it is still
+non-conforming — the commonest font in a deck is never mistaken for the brand.
 
 **Measured, not asserted** (`scripts/phase1_exit_check.py`, `scripts/run_benchmark.py`):
 
@@ -79,7 +129,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 190 tests
+python -m pytest tests -q          # 291 tests
 ```
 
 Python 3.11+. No API key is required: the planner falls back to an offline stub, and every deterministic layer runs without credentials or network access.
@@ -98,11 +148,15 @@ src/engine/slide_wright/    the engine — deterministic, no model calls
   apply.py                  in-place edits, character-level
   report.py                 the change report and delivery gate
   session.py                transactional session, versions, rollback
+  audit.py                  what is wrong with this deck
+  brand.py                  template conformance
+  sources.py                spreadsheets, with cell-level citations
+  refresh.py                update figures from a source, deterministically
   planner.py                instruction -> validated change set
   llm/                      provider abstraction, budgets, offline stub
   corpus/                   deck profiler and adversarial generator
 docs/                       architecture, 6 ADRs, guides
-tests/                      190 tests, including regressions from real decks
+tests/                      291 tests, including regressions from real decks
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
 ```
@@ -116,8 +170,11 @@ private/                    project intelligence — gitignored, never committed
 | 0 — Validation | Technical gates **passed**. Demand gate **not run** — needs practitioner conversations. |
 | 1 — Core engine | **Complete.** Exit condition met: 11/11 eligible real decks edited and verified. |
 | 2 — MVP (backend, web) | **Gated on a paying customer.** Not started, on purpose. |
+| 3 — Engine capabilities | Audit, citations, refresh and brand conformance **built**; the customer-facing half stays gated. |
 
 There is no web application, no database and no account system, because no customer has yet said they want one. The roadmap gates that work on evidence rather than on readiness, and the evidence does not exist yet.
+
+Phase 3's *engine* capabilities were built ahead of that gate because each is deterministic, testable offline, and useful whatever the eventual delivery surface turns out to be. Brand conformance currently **reports** drift; correcting it automatically is the next increment, and is worth building only once someone asks for it.
 
 **Known gaps, stated plainly:**
 
