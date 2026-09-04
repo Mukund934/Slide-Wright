@@ -121,31 +121,55 @@ def _apply_one(root, change: Change) -> bool:
 
 
 def _set_text(shape, before: str, after: str) -> bool:
-    """Replace text in the run that holds it, leaving every other run alone."""
-    runs = shape.findall(".//a:r", NS)
-    # Exact single-run match first: the narrowest possible edit.
-    for run in runs:
+    """Replace text in the run that holds it, leaving every other run alone.
+
+    Text in a shape is not one string. It is runs inside paragraphs, split
+    wherever formatting changes, and `ShapeInfo.text` joins *all* of them. So a
+    caller's `before` may correspond to a single run, to one paragraph, or to
+    the whole shape across several paragraphs.
+
+    Tried narrowest-first, because a narrower match means fewer bytes touched:
+      1. one run holds it exactly            — two-character edits land here
+      2. one paragraph holds it              — collapse into that paragraph
+      3. the whole shape holds it            — collapse into the first run
+
+    Steps 2 and 3 lose intra-run formatting inside the matched span, which is
+    unavoidable when replacing text that spans differently formatted runs.
+    """
+    # 1. Exact single-run match: the narrowest possible edit.
+    for run in shape.findall(".//a:r", NS):
         t = run.find("a:t", NS)
         if t is not None and t.text == before:
             t.text = after
             return True
-    # The string may be split across runs by formatting; collapse into the
-    # first run of the paragraph that contains it and clear the remainder.
-    for para in shape.findall(".//a:p", NS):
-        para_runs = para.findall("a:r", NS)
-        joined = "".join((r.find("a:t", NS).text or "") for r in para_runs
-                         if r.find("a:t", NS) is not None)
-        if before and before in joined:
-            replaced = joined.replace(before, after, 1)
-            first = True
-            for r in para_runs:
-                t = r.find("a:t", NS)
-                if t is None:
-                    continue
-                t.text = replaced if first else ""
-                first = False
+
+    paragraphs = shape.findall(".//a:p", NS)
+
+    # 2. The span sits inside one paragraph.
+    for para in paragraphs:
+        if _replace_within(para.findall("a:r", NS), before, after):
             return True
-    return False
+
+    # 3. The span crosses paragraphs; treat the shape as one text block.
+    all_runs = [r for para in paragraphs for r in para.findall("a:r", NS)]
+    return _replace_within(all_runs, before, after)
+
+
+def _replace_within(runs, before: str, after: str) -> bool:
+    """Replace `before` across a run sequence, writing the result into the first."""
+    texts = [(r, r.find("a:t", NS)) for r in runs]
+    texts = [(r, t) for r, t in texts if t is not None]
+    if not texts:
+        return False
+
+    joined = "".join(t.text or "" for _, t in texts)
+    if not before or before not in joined:
+        return False
+
+    replaced = joined.replace(before, after, 1)
+    for index, (_, t) in enumerate(texts):
+        t.text = replaced if index == 0 else ""
+    return True
 
 
 def _set_table_cell(shape, change: Change) -> bool:
