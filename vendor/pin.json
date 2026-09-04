@@ -1,0 +1,57 @@
+{
+  "upstream": "https://github.com/hugohe3/ppt-master",
+  "licence": "MIT",
+  "version": "v-research-snapshot-2026-09-04",
+  "source_path": "C:\\Users\\mukun\\Downloads\\trunk\\7BestRepos\\ppt-master-main\\ppt-master-main\\skills\\ppt-master",
+  "vendored_at": "vendor/ppt-master",
+  "tree_sha256": "355134d98003771d0be2eafabe7acd9c8f8da806a375dcca6b8e1050b50607e2",
+  "file_count": 13070,
+  "hygiene": {
+    "removed": [
+      "scripts/gemini_watermark_remover.py",
+      "scripts/assets/bg_48.png",
+      "scripts/assets/bg_96.png"
+    ],
+    "quarantined": [
+      {
+        "from": "templates/icons/simple-icons",
+        "to": "quarantine/simple-icons"
+      }
+    ],
+    "forced_export_flags": [
+      "--native-charts-and-tables"
+    ]
+  },
+  "attribution": [
+    {
+      "asset": "CHUNK Icons",
+      "licence": "CC BY 4.0",
+      "author": "Noah Jacobus",
+      "obligation": "credit the author and state that modifications were made"
+    },
+    {
+      "asset": "Tabler Icons",
+      "licence": "MIT",
+      "author": "Pawel Kuna",
+      "obligation": "retain copyright and licence notice"
+    },
+    {
+      "asset": "Phosphor Icons",
+      "licence": "MIT",
+      "author": "Phosphor Icons",
+      "obligation": "retain copyright and licence notice"
+    },
+    {
+      "asset": "Apache POI preset geometry",
+      "licence": "Apache-2.0",
+      "author": "The Apache Software Foundation",
+      "obligation": "retain NOTICE"
+    },
+    {
+      "asset": "ppt-master",
+      "licence": "MIT",
+      "author": "Hugo He",
+      "obligation": "retain copyright and licence notice"
+    }
+  ]
+}
