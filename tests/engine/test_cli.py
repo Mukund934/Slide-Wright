@@ -29,7 +29,31 @@ class TestInspect:
 class TestAudit:
     def test_clean_deck_exits_zero(self, adversarial_deck, capsys):
         assert main(["audit", str(adversarial_deck)]) == EXIT_OK
-        assert "passed" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "DECK AUDIT" in out
+        assert "No structural issues found" in out
+
+    def test_gate_only_runs_just_the_delivery_gate(self, adversarial_deck, capsys):
+        assert main(["audit", str(adversarial_deck), "--gate-only"]) == EXIT_OK
+        out = capsys.readouterr().out
+        assert "QUALITY GATE" in out
+        assert "DECK AUDIT" not in out
+
+    def test_structural_findings_exit_nonzero(self, tmp_path, capsys):
+        """A deck with untitled slides is reportable even if the gate passes."""
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        prs = Presentation()
+        for _ in range(3):
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+            box.text_frame.text = "Body text with no title above it"
+        deck = tmp_path / "untitled.pptx"
+        prs.save(str(deck))
+
+        assert main(["audit", str(deck)]) == EXIT_FINDINGS
+        assert "no title" in capsys.readouterr().out
 
     def test_findings_exit_nonzero(self, tmp_path, capsys):
         """A deck with content off the canvas must be reportable in a script."""
