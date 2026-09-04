@@ -1,0 +1,50 @@
+# ── Private project intelligence — NEVER commit ──────────────────────────────
+# Our persistent project brain: roadmap, research, strategy, decisions, costs.
+# See private/README.md for what lives there and why it stays out of Git.
+/private/
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+secrets/
+
+# ── Customer material — decks are confidential by default ────────────────────
+# Real customer/test decks must never enter history. Fixtures live in
+# tests/corpus/ and are tracked only when explicitly cleared for sharing.
+/inbox/
+/outbox/
+*.local.pptx
+*.confidential.*
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# ── Node ─────────────────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# ── Working artifacts ────────────────────────────────────────────────────────
+scratch/
+tmp/
+*.log
+.DS_Store
+Thumbs.db
