@@ -50,6 +50,18 @@ def build_adversarial(out_path: str | Path) -> Path:
 
 # ── slides ───────────────────────────────────────────────────────────────────
 
+def _source_note(slide, text: str) -> None:
+    """Attribute a data slide.
+
+    A chart or table without a source line is a finding in our own audit, so
+    the reference deck should not commit the error it is used to detect.
+    """
+    box = slide.shapes.add_textbox(Inches(1), Inches(6.8), Inches(8), Inches(0.4))
+    box.text_frame.text = text
+    box.text_frame.paragraphs[0].font.size = Pt(11)
+    box.text_frame.paragraphs[0].font.color.rgb = MUTED
+
+
 def _slide_title(prs: Presentation) -> None:
     s = prs.slides.add_slide(prs.slide_layouts[0])
     s.shapes.title.text = "Adversarial Fidelity Corpus"
@@ -75,6 +87,7 @@ def _slide_native_chart(prs: Presentation) -> None:
         Inches(1), Inches(1.8), Inches(11), Inches(4.8),
         data,
     )
+    _source_note(s, "Source: management accounts, FY26 (unaudited)")
 
 
 def _slide_table(prs: Presentation) -> None:
@@ -99,6 +112,7 @@ def _slide_table(prs: Presentation) -> None:
             para.font.size = Pt(14)
             if r == 0:
                 para.font.bold = True
+    _source_note(s, "Source: broker comps, 30 June 2026")
 
 
 def _slide_grouped_shapes(prs: Presentation) -> None:
