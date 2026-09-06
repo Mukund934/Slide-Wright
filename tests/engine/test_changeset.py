@@ -294,3 +294,16 @@ class TestProtectionScopes:
         assert s.add(Change(id="m", op=Op.MOVE, slide=1, target="7",
                             before=(0, 0), after=(9, 9))).status is Status.REJECTED
         assert s.add(change(cid="ok", before="Strategy", after="Our strategy")).status is Status.PROPOSED
+
+
+class TestDescribeCoversEveryOp:
+    """A missing entry raises KeyError at report time — after the edit is written.
+
+    That is exactly what happened when `set_font` was added: the change applied
+    cleanly, then the run crashed while describing what it had just done.
+    """
+
+    def test_every_op_can_be_described(self):
+        for op in Op:
+            c = Change(id="c1", op=op, slide=1, target="7", before="a", after="b")
+            assert c.describe(), f"{op.value} has no description"

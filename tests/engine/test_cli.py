@@ -454,3 +454,91 @@ class TestDiffCommand:
         text = capsys.readouterr().out
         assert "slide 3" in text
         assert "9.4" in text and "11.8" in text
+
+
+class TestBrandFix:
+    """Correcting drift, with the promise that content is untouched.
+
+    The wedge this serves inverts the usual guarantee: change every typeface
+    that does not conform, and change nothing else at all. The second half is
+    what makes it safe to run on a deck someone else wrote.
+    """
+
+    def test_fix_reports_a_plan_and_changes_nothing_on_a_dry_run(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        code = main(["brand", str(adversarial_deck), str(adversarial_deck),
+                     "--fix", "--dry-run", "--workspace", str(tmp_path / "ws")])
+        assert code == EXIT_OK
+        out = capsys.readouterr().out
+        assert "CONFORMANCE PLAN" in out
+        assert "No word or number is changed" in out
+        assert not list((tmp_path / "ws").glob("*edited*"))
+
+    def test_a_conforming_deck_needs_no_correction(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        code = main(["brand", str(adversarial_deck), str(adversarial_deck),
+                     "--fix", "--workspace", str(tmp_path / "ws")])
+        assert code == EXIT_OK
+        assert "Nothing to correct" in capsys.readouterr().out
+
+    def test_check_names_what_fix_will_not_touch(self, adversarial_deck, capsys):
+        """So nobody runs --fix twice expecting a clean report."""
+        main(["brand", str(adversarial_deck), str(adversarial_deck)])
+        out = capsys.readouterr().out
+        assert "conformance" in out
+
+
+@pytest.mark.fixtures
+class TestBrandFixOnARealDeck:
+    def _eia(self):
+        from pathlib import Path
+
+        path = (Path(__file__).resolve().parents[2] / "tests" / "fixtures"
+                / "third-party" / "eia-aeo2023-release.pptx")
+        if not path.is_file():
+            pytest.skip("run scripts/fetch_fixtures.py")
+        return path
+
+    def test_corrects_typefaces_without_touching_a_word(self, tmp_path, capsys):
+        from slide_wright.diff import diff
+
+        deck = self._eia()
+        out = tmp_path / "fixed.pptx"
+        code = main(["brand", str(deck), str(deck), "--fix",
+                     "--workspace", str(tmp_path / "ws"), "-o", str(out)])
+        assert code == EXIT_OK
+        assert "0 words or numbers changed, verified" in capsys.readouterr().out
+
+        result = diff(deck, out)
+        assert result.deltas, "the fix must actually change something"
+        assert not result.content_deltas, "a formatting pass changed content"
+        assert {d.kind for d in result.deltas} == {"formatting"}
+
+    def test_the_corrected_deck_reports_no_typeface_drift(self, tmp_path, capsys):
+        from slide_wright.brand import check_conformance, read_profile
+
+        deck = self._eia()
+        out = tmp_path / "fixed.pptx"
+        main(["brand", str(deck), str(deck), "--fix",
+              "--workspace", str(tmp_path / "ws"), "-o", str(out)])
+        capsys.readouterr()
+
+        profile = read_profile(deck)
+        after = check_conformance(inspect(out), profile, "fixed")
+        assert not [d for d in after.deviations if d.kind == "font"]
+
+    def test_charts_and_workbooks_survive_a_conformance_pass(self, tmp_path, capsys):
+        from slide_wright.charts import census
+
+        deck = self._eia()
+        out = tmp_path / "fixed.pptx"
+        main(["brand", str(deck), str(deck), "--fix",
+              "--workspace", str(tmp_path / "ws"), "-o", str(out)])
+        capsys.readouterr()
+
+        before, after = census(deck), census(out)
+        assert after["charts"] == before["charts"] == 29
+        assert after["workbooks"] == before["workbooks"] == 29
+        assert after["values"] == before["values"]
