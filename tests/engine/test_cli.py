@@ -427,3 +427,30 @@ class TestBrand:
 
         assert main(["brand", str(adversarial_deck), str(off)]) == EXIT_FINDINGS
         assert "Comic Sans MS" in capsys.readouterr().out
+
+
+class TestDiffCommand:
+    """`verify` says whether the package is intact; `diff` says what a reader
+    would notice. They answer different questions and both are needed."""
+
+    def test_identical_decks_exit_zero(self, adversarial_deck, tmp_path, capsys):
+        import shutil
+
+        copy = tmp_path / "copy.pptx"
+        shutil.copy(adversarial_deck, copy)
+        assert main(["diff", str(adversarial_deck), str(copy)]) == EXIT_OK
+        assert "No structural differences" in capsys.readouterr().out
+
+    def test_a_changed_deck_exits_with_findings_and_says_what_changed(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        table = next(s for s in inspect(adversarial_deck).all_shapes() if s.kind == "table")
+        out = tmp_path / "out.pptx"
+        assert main(["edit", str(adversarial_deck), "--workspace", str(tmp_path / "ws"),
+                     "--set", f"3:{table.id}/r1/c1:9.4x=11.8x", "-o", str(out)]) == EXIT_OK
+        capsys.readouterr()
+
+        assert main(["diff", str(adversarial_deck), str(out)]) == EXIT_FINDINGS
+        text = capsys.readouterr().out
+        assert "slide 3" in text
+        assert "9.4" in text and "11.8" in text

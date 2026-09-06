@@ -14,6 +14,7 @@ one, and the loop is what needs proving.
     slide-wright propose  deck.pptx --instruct "..." -o changes.json
     slide-wright review   changes.json --approve c1 --reject c2
     slide-wright apply    deck.pptx changes.json -o out.pptx
+    slide-wright diff     before.pptx after.pptx
     slide-wright history  deck.pptx
     slide-wright revert   deck.pptx --to 1
 """
@@ -336,6 +337,19 @@ def cmd_revert(args) -> int:
     return EXIT_OK
 
 
+def cmd_diff(args) -> int:
+    """What changed between two decks, structurally.
+
+    Complements `verify`, which answers whether the package is intact. This
+    answers what a reader would notice.
+    """
+    from slide_wright.diff import diff as deck_diff
+
+    result = deck_diff(args.source, args.output)
+    print(result.render(limit=args.limit))
+    return EXIT_FINDINGS if result.changed else EXIT_OK
+
+
 def cmd_profile(args) -> int:
     print(format_table(profile_many(args.decks)))
     return EXIT_OK
@@ -508,6 +522,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-m", "--message", help="what this edit is for")
     p.add_argument("--workspace", help="where versions are kept")
     p.set_defaults(func=cmd_apply)
+
+    p = sub.add_parser("diff", help="what changed between two decks, in words")
+    p.add_argument("source")
+    p.add_argument("output")
+    p.add_argument("--limit", type=int, default=40,
+                   help="maximum differences to list (default 40)")
+    p.set_defaults(func=cmd_diff)
 
     p = sub.add_parser("history", help="every version of this deck")
     p.add_argument("deck")
