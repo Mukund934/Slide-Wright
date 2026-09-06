@@ -101,6 +101,76 @@ class TestPrivateDocsNeverTracked:
         assert not leaked, "the vendored upstream tree should not be committed"
 
 
+def history_patch() -> str:
+    """Every line ever added or removed, across all branches.
+
+    Shallow clones make this vacuous, which is why CI checks out full history
+    for the hygiene job specifically.
+    """
+    out = subprocess.run(
+        ["git", "log", "--all", "-p"],
+        cwd=REPO, capture_output=True, text=True, errors="replace",
+    )
+    return out.stdout
+
+
+class TestHistoryIsClean:
+    """The repository is public, so its history is public too.
+
+    Every check above inspects the current tree. A credential committed and
+    then deleted in a later commit passes all of them and is still one
+    `git log -p` away from anyone who clones us.
+    """
+
+    def test_no_credentials_anywhere_in_history(self):
+        patch = history_patch()
+        if not patch:
+            pytest.skip("no git history available")
+        offenders = []
+        for pattern, label in SECRET_PATTERNS:
+            for match in set(pattern.findall(patch)):
+                offenders.append(f"{label}: {match[:8]}…")
+        assert not offenders, (
+            "credential-shaped strings in git history — history cannot be "
+            "cleaned by a later commit, so the key must be treated as "
+            "compromised and rotated: " + "; ".join(offenders)
+        )
+
+    def test_no_live_ai_studio_key_in_history(self):
+        patch = history_patch()
+        if not patch:
+            pytest.skip("no git history available")
+        offenders = [
+            m.group(0)[:12] + "…"
+            for m in AQ_KEY.finditer(patch)
+            if not PLACEHOLDER.search(m.group(0))
+        ]
+        assert not offenders, "possible live key in history: " + "; ".join(offenders)
+
+    def test_private_docs_never_entered_history(self):
+        """Not merely untracked now — never committed at any point."""
+        out = subprocess.run(
+            ["git", "log", "--all", "--pretty=format:", "--name-only"],
+            cwd=REPO, capture_output=True, text=True, check=True,
+        )
+        leaked = sorted({
+            line for line in out.stdout.splitlines()
+            if line.startswith("private/")
+        })
+        assert not leaked, f"private files exist in history: {leaked}"
+
+    def test_the_vendored_engine_never_entered_history(self):
+        out = subprocess.run(
+            ["git", "log", "--all", "--pretty=format:", "--name-only"],
+            cwd=REPO, capture_output=True, text=True, check=True,
+        )
+        leaked = {
+            line for line in out.stdout.splitlines()
+            if line.startswith("vendor/ppt-master/")
+        }
+        assert not leaked, f"{len(leaked)} vendored files are in history"
+
+
 class TestNoStrategyInPublicDocs:
     """Commercial strategy belongs in private/, not a public repository.
 
