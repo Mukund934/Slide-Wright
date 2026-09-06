@@ -132,9 +132,15 @@ pip install -e "src/engine[dev]"
 python -m pytest tests -q          # 366 tests
 ```
 
-Python 3.11+. No API key is required: the planner falls back to an offline stub, and every deterministic layer runs without credentials or network access.
+Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
 
-To enable plain-language instructions, set `ANTHROPIC_API_KEY` and use `slide-wright edit --instruct "..."`.
+For plain-language instructions, copy `.env.example` to `.env` and set `GEMINI_API_KEY` (the free tier is sufficient), then:
+
+```bash
+slide-wright edit deck.pptx --instruct "change the Alpha Corp multiple to 11.8x"
+```
+
+Development runs at zero cost by design. Every model call is recorded — provider, model, tokens, latency, and what it *would* cost at published paid rates — so the free-tier constraint stays measurable rather than assumed.
 
 ## Repository layout
 
@@ -156,7 +162,7 @@ src/engine/slide_wright/    the engine — deterministic, no model calls
   planner.py                instruction -> validated change set
   llm/                      provider abstraction, Gemini, budgets, usage ledger
   corpus/                   deck profiler and adversarial generator
-docs/                       architecture, 6 ADRs, guides
+docs/                       architecture, 7 ADRs, guides
 tests/                      366 tests, including regressions from real decks
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
@@ -180,7 +186,7 @@ Phase 3's *engine* capabilities were built ahead of that gate because each is de
 **Known gaps, stated plainly:**
 
 - **SmartArt is untested.** No deck available for testing contains a `ppt/diagrams/` part, and it cannot be generated faithfully. Fidelity on SmartArt is unproven — not claimed.
-- **Per-deck model cost is unmeasured.** Budgets and ceilings are implemented; the real figure needs an API key.
+- **Per-deck model cost is barely measured.** The usage ledger records every call, but only a handful of real edits have run through it — not enough to price a deck.
 - Also unproven: OLE embedded objects, licensed fonts not installed locally, packages above ~300 parts.
 
 ## What this project has learned the hard way
