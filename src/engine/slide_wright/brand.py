@@ -19,13 +19,27 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from lxml import etree
 
+from slide_wright.changeset import Change, ChangeSet, Op, Origin
 from slide_wright.inspect import NS, DeckInfo
 from slide_wright.package import Package
 
 HEX = re.compile(r"^[0-9A-Fa-f]{6}$")
+
+# `typeface="+mn-lt"` is not a font. It is a reference to the theme's minor
+# latin font, resolved by PowerPoint at render time -- so a run carrying one is
+# already following the template in the only way that survives a template
+# change. Treating these as drift is a false positive, and "correcting" one to a
+# literal font name would detach the run from the theme: the exact opposite of
+# conformance, applied automatically, to a deck that was already right.
+THEME_REFERENCE = re.compile(r"^\+(mj|mn)-(lt|ea|cs)$")
+
+
+def is_theme_reference(font: str | None) -> bool:
+    return bool(font and THEME_REFERENCE.match(font))
 
 
 @dataclass
@@ -158,7 +172,8 @@ def check_conformance(deck: DeckInfo, profile: BrandProfile, name: str = "") -> 
             is_title = shape.placeholder_type in {"title", "ctrTitle"}
             for run in shape.runs:
                 report.checked_runs += 1
-                if run.font and profile.fonts and run.font not in profile.fonts:
+                if (run.font and profile.fonts and run.font not in profile.fonts
+                        and not is_theme_reference(run.font)):
                     off_fonts.setdefault(run.font, []).append(slide.number)
                 if run.color and profile.palette and run.color.upper() not in profile.palette:
                     off_colours.setdefault(run.color.upper(), []).append(slide.number)
@@ -212,3 +227,113 @@ def dominant_fonts(deck: DeckInfo, top: int = 3) -> list[tuple[str, int]]:
     """The typefaces a deck actually uses, most common first."""
     counts = Counter(r.font for s in deck.all_shapes() for r in s.runs if r.font)
     return counts.most_common(top)
+
+
+# ── correcting drift, not merely reporting it ────────────────────────────────
+
+@dataclass
+class ConformancePlan:
+    """What a conformance pass would change, before anything is written.
+
+    Every entry is a formatting change addressed to one run. Nothing here can
+    alter a word or a number, and that is enforced twice: by the operations it
+    is allowed to emit, and by a content check after the edit is applied.
+    """
+
+    profile: BrandProfile
+    deck: str = ""
+    changes: list[Change] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+
+    @property
+    def empty(self) -> bool:
+        return not self.changes
+
+    def to_changeset(self, deck_path: str) -> ChangeSet:
+        changeset = ChangeSet(
+            deck=deck_path,
+            instruction=f"conform to {Path(self.profile.source).name or 'the template'}",
+        )
+        for change in self.changes:
+            changeset.add(change)
+        return changeset
+
+    def render(self) -> str:
+        lines = [f"CONFORMANCE PLAN — {self.deck}", ""]
+        if self.empty:
+            lines.append("  Nothing to correct; every run already conforms.")
+        else:
+            fonts = [c for c in self.changes if c.op is Op.SET_FONT]
+            colours = [c for c in self.changes if c.op is Op.SET_COLOR]
+            lines.append(
+                f"  {len(self.changes)} run(s) to correct — "
+                f"{len(fonts)} typeface, {len(colours)} colour"
+            )
+            lines.append("")
+            for change in self.changes[:15]:
+                lines.append(
+                    f"    · slide {change.slide} {change.target} — "
+                    f"{change.before!r} -> {change.after!r}"
+                )
+            if len(self.changes) > 15:
+                lines.append(f"    · … {len(self.changes) - 15} more")
+
+        if self.skipped:
+            lines += ["", "  Left alone (no explicit formatting to change)"]
+            for note in self.skipped[:6]:
+                lines.append(f"    · {note}")
+            if len(self.skipped) > 6:
+                lines.append(f"    · … {len(self.skipped) - 6} more")
+
+        lines += ["", "  No word or number is changed by any of these."]
+        return "\n".join(lines)
+
+
+def plan_conformance(deck: DeckInfo, profile: BrandProfile, name: str = "") -> ConformancePlan:
+    """Turn template drift into per-run corrections.
+
+    `check_conformance` aggregates drift by typeface and colour, which is right
+    for a report and useless for a fix: it discards where each offending run
+    actually is. This walks the same ground keeping the address.
+
+    A run that carries no explicit formatting is *left alone*, and said so. It
+    inherits from the layout, so it is already conformant in the only sense that
+    survives a template change — and writing an override onto it would detach it
+    from the next one.
+    """
+    plan = ConformancePlan(profile=profile, deck=name or "deck")
+    if not profile.fonts and not profile.palette:
+        plan.skipped.append("the template declares no fonts or palette to conform to")
+        return plan
+
+    target_font = profile.minor_font or profile.major_font
+
+    for slide in deck.slides:
+        for shape in slide.shapes:
+            for index, run in enumerate(shape.runs):
+                # Whitespace-only runs are corrected too. They carry an explicit
+                # typeface, they are counted as drift by `check_conformance`, and
+                # skipping them would leave a deck that still reports as
+                # non-conformant immediately after being conformed -- a fix that
+                # cannot satisfy its own report is not a fix.
+                if (run.font and profile.fonts and run.font not in profile.fonts
+                        and not is_theme_reference(run.font)):
+                    if target_font:
+                        plan.changes.append(Change(
+                            id=f"b{len(plan.changes) + 1}",
+                            op=Op.SET_FONT,
+                            slide=slide.number,
+                            target=f"{shape.id}/run/{index}",
+                            before=run.font,
+                            after=target_font,
+                            rationale=f"{run.font!r} is not a template typeface",
+                            origin=Origin.RULE,
+                            citation=Path(profile.source).name,
+                            object_kind=shape.kind,
+                        ))
+                    else:
+                        plan.skipped.append(
+                            f"slide {slide.number}: {run.font!r} is off-template but "
+                            "the template names no replacement typeface"
+                        )
+    return plan
