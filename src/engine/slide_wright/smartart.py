@@ -76,6 +76,7 @@ class SmartArt:
     colors_part: str = ""
     drawing_part: str = ""
     nodes: list[DiagramNode] = field(default_factory=list)
+    malformed: bool = False   # the data part exists but could not be parsed
 
     @property
     def parts(self) -> list[str]:
@@ -91,8 +92,10 @@ class SmartArt:
 
     @property
     def complete(self) -> bool:
-        """A diagram missing any of its four required parts is already broken."""
-        return all((self.data_part, self.layout_part, self.style_part, self.colors_part))
+        """Usable: all four required parts present, and the model readable."""
+        return not self.malformed and all(
+            (self.data_part, self.layout_part, self.style_part, self.colors_part)
+        )
 
     @property
     def has_drawing_cache(self) -> bool:
@@ -138,7 +141,13 @@ def find_all(pkg: Package | str) -> list[SmartArt]:
                     setattr(art, field_name, rels[rid])
 
             if art.data_part and art.data_part in pkg.parts:
-                art.nodes = read_nodes(pkg, art.data_part)
+                try:
+                    art.nodes = read_nodes(pkg, art.data_part)
+                except SmartArtUnsupported:
+                    # Detection must survive a corrupted diagram so the damage
+                    # can be *reported*. Raising here would turn "this file is
+                    # broken" into an unhandled error far from the deck.
+                    art.malformed = True
                 art.drawing_part = _drawing_for(pkg, art.data_part)
 
             diagrams.append(art)
@@ -151,19 +160,53 @@ def read_nodes(pkg: Package, data_part: str) -> list[DiagramNode]:
 
     The authored text lives in `<dgm:pt>` points, not in the drawing cache. A
     tool that reads the cache is reading a screenshot of the truth.
+
+    Runs are joined without a separator (they are one paragraph split by
+    formatting) but paragraphs are joined with a newline. Without that, an org
+    chart node reading "Manager" / "Second para" comes back as the single word
+    "ManagerSecond para" — measured on LibreOffice's smartart-org-chart fixture.
     """
-    root = etree.fromstring(pkg.read(data_part))
+    root = _parse(pkg, data_part)
     nodes = []
     for pt in root.iter(f"{{{DGM_NS}}}pt"):
         # Only real content points carry text; presentation points do not.
         if pt.get("type") not in (None, "node", "asst"):
             continue
-        texts = [t.text or "" for t in pt.iter(f"{{{NS['a']}}}t")]
-        text = "".join(texts).strip()
+        paragraphs = [
+            "".join(t.text or "" for t in para.iter(f"{{{NS['a']}}}t"))
+            for para in pt.iter(f"{{{NS['a']}}}p")
+        ]
+        text = "\n".join(p for p in paragraphs if p).strip()
         if not text:
             continue
         nodes.append(DiagramNode(model_id=pt.get("modelId", ""), text=text))
     return nodes
+
+
+def _parse(pkg: Package, part: str):
+    """Parse a diagram part, treating malformed XML as damage rather than a crash.
+
+    A corrupted `data1.xml` is exactly the outcome we exist to catch. Letting
+    lxml raise here would surface it as an unhandled parser error somewhere far
+    from the deck, instead of as "this diagram was damaged".
+    """
+    try:
+        return etree.fromstring(pkg.read(part))
+    except etree.XMLSyntaxError as exc:
+        raise SmartArtUnsupported(
+            f"diagram part {part} is not well-formed XML: {exc}"
+        ) from None
+
+
+def count_points(pkg: Package, data_part: str) -> int:
+    """Every `<dgm:pt>` in a diagram, text-bearing or not.
+
+    Structure and text are separate things. `poi-smartart.pptx` carries 26
+    points and no text at all — a diagram of empty boxes. Verifying only text
+    would let that whole diagram be destroyed without a single assertion
+    firing, so structure is counted in its own right.
+    """
+    return len(list(_parse(pkg, data_part).iter(f"{{{DGM_NS}}}pt")))
 
 
 def census(pkg: Package | str) -> dict:
@@ -171,11 +214,24 @@ def census(pkg: Package | str) -> dict:
     pkg = pkg if isinstance(pkg, Package) else Package.open(pkg)
     parts = [n for n in pkg.parts if DIAGRAM_PART.match(n)]
     diagrams = find_all(pkg)
+    points, malformed = 0, 0
+    for d in diagrams:
+        if d.malformed:
+            malformed += 1
+            continue
+        if not (d.data_part and d.data_part in pkg.parts):
+            continue
+        try:
+            points += count_points(pkg, d.data_part)
+        except SmartArtUnsupported:
+            malformed += 1
     return {
         "diagrams": len(diagrams),
         "diagram_parts": len(parts),
         "nodes": sum(len(d.nodes) for d in diagrams),
+        "points": points,
         "incomplete": sum(1 for d in diagrams if not d.complete),
+        "malformed": malformed,
     }
 
 
@@ -188,7 +244,7 @@ def assert_preserved(source: Package | str, output: Package | str) -> None:
     """
     before, after = census(source), census(output)
     problems = []
-    for key in ("diagrams", "diagram_parts", "nodes"):
+    for key in ("diagrams", "diagram_parts", "nodes", "points"):
         if after[key] < before[key]:
             problems.append(f"{key}: {before[key]} -> {after[key]}")
     if after["incomplete"] > before["incomplete"]:
