@@ -377,3 +377,90 @@ class TestTypefaceSpellings:
             titled(3, "Churn fell to 1.9 percent", shape("C", font="+mn-lt")),
         ))
         assert not self._findings(result)
+
+
+class TestDetachedFromTheTemplate:
+    """Where `_foreign_slides` stops, this starts.
+
+    That check names the odd slides out and goes quiet once more than half the
+    deck hardcodes, because a consistently hardcoded deck is consistent. The
+    consequence was that the decks with the *most* template drift said nothing
+    at all — one real fixture mixes three typefaces across 111 of its 149 runs
+    and produced no typeface finding whatsoever.
+
+    Both use the same threshold, so between them they partition.
+    """
+
+    def _findings(self, result):
+        return [o for o in result.observations if "deferring" in o.message]
+
+    def _deck_of(self, hardcoded: int, inherited: int):
+        """Titles carry the same treatment as their bodies.
+
+        `titled` adds a title run of its own, so leaving those inheriting put a
+        deck of twenty hardcoded bodies at 48% -- just under the threshold, and
+        the test measured the helper rather than the rule.
+        """
+        slides = []
+        for i in range(hardcoded):
+            head = shape(f"Revenue grew {i} percent", ph="title",
+                         sid=f"ht{i}", font="Arial")
+            body = shape(f"body {i}", font="Arial", sid=f"h{i}")
+            slides.append(SlideInfo(number=len(slides) + 1,
+                                    part_name=f"s{len(slides) + 1}",
+                                    shapes=[head, body]))
+        for i in range(inherited):
+            head = shape(f"Margins improved {i} percent", ph="title", sid=f"it{i}")
+            body = shape(f"body {i}", sid=f"i{i}")
+            slides.append(SlideInfo(number=len(slides) + 1,
+                                    part_name=f"s{len(slides) + 1}",
+                                    shapes=[head, body]))
+        return deck(*slides)
+
+    def test_a_mostly_hardcoded_deck_is_named(self):
+        result = audit(self._deck_of(hardcoded=20, inherited=2))
+        found = self._findings(result)
+        assert found
+        assert "Arial" in found[0].message
+
+    def test_a_mostly_inheriting_deck_is_not(self):
+        assert not self._findings(audit(self._deck_of(hardcoded=2, inherited=20)))
+
+    def test_theme_references_do_not_count_as_hardcoded(self):
+        slides = [
+            titled(i + 1, f"Revenue grew {i} percent",
+                   shape(f"body {i}", font="+mn-lt", sid=f"t{i}"))
+            for i in range(22)
+        ]
+        assert not self._findings(audit(deck(*slides)))
+
+    def test_a_short_deck_is_not_judged(self):
+        """Too little text to say anything about the deck as a whole."""
+        assert not self._findings(audit(self._deck_of(hardcoded=3, inherited=0)))
+
+    def test_the_finding_is_factual_rather_than_a_verdict(self):
+        """Hardcoding is not wrong; it just breaks the link to the template."""
+        found = self._findings(audit(self._deck_of(hardcoded=20, inherited=2)))
+        assert "not wrong in itself" in found[0].suggestion
+        assert "template change will not reach" in found[0].suggestion
+
+
+class TestLayoutFindingNamesOnlyReportedSlides:
+    def test_a_structural_slides_layout_is_not_listed(self):
+        """`rare` can hold a layout whose only slide was excluded as structural.
+
+        Listing it made the message describe slides absent from the finding —
+        three layout names for two slides, on two different real decks.
+        """
+        result = audit(deck(
+            with_layout(1, "Revenue grew 38 percent", "Title Slide"),
+            with_layout(2, "Margins improved", "Title and Content"),
+            with_layout(3, "Churn fell to 1.9 percent", "Two Content"),
+            with_layout(4, "Pipeline is healthy", "Title and Content"),
+            with_layout(5, "Cash runway is 26 months", "Title and Content"),
+        ))
+        found = [o for o in result.observations if "layout no other" in o.message]
+        assert found
+        assert found[0].slides == [3]
+        assert "Two Content" in found[0].message
+        assert "Title Slide" not in found[0].message
