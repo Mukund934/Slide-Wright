@@ -464,3 +464,51 @@ class TestLayoutFindingNamesOnlyReportedSlides:
         assert found[0].slides == [3]
         assert "Two Content" in found[0].message
         assert "Title Slide" not in found[0].message
+
+
+class TestDuplicatedLayouts:
+    """PowerPoint's own record that a slide came from another deck.
+
+    Every other consistency check infers foreignness. This one does not: the
+    numeric prefix is written by PowerPoint when it has to keep a second layout
+    of the same name, which is what happens on a paste from another file.
+    """
+
+    def _findings(self, result):
+        return [o for o in result.observations if "duplicated layout" in o.message]
+
+    def test_a_numeric_prefix_is_reported(self):
+        result = audit(deck(
+            with_layout(1, "Revenue grew 38 percent", "Title and Content"),
+            with_layout(2, "Margins improved", "2_Title Slide"),
+            with_layout(3, "Churn fell to 1.9 percent", "Title and Content"),
+        ))
+        found = self._findings(result)
+        assert found and found[0].slides == [2]
+
+    def test_ordinary_layout_names_are_not(self):
+        result = audit(deck(
+            with_layout(1, "Revenue grew 38 percent", "Title and Content"),
+            with_layout(2, "Margins improved", "Two Content"),
+            with_layout(3, "Churn fell to 1.9 percent", "Title and Content"),
+        ))
+        assert not self._findings(result)
+
+    def test_a_structural_slide_is_not_excluded_here(self):
+        """Convention explains a unique title layout. It does not explain a
+        duplicated one, so this check does not exempt slide 1."""
+        result = audit(deck(
+            with_layout(1, "Revenue grew 38 percent", "1_Title Slide"),
+            with_layout(2, "Margins improved", "Title and Content"),
+            with_layout(3, "Churn fell to 1.9 percent", "Title and Content"),
+        ))
+        found = self._findings(result)
+        assert found and found[0].slides == [1]
+
+    def test_the_suggestion_explains_where_the_name_comes_from(self):
+        result = audit(deck(
+            with_layout(1, "Revenue grew 38 percent", "Title and Content"),
+            with_layout(2, "Margins improved", "2_Title Slide"),
+            with_layout(3, "Churn fell to 1.9 percent", "Title and Content"),
+        ))
+        assert "brought in from another deck" in self._findings(result)[0].suggestion

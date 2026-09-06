@@ -154,6 +154,7 @@ def audit(deck: DeckInfo, name: str = "") -> DeckAudit:
         _foreign_slides,
         _detached_from_the_template,
         _layout_outliers,
+        _duplicated_layouts,
         _typeface_spellings,
         _unsourced_figures,
         _bare_numbers,
@@ -486,4 +487,43 @@ def _detached_from_the_template(deck: DeckInfo, out: DeckAudit) -> None:
         f"directly rather than deferring to the theme: {listed}",
         "not wrong in itself, but a later template change will not reach any of "
         "them; `brand --fix` re-links them without altering a word",
+    ))
+
+
+# PowerPoint renames a layout to "2_Something" when it has to add a second copy
+# of a layout that already exists in the master. That happens when a slide
+# arrives from another deck and brings its own layout with it.
+DUPLICATED_LAYOUT = re.compile(r"^\d+_")
+
+
+def _duplicated_layouts(deck: DeckInfo, out: DeckAudit) -> None:
+    """Layouts PowerPoint itself marked as duplicates.
+
+    Every other check here infers that a slide came from elsewhere -- it
+    hardcodes a typeface, it uses a layout nothing else uses. This one does
+    not infer anything: the numeric prefix is PowerPoint's own record that it
+    had to keep two layouts of the same name, which is what happens when
+    content is pasted in from another file.
+
+    Because it is direct evidence rather than an inference, the first and last
+    slides are *not* excluded here. They are excluded elsewhere because a
+    unique title layout is expected by convention; a *duplicated* one is not
+    explained by convention at all.
+    """
+    marked: dict[str, list[int]] = {}
+    for slide in deck.slides:
+        if slide.layout and DUPLICATED_LAYOUT.match(slide.layout):
+            marked.setdefault(slide.layout, []).append(slide.number)
+    if not marked:
+        return
+
+    slides = sorted(n for numbers in marked.values() for n in numbers)
+    listed = ", ".join(f"{name!r}" for name in sorted(marked))
+    out.observations.append(Observation(
+        Area.CONSISTENCY,
+        slides,
+        f"{len(slides)} slide(s) use a duplicated layout ({listed})",
+        "PowerPoint names a layout this way when it has to keep a second copy "
+        "of one that already exists, which is what happens when a slide is "
+        "brought in from another deck",
     ))
