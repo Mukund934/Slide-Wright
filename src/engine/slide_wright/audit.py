@@ -152,6 +152,7 @@ def audit(deck: DeckInfo, name: str = "") -> DeckAudit:
         _colour_sprawl,
         _foreign_slides,
         _layout_outliers,
+        _typeface_spellings,
         _unsourced_figures,
         _bare_numbers,
         _table_shape,
@@ -400,4 +401,37 @@ def _layout_outliers(deck: DeckInfo, out: DeckAudit) -> None:
         f"({', '.join(sorted(rare))})",
         "worth a look: a one-off layout is often a slide brought in from "
         "another deck, though it may equally be a deliberate divider",
+    ))
+
+
+def _typeface_spellings(deck: DeckInfo, out: DeckAudit) -> None:
+    """The same typeface, typed more than one way.
+
+    Found on a real deck: 177 runs in "Century Gothic" and 89 in "Century
+    gothic". To a reader they are the same font; to the file they are two
+    different strings, and to anyone counting deviations they look like two
+    separate problems rather than one.
+
+    It is also a strong tell that a deck was assembled by several people, which
+    is the thing the checks around this one are trying to surface.
+    """
+    spellings: dict[str, set[str]] = {}
+    for shape in deck.all_shapes():
+        for run in shape.runs:
+            if run.font and not run.font.startswith("+"):
+                spellings.setdefault(run.font.strip().casefold(), set()).add(run.font)
+
+    inconsistent = {k: v for k, v in spellings.items() if len(v) > 1}
+    if not inconsistent:
+        return
+
+    detail = "; ".join(
+        " / ".join(f"{name!r}" for name in sorted(variants))
+        for variants in inconsistent.values()
+    )
+    out.observations.append(Observation(
+        Area.CONSISTENCY, [],
+        f"{len(inconsistent)} typeface(s) are spelled more than one way: {detail}",
+        "the same font typed differently by different people; harmless to look "
+        "at, but it doubles every count that groups by typeface",
     ))

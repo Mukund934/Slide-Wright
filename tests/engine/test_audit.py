@@ -321,3 +321,59 @@ class TestLayoutOutliers:
             titled(3, "Churn fell to 1.9 percent"),
         ))
         assert not self._layout_findings(result)
+
+
+class TestTypefaceSpellings:
+    """The same font, typed two ways — found on a real deck.
+
+    177 runs in "Century Gothic" and 89 in "Century gothic". Identical to a
+    reader, two different strings to the file, and two separate problems to
+    anything counting deviations by typeface.
+    """
+
+    def _findings(self, result):
+        return [o for o in result.observations if "spelled" in o.message]
+
+    def test_a_case_difference_is_caught(self):
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent", shape("A", font="Century Gothic")),
+            titled(2, "Margins improved", shape("B", font="Century gothic")),
+            titled(3, "Churn fell to 1.9 percent", shape("C", font="Century Gothic")),
+        ))
+        found = self._findings(result)
+        assert found
+        assert "Century Gothic" in found[0].message
+        assert "Century gothic" in found[0].message
+
+    def test_a_whitespace_difference_is_caught(self):
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent", shape("A", font="Arial")),
+            titled(2, "Margins improved", shape("B", font="Arial ")),
+            titled(3, "Churn fell to 1.9 percent", shape("C", font="Arial")),
+        ))
+        assert self._findings(result)
+
+    def test_consistent_spelling_is_not_flagged(self):
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent", shape("A", font="Arial")),
+            titled(2, "Margins improved", shape("B", font="Arial")),
+            titled(3, "Churn fell to 1.9 percent", shape("C", font="Arial")),
+        ))
+        assert not self._findings(result)
+
+    def test_genuinely_different_fonts_are_not_flagged(self):
+        """Arial and Georgia are two fonts, not two spellings of one."""
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent", shape("A", font="Arial")),
+            titled(2, "Margins improved", shape("B", font="Georgia")),
+            titled(3, "Churn fell to 1.9 percent", shape("C", font="Arial")),
+        ))
+        assert not self._findings(result)
+
+    def test_theme_references_are_ignored(self):
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent", shape("A", font="+mn-lt")),
+            titled(2, "Margins improved", shape("B", font="+MN-LT")),
+            titled(3, "Churn fell to 1.9 percent", shape("C", font="+mn-lt")),
+        ))
+        assert not self._findings(result)
