@@ -85,7 +85,28 @@ jobs:
     name: Licence and secret hygiene
     runs-on: ubuntu-latest
     steps:
+      # Full history on purpose. actions/checkout defaults to a shallow clone,
+      # which would leave the authorship and AI-trailer assertions inspecting
+      # a single commit while still reporting green -- a guard that looks
+      # enforced and is not.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "src/engine[dev]"
+
+      # These assert over the whole history, so they belong in this job rather
+      # than the shallow-cloned matrix above.
+      - name: Repository hygiene (full history)
+        run: python -m pytest tests/test_repo_hygiene.py -v
 
       # ADR-0006: the unsafe export path must never reappear.
       - name: Assert the native chart/table rail is intact
