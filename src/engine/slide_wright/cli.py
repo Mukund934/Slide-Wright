@@ -105,7 +105,11 @@ def cmd_refresh(args) -> int:
     changeset = session.propose("refresh figures from source")
     for lock in args.lock or []:
         scope, _, target = lock.partition(":")
-        changeset.lock(scope, target)
+        try:
+            changeset.lock(scope, target)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
     for change in plan.to_changeset(str(session.current.path)).changes:
         changeset.add(change)
     changeset.approve_all()
@@ -161,7 +165,11 @@ def cmd_edit(args) -> int:
 
     for lock in args.lock or []:
         scope, _, target = lock.partition(":")
-        changeset.lock(scope, target)
+        try:
+            changeset.lock(scope, target)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
 
     for i, spec in enumerate(args.set or [], start=1):
         try:
@@ -182,8 +190,9 @@ def cmd_edit(args) -> int:
         )
         if result.is_stub:
             print(
-                "note: no ANTHROPIC_API_KEY set, so no model was consulted. "
-                "Use --set to make changes directly.",
+                "note: no GEMINI_API_KEY set, so no model was consulted. "
+                "Copy .env.example to .env and add a free-tier key, "
+                "or use --set to make changes directly.",
                 file=sys.stderr,
             )
         for raw, reason in result.dropped:
@@ -294,7 +303,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--instruct", metavar="TEXT",
                    help="describe the change in plain language (needs a model key)")
     p.add_argument("--lock", action="append", metavar="SCOPE[:TARGET]",
-                   help="protect content, e.g. numbers, slide:4, shape:7")
+                   help="protect content: numbers, wording, layout, tables, "
+                        "charts, media, slide:4, shape:7")
     p.add_argument("-o", "--output", help="write the verified deck here")
     p.add_argument("-m", "--message", help="what this edit is for")
     p.add_argument("--workspace", help="where versions are kept")
