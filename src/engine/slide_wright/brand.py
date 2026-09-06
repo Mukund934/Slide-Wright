@@ -306,34 +306,48 @@ def plan_conformance(deck: DeckInfo, profile: BrandProfile, name: str = "") -> C
         plan.skipped.append("the template declares no fonts or palette to conform to")
         return plan
 
-    target_font = profile.minor_font or profile.major_font
-
     for slide in deck.slides:
         for shape in slide.shapes:
+            is_title = shape.placeholder_type in {"title", "ctrTitle"}
+            # Headings follow the major font, body text the minor one.
+            reference = "+mj-lt" if is_title else "+mn-lt"
+            resolves_to = profile.major_font if is_title else profile.minor_font
+            resolves_to = resolves_to or profile.major_font or profile.minor_font
+
             for index, run in enumerate(shape.runs):
+                if not run.font or is_theme_reference(run.font):
+                    continue
+                if not resolves_to:
+                    plan.skipped.append(
+                        f"slide {slide.number}: {run.font!r} is hardcoded but the "
+                        "template names no typeface to defer to"
+                    )
+                    continue
+
+                off_template = profile.fonts and run.font not in profile.fonts
+                redundant = run.font == resolves_to
+                if not off_template and not redundant:
+                    continue
+
                 # Whitespace-only runs are corrected too. They carry an explicit
                 # typeface, they are counted as drift by `check_conformance`, and
                 # skipping them would leave a deck that still reports as
                 # non-conformant immediately after being conformed -- a fix that
                 # cannot satisfy its own report is not a fix.
-                if (run.font and profile.fonts and run.font not in profile.fonts
-                        and not is_theme_reference(run.font)):
-                    if target_font:
-                        plan.changes.append(Change(
-                            id=f"b{len(plan.changes) + 1}",
-                            op=Op.SET_FONT,
-                            slide=slide.number,
-                            target=f"{shape.id}/run/{index}",
-                            before=run.font,
-                            after=target_font,
-                            rationale=f"{run.font!r} is not a template typeface",
-                            origin=Origin.RULE,
-                            citation=Path(profile.source).name,
-                            object_kind=shape.kind,
-                        ))
-                    else:
-                        plan.skipped.append(
-                            f"slide {slide.number}: {run.font!r} is off-template but "
-                            "the template names no replacement typeface"
-                        )
+                plan.changes.append(Change(
+                    id=f"b{len(plan.changes) + 1}",
+                    op=Op.SET_FONT,
+                    slide=slide.number,
+                    target=f"{shape.id}/run/{index}",
+                    before=run.font,
+                    after=reference,
+                    rationale=(
+                        f"{run.font!r} is not a template typeface"
+                        if off_template else
+                        f"{run.font!r} hardcodes the template's own typeface"
+                    ),
+                    origin=Origin.RULE,
+                    citation=Path(profile.source).name,
+                    object_kind=shape.kind,
+                ))
     return plan
