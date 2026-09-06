@@ -257,3 +257,67 @@ class TestFailuresExplainThemselves:
             before=(0, 0), after=(100, 100)), tmp_path)
         assert "placed by the layout" in why
         assert "not found" not in why
+
+
+class TestRunAddressingMatchesInspect:
+    """`<shape>/run/<index>` must mean the same run to both halves of the system.
+
+    The index in a target is produced by reading the deck through `inspect`,
+    which skips runs carrying no text. The applier used to enumerate every run,
+    so a shape with two empty runs made inspect see fifteen where the applier
+    saw seventeen — and a change addressed at run 13 was written to a different
+    run entirely, while reporting success.
+
+    Every check passed: content untouched, no native lost, fidelity fine. Only
+    running the pass twice caught it, because the run that should have changed
+    never did and kept being proposed again.
+    """
+
+    def _shape_element(self, deck, slide_part: str, shape_id: str):
+        from lxml import etree
+
+        from slide_wright.apply import NS
+        from slide_wright.package import Package
+
+        root = etree.fromstring(Package.open(deck).read(slide_part))
+        for el in root.iter():
+            if etree.QName(el).localname == "cNvPr" and el.get("id") == shape_id:
+                return el.getparent().getparent()
+        return None
+
+    def test_the_applier_enumerates_what_inspect_enumerates(self, adversarial_deck):
+        from slide_wright.apply import _addressable_runs
+
+        deck = inspect(adversarial_deck)
+        for slide in deck.slides:
+            for shape in slide.shapes:
+                if not shape.runs:
+                    continue
+                element = self._shape_element(adversarial_deck, slide.part_name, shape.id)
+                if element is None:
+                    continue
+                assert len(_addressable_runs(element)) == len(shape.runs), (
+                    f"slide {slide.number} shape {shape.id}: inspect sees "
+                    f"{len(shape.runs)} runs, the applier sees "
+                    f"{len(_addressable_runs(element))}"
+                )
+
+    def test_an_empty_run_is_not_addressable(self):
+        from lxml import etree
+
+        from slide_wright.apply import _addressable_runs
+
+        xml = (
+            '<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+            ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            '<a:p>'
+            '<a:r><a:rPr/><a:t>first</a:t></a:r>'
+            '<a:r><a:rPr/><a:t></a:t></a:r>'
+            '<a:r><a:rPr/><a:t>second</a:t></a:r>'
+            '</a:p></p:sp>'
+        )
+        runs = _addressable_runs(etree.fromstring(xml))
+        assert len(runs) == 2, "an empty run must not consume an index"
+        assert runs[1].find(
+            "{http://schemas.openxmlformats.org/drawingml/2006/main}t"
+        ).text == "second"

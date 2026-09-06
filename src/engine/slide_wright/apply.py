@@ -262,6 +262,31 @@ def _set_font_size(shape, size_pt: float) -> bool:
     return changed
 
 
+def _addressable_runs(shape) -> list:
+    """The runs a `<shape>/run/<index>` target can address.
+
+    This must enumerate exactly what `inspect` enumerates, because the index in
+    the target was produced by reading the deck through `inspect`. It does not
+    include runs with no text, and neither may this.
+
+    That divergence was a real bug and an instructive one. A shape carrying two
+    empty runs made `inspect` see fifteen runs where the applier saw seventeen,
+    so a change addressed at run 13 was written to a different run entirely --
+    and reported as applied, because a font change had indeed been made
+    somewhere. Every check passed: the content was untouched, no native object
+    was lost, the fidelity score was fine. Only running the pass twice revealed
+    it, because the run that was supposed to change never did and kept being
+    proposed again.
+    """
+    addressable = []
+    for run in shape.findall(".//a:r", NS):
+        text = run.find("a:t", NS)
+        if text is None or not text.text:
+            continue
+        addressable.append(run)
+    return addressable
+
+
 def _set_run_format(shape, change: Change) -> bool:
     """Change one run's typeface or colour, touching nothing else.
 
@@ -271,7 +296,7 @@ def _set_run_format(shape, change: Change) -> bool:
     fixed and every other run byte-identical, which is what makes "we changed
     only what did not conform" a checkable claim rather than a slogan.
     """
-    runs = shape.findall(".//a:r", NS)
+    runs = _addressable_runs(shape)
     if not runs:
         return False
 
