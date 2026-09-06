@@ -119,3 +119,59 @@ class TestRendering:
         rep = build(compare(adversarial_deck, copy))
         rep.fidelity.output_census.chart_parts = 0
         assert "LOSS" in rep.render()
+
+
+class TestUnrequestedChangesAreExplained:
+    """A blocked deck must say what moved, not merely that something did.
+
+    The report used to name the part: "unrequested changes on slide 3". The
+    reviewer is at the point of deciding whether to ship a deck to an
+    investment committee, and a filename is not something anyone can decide on.
+    """
+
+    def _report_with_unattributed_edit(self, adversarial_deck, tmp_path):
+        """Edit a real value, then attribute the request to a different slide."""
+        out = tmp_path / "out.pptx"
+        _edit_slide(adversarial_deck, out, "ppt/slides/slide3.xml", b"9.4x", b"11.8x")
+        return build(
+            compare(adversarial_deck, out),
+            [RequestedChange(slide=1, description="tighten the title")],
+        )
+
+    def test_the_report_is_blocked(self, adversarial_deck, tmp_path):
+        report = self._report_with_unattributed_edit(adversarial_deck, tmp_path)
+        assert not report.deliverable
+
+    def test_it_names_the_value_that_changed(self, adversarial_deck, tmp_path):
+        report = self._report_with_unattributed_edit(adversarial_deck, tmp_path)
+        rendered = report.render()
+        assert "Changes nobody asked for" in rendered
+        assert "9.4" in rendered and "11.8" in rendered, rendered
+
+    def test_explanations_are_scoped_to_the_unrequested_slides(
+        self, adversarial_deck, tmp_path
+    ):
+        report = self._report_with_unattributed_edit(adversarial_deck, tmp_path)
+        assert {d.slide for d in report.explain_unrequested()} == {3}
+
+    def test_nothing_is_computed_when_everything_was_requested(
+        self, adversarial_deck, tmp_path
+    ):
+        out = tmp_path / "out.pptx"
+        _edit_slide(adversarial_deck, out, "ppt/slides/slide3.xml", b"9.4x", b"11.8x")
+        report = build(
+            compare(adversarial_deck, out),
+            [RequestedChange(slide=3, description="update the multiple")],
+        )
+        assert report.deliverable
+        assert report.explain_unrequested() == []
+
+    def test_a_missing_file_does_not_turn_a_block_into_a_crash(
+        self, adversarial_deck, tmp_path
+    ):
+        """Explaining is a courtesy; failing to explain must not raise."""
+        report = self._report_with_unattributed_edit(adversarial_deck, tmp_path)
+        (tmp_path / "out.pptx").unlink()
+        assert report.explain_unrequested() == []
+        assert not report.deliverable
+        assert "Changes nobody asked for" in report.render()
