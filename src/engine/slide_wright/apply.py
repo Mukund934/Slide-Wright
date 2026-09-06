@@ -93,13 +93,14 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
         part_applied = False
         for change in changes:
             try:
-                if _apply_one(root, change):
+                ok, why = _apply_one(root, change)
+                if ok:
                     change.status = Status.APPLIED
                     result.applied.append(change)
                     part_applied = True
                 else:
                     change.status = Status.FAILED
-                    result.failed.append((change, "target not found on slide"))
+                    result.failed.append((change, why))
             except ApplyError as exc:
                 change.status = Status.FAILED
                 result.failed.append((change, str(exc)))
@@ -122,19 +123,41 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
 
 # ── per-operation handlers ───────────────────────────────────────────────────
 
-def _apply_one(root, change: Change) -> bool:
-    shape = _find_shape(root, change.target.split("/")[0])
+def _apply_one(root, change: Change) -> tuple[bool, str]:
+    """Apply one change, returning whether it worked and, if not, why.
+
+    A single boolean conflated two very different failures: the shape is not
+    on this slide, and the shape is here but the edit does not apply to it.
+    Both were reported as "target not found", which sends a reader looking for
+    a shape id that is in fact present.
+    """
+    shape_id = change.target.split("/")[0]
+    shape = _find_shape(root, shape_id)
     if shape is None:
-        return False
+        return False, f"no shape with id {shape_id!r} on slide {change.slide}"
 
     if change.op is Op.SET_TEXT:
-        return _set_text(shape, str(change.before), str(change.after))
+        if _set_text(shape, str(change.before), str(change.after)):
+            return True, ""
+        return False, (f"shape {shape_id} does not contain the text "
+                       f"{str(change.before)!r}")
     if change.op is Op.SET_TABLE_CELL:
-        return _set_table_cell(shape, change)
+        if _set_table_cell(shape, change):
+            return True, ""
+        return False, f"cell {change.target} does not hold {str(change.before)!r}"
     if change.op is Op.SET_FONT_SIZE:
-        return _set_font_size(shape, float(change.after))
+        if _set_font_size(shape, float(change.after)):
+            return True, ""
+        # Runs inherit their size from the layout unless they carry an explicit
+        # override. There is nothing to change, and saying "not found" would be
+        # a lie about the shape rather than a fact about its formatting.
+        return False, (f"shape {shape_id} has no explicit text formatting to "
+                       f"change; its size is inherited from the layout")
     if change.op in (Op.MOVE, Op.RESIZE):
-        return _set_geometry(shape, change)
+        if _set_geometry(shape, change):
+            return True, ""
+        return False, (f"shape {shape_id} has no position of its own; it is "
+                       f"placed by the layout")
     raise ApplyError(f"unhandled op {change.op}")
 
 
