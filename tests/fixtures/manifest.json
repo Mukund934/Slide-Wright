@@ -2,7 +2,12 @@
   "note": "Third-party PPTX fixtures. NOT committed \u2014 they belong to their projects. Reproduce with `python scripts/fetch_fixtures.py`.",
   "attribution": {
     "Apache POI": "Apache-2.0 \u2014 https://poi.apache.org/",
-    "LibreOffice": "MPL-2.0 \u2014 https://www.libreoffice.org/"
+    "LibreOffice": "MPL-2.0 \u2014 https://www.libreoffice.org/",
+    "dotnet/Open-XML-SDK": "MIT \u2014 https://github.com/dotnet/Open-XML-SDK",
+    "python-pptx": "MIT \u2014 https://github.com/scanny/python-pptx",
+    "ts-pptx": "MIT \u2014 https://github.com/shbernal/ts-pptx",
+    "pptx-automizer": "MIT \u2014 https://github.com/singerla/pptx-automizer",
+    "US EIA / NASA": "US federal works, public domain (17 U.S.C. 105)"
   },
   "fixtures": [
     {
@@ -94,6 +99,105 @@
       "why": "gear layout; regression fixture for a real rendering bug",
       "sha256": "c1d2823c0928c852ae8cb78ca3cb1140197d91848199849e1888e28d24a6548d",
       "bytes": 25487
+    },
+    {
+      "name": "automizer-three-diagrams.pptx",
+      "url": "https://raw.githubusercontent.com/singerla/pptx-automizer/main/__tests__/pptx-templates/SlideWithDiagrams.pptx",
+      "licence": "MIT",
+      "project": "pptx-automizer",
+      "why": "THREE SmartArt graphics (matrix3, venn2, AlternatingHexagons); one has no text at all; German-locale layout names",
+      "sha256": "ae4e1ad2c5b92b2bd55fcddcf219a8020e71b6486d24424a30bad658a35e5614",
+      "bytes": 64008
+    },
+    {
+      "name": "tspptx-smartart-families.pptx",
+      "url": "https://raw.githubusercontent.com/shbernal/ts-pptx/master/test/read/fixtures/smartart-families.pptx",
+      "licence": "MIT",
+      "project": "ts-pptx",
+      "why": "FOUR SmartArt graphics across 20 diagram parts \u2014 the densest diagram fixture found",
+      "sha256": "5da5cfe0594970bc5029f1bbb1778d1b2a11894b0e178bdd476626d3acc20c25",
+      "bytes": 75109
+    },
+    {
+      "name": "tspptx-mixed.pptx",
+      "url": "https://raw.githubusercontent.com/shbernal/ts-pptx/master/test/read/fixtures/mixed.pptx",
+      "licence": "MIT",
+      "project": "ts-pptx",
+      "why": "mixed shape kinds in one deck",
+      "sha256": "db80910224b01b46cb7e8c29e183b59d128a18fd8e0c651558907230874693b9",
+      "bytes": 105638
+    },
+    {
+      "name": "oxsdk-smartart-orgchart.pptx",
+      "url": "https://raw.githubusercontent.com/dotnet/Open-XML-SDK/main/test/DocumentFormat.OpenXml.Tests.Assets/assets/TestDataStorage/v2FxTestFiles/presentation/SmartArt_OrgChart1.pptx",
+      "licence": "MIT",
+      "project": "dotnet/Open-XML-SDK",
+      "why": "Microsoft's own SmartArt test asset \u2014 the reference implementation's fixture",
+      "sha256": "534b94adefd42e0874fc4c8c45fb7b1dbcd2df63dbec20d68762553869bc57dd",
+      "bytes": 69565
+    },
+    {
+      "name": "pypptx-ole-object.pptx",
+      "url": "https://raw.githubusercontent.com/scanny/python-pptx/master/features/steps/test_files/shp-access-ole-object.pptx",
+      "licence": "MIT",
+      "project": "python-pptx",
+      "why": "OLE embedded object \u2014 previously untested",
+      "sha256": "a448dc27c4d1212ad23f680c040f8a918ef7cbb6c41c9ad57f33d1d59a8f9bb4",
+      "bytes": 119022
+    },
+    {
+      "name": "oxsdk-chart-2d.pptx",
+      "url": "https://raw.githubusercontent.com/dotnet/Open-XML-SDK/main/test/DocumentFormat.OpenXml.Tests.Assets/assets/TestDataStorage/v2FxTestFiles/presentation/Chart_2D.pptx",
+      "licence": "MIT",
+      "project": "dotnet/Open-XML-SDK",
+      "why": "native 2D charts",
+      "sha256": "dad57bde3989dbc48e5c52988773ccf74d1cf56af875e5366e4c92992ce258f3",
+      "bytes": 62118
+    },
+    {
+      "name": "oxsdk-table-large.pptx",
+      "url": "https://raw.githubusercontent.com/dotnet/Open-XML-SDK/main/test/DocumentFormat.OpenXml.Tests.Assets/assets/TestDataStorage/v2FxTestFiles/presentation/Table_Large.pptx",
+      "licence": "MIT",
+      "project": "dotnet/Open-XML-SDK",
+      "why": "large native table",
+      "sha256": "07aa3b2665961a001e4a05e0de6348babd67080de38387e780768ac5fbb8eb06",
+      "bytes": 76194
+    },
+    {
+      "name": "pypptx-chart-types.pptx",
+      "url": "https://raw.githubusercontent.com/scanny/python-pptx/master/features/steps/test_files/cht-chart-type.pptx",
+      "licence": "MIT",
+      "project": "python-pptx",
+      "why": "several chart types in one deck",
+      "sha256": "d0a7979d05970aa83fd8406f0829cd0019853a7bc4e16f8cda814586fc2eaccc",
+      "bytes": 1393564
+    },
+    {
+      "name": "pypptx-shapes.pptx",
+      "url": "https://raw.githubusercontent.com/scanny/python-pptx/master/features/steps/test_files/shp-shapes.pptx",
+      "licence": "MIT",
+      "project": "python-pptx",
+      "why": "assorted shape kinds",
+      "sha256": "302dc642b791f49da6057b69a7ef2a0804f61d9469e7e49e9e734ae3305951cc",
+      "bytes": 125205
+    },
+    {
+      "name": "eia-aeo2023-release.pptx",
+      "url": "https://www.eia.gov/outlooks/archive/aeo23/ppt/AEO2023_Release_Presentation.pptx",
+      "licence": "Public domain (US federal work)",
+      "project": "US EIA",
+      "why": "real government release deck \u2014 chart-heavy professional output",
+      "sha256": "d6d2d67c0627d09ce58d4bba273489593beee59d885460e1869ec4f625f39602",
+      "bytes": 3700808
+    },
+    {
+      "name": "nasa-es6-exit.pptx",
+      "url": "https://ntrs.nasa.gov/api/citations/20230012455/downloads/2023_Raven_St_Clair_ES6_ExitPresentation_STRIVES.pptx",
+      "licence": "Public domain (US federal work)",
+      "project": "NASA NTRS",
+      "why": "real NASA project presentation",
+      "sha256": "e8f21f051b15d553f92d2329ef895c0084611fdcbb198b5a39f1b6df062f6fc2",
+      "bytes": 57505297
     }
   ]
 }

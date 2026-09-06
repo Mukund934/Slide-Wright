@@ -34,6 +34,11 @@ FIXTURES = REPO / "tests" / "fixtures" / "third-party"
 MANIFEST = REPO / "tests" / "fixtures" / "manifest.json"
 
 POI = "https://raw.githubusercontent.com/apache/poi/trunk/test-data/slideshow"
+OXSDK = ("https://raw.githubusercontent.com/dotnet/Open-XML-SDK/main/test/"
+         "DocumentFormat.OpenXml.Tests.Assets/assets/TestDataStorage/v2FxTestFiles/presentation")
+PYPPTX = "https://raw.githubusercontent.com/scanny/python-pptx/master/features/steps/test_files"
+TSPPTX = "https://raw.githubusercontent.com/shbernal/ts-pptx/master/test/read/fixtures"
+AUTOMIZER = "https://raw.githubusercontent.com/singerla/pptx-automizer/main/__tests__/pptx-templates"
 LO_SD = "https://raw.githubusercontent.com/LibreOffice/core/master/sd/qa/unit/data/pptx"
 LO_OOX = "https://raw.githubusercontent.com/LibreOffice/core/master/oox/qa/unit/data"
 
@@ -63,6 +68,38 @@ SOURCES = [
      "pyramid layout with a single child node"),
     (f"{LO_SD}/tdf149551_SmartArt_Gear.pptx", "lo-smartart-gear.pptx", "MPL-2.0", "LibreOffice",
      "gear layout; regression fixture for a real rendering bug"),
+
+    # ── MIT-licensed multi-diagram decks — the cleanest licence, richest content ──
+    (f"{AUTOMIZER}/SlideWithDiagrams.pptx", "automizer-three-diagrams.pptx", "MIT", "pptx-automizer",
+     "THREE SmartArt graphics (matrix3, venn2, AlternatingHexagons); one has no text at all; German-locale layout names"),
+    (f"{TSPPTX}/smartart-families.pptx", "tspptx-smartart-families.pptx", "MIT", "ts-pptx",
+     "FOUR SmartArt graphics across 20 diagram parts — the densest diagram fixture found"),
+    (f"{TSPPTX}/mixed.pptx", "tspptx-mixed.pptx", "MIT", "ts-pptx",
+     "mixed shape kinds in one deck"),
+    (f"{OXSDK}/SmartArt_OrgChart1.pptx", "oxsdk-smartart-orgchart.pptx", "MIT", "dotnet/Open-XML-SDK",
+     "Microsoft's own SmartArt test asset — the reference implementation's fixture"),
+
+    # ── Other hard constructs still listed as unproven ───────────────────────
+    (f"{PYPPTX}/shp-access-ole-object.pptx", "pypptx-ole-object.pptx", "MIT", "python-pptx",
+     "OLE embedded object — previously untested"),
+    (f"{OXSDK}/Chart_2D.pptx", "oxsdk-chart-2d.pptx", "MIT", "dotnet/Open-XML-SDK",
+     "native 2D charts"),
+    (f"{OXSDK}/Table_Large.pptx", "oxsdk-table-large.pptx", "MIT", "dotnet/Open-XML-SDK",
+     "large native table"),
+    (f"{PYPPTX}/cht-chart-type.pptx", "pypptx-chart-types.pptx", "MIT", "python-pptx",
+     "several chart types in one deck"),
+    (f"{PYPPTX}/shp-shapes.pptx", "pypptx-shapes.pptx", "MIT", "python-pptx",
+     "assorted shape kinds"),
+
+    # ── Real professional decks. US federal works are public domain
+    #    (17 U.S.C. sec.105) — genuine output, not synthetic fixtures. ────────
+    ("https://www.eia.gov/outlooks/archive/aeo23/ppt/AEO2023_Release_Presentation.pptx",
+     "eia-aeo2023-release.pptx", "Public domain (US federal work)", "US EIA",
+     "real government release deck — chart-heavy professional output"),
+    ("https://ntrs.nasa.gov/api/citations/20230012455/downloads/"
+     "2023_Raven_St_Clair_ES6_ExitPresentation_STRIVES.pptx",
+     "nasa-es6-exit.pptx", "Public domain (US federal work)", "NASA NTRS",
+     "real NASA project presentation"),
 ]
 
 
@@ -124,6 +161,11 @@ def main() -> int:
                 "attribution": {
                     "Apache POI": "Apache-2.0 — https://poi.apache.org/",
                     "LibreOffice": "MPL-2.0 — https://www.libreoffice.org/",
+                    "dotnet/Open-XML-SDK": "MIT — https://github.com/dotnet/Open-XML-SDK",
+                    "python-pptx": "MIT — https://github.com/scanny/python-pptx",
+                    "ts-pptx": "MIT — https://github.com/shbernal/ts-pptx",
+                    "pptx-automizer": "MIT — https://github.com/singerla/pptx-automizer",
+                    "US EIA / NASA": "US federal works, public domain (17 U.S.C. 105)",
                 },
                 "fixtures": entries,
             },
