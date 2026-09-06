@@ -150,6 +150,8 @@ def audit(deck: DeckInfo, name: str = "") -> DeckAudit:
         _empty_and_image_only,
         _font_sprawl,
         _colour_sprawl,
+        _foreign_slides,
+        _layout_outliers,
         _unsourced_figures,
         _bare_numbers,
         _table_shape,
@@ -313,3 +315,89 @@ def _table_shape(deck: DeckInfo, out: DeckAudit) -> None:
             f"{len(set(wide))} table(s) have more than seven columns",
             "a table that wide is usually read as a chart; consider one",
         ))
+
+
+# ── slides that came from somewhere else ─────────────────────────────────────
+#
+# The pasted-together deck is the ordinary case, not the exception: people
+# start from last quarter's file and pull slides in from three others. The
+# deck-level checks above say "five typefaces are in use" and stop there, which
+# tells you a deck is inconsistent without telling you where to look.
+#
+# These name the slides. A slide that carries explicit formatting in a deck
+# whose slides otherwise inherit from the theme is the clearest tell there is,
+# because inheriting is what a slide built in this deck's own template does.
+
+
+def _foreign_slides(deck: DeckInfo, out: DeckAudit) -> None:
+    """Slides carrying hardcoded fonts where the rest of the deck inherits."""
+    explicit: dict[int, set[str]] = {}
+    for slide in deck.slides:
+        fonts = {
+            run.font
+            for shape in slide.shapes
+            for run in shape.runs
+            # A theme reference is not a hardcoded font -- it is the slide
+            # deferring to the template, which is the opposite of foreign.
+            if run.font and not run.font.startswith("+")
+        }
+        if fonts:
+            explicit[slide.number] = fonts
+
+    if not explicit or len(explicit) >= deck.slide_count:
+        # Either nothing is hardcoded, or everything is. Neither identifies an
+        # outlier, and calling a whole deck foreign to itself is not a finding.
+        return
+
+    share = len(explicit) / max(deck.slide_count, 1)
+    if share > 0.5:
+        return
+
+    fonts = sorted({f for fs in explicit.values() for f in fs})
+    out.observations.append(Observation(
+        Area.CONSISTENCY,
+        sorted(explicit),
+        f"{len(explicit)} of {deck.slide_count} slides hardcode a typeface "
+        f"({', '.join(fonts)}) where the rest inherit from the theme",
+        "slides pasted in from another deck usually look like this; conforming "
+        "them re-links their text to this deck's template",
+    ))
+
+
+def _layout_outliers(deck: DeckInfo, out: DeckAudit) -> None:
+    """Slides built on a layout almost nothing else in the deck uses."""
+    layouts = Counter(s.layout for s in deck.slides if s.layout)
+    if len(layouts) < 2 or sum(layouts.values()) < 4:
+        return
+
+    rare = {name for name, n in layouts.items() if n == 1}
+    if not rare or len(rare) == len(layouts):
+        # All-singletons means the deck simply uses many layouts, which is a
+        # style, not a defect.
+        return
+
+    # The first and last slides are a title and a closing slide by convention,
+    # so a layout used only there is expected rather than suspicious. Flagging
+    # them was a real false positive on the corpus deck, and a user told
+    # something wrong about their own deck stops believing the rest of the
+    # report. Matching on layout *names* would catch these too and would break
+    # on the first deck authored in another language -- one fixture reports
+    # "Diapositive de titre".
+    structural = {1, deck.slide_count}
+    slides = sorted(
+        s.number for s in deck.slides
+        if s.layout in rare and s.number not in structural
+    )
+    if not slides:
+        return
+    if len(slides) > deck.slide_count / 3:
+        return
+
+    out.observations.append(Observation(
+        Area.CONSISTENCY,
+        slides,
+        f"{len(slides)} slide(s) use a layout no other slide uses "
+        f"({', '.join(sorted(rare))})",
+        "worth a look: a one-off layout is often a slide brought in from "
+        "another deck, though it may equally be a deliberate divider",
+    ))
