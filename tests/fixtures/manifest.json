@@ -198,6 +198,51 @@
       "why": "real NASA project presentation",
       "sha256": "e8f21f051b15d553f92d2329ef895c0084611fdcbb198b5a39f1b6df062f6fc2",
       "bytes": 57505297
+    },
+    {
+      "name": "nasa-aewg-mixed-fonts.pptx",
+      "url": "https://ntrs.nasa.gov/api/citations/20220007613/downloads/20220007613_Johnson_AEWG_presentation_final_2.pptx",
+      "licence": "Public domain (US federal work)",
+      "project": "NASA NTRS",
+      "why": "the densest real Franken-deck found: three typefaces mixed (Calibri, Arial, Times New Roman) across 110 correctable runs, plus 8 near-miss alignments",
+      "sha256": "13d2ebca6bf54a8f3ff063486c8a6e2868e4c3c40cf07a33320b708f677f4b85",
+      "bytes": 915154
+    },
+    {
+      "name": "eia-ieo2023-release.pptx",
+      "url": "https://www.eia.gov/outlooks/ieo/ppt/IEO2023_Release_Presentation.pptx",
+      "licence": "Public domain (US federal work)",
+      "project": "US EIA",
+      "why": "a second EIA release deck: 185 parts, 27 slides, and unlike its AEO sibling it carries no charts at all",
+      "sha256": "ba3136413e4f1b64dfd93377e6beceba6d5c0631aa204e0a4674a0c2a554b679",
+      "bytes": 1729180
+    },
+    {
+      "name": "nasa-atkins-lewis-clean.pptx",
+      "url": "https://ntrs.nasa.gov/api/citations/20205005334/downloads/Atkins%20and%20Lewis%20Presentation.pptx",
+      "licence": "Public domain (US federal work)",
+      "project": "NASA NTRS",
+      "why": "a negative control: a real 126-part professional deck that needs no tidying at all, so a pass that starts inventing work fails here first",
+      "sha256": "41b5faf6501211b868006a60b9ae5f647ae73fa9c806589cefd0b5234129361a",
+      "bytes": 1838138
+    },
+    {
+      "name": "nasa-esm-annual-review.pptx",
+      "url": "https://ntrs.nasa.gov/api/citations/20210021297/downloads/ESM-GCD_APR-FY21.pptx",
+      "licence": "Public domain (US federal work)",
+      "project": "NASA NTRS",
+      "why": "the extreme case: a 300-part, 41-slide annual review assembled by many hands, with 1,122 correctable runs across four typefaces and 66 near-miss alignments",
+      "sha256": "747be6f7ff0d54e6fbdc9fb79dead70fd6fdff102921b98017057bdc3447100e",
+      "bytes": 19083511
+    },
+    {
+      "name": "nasa-bhutan-water.pptx",
+      "url": "https://ntrs.nasa.gov/api/citations/20205005469/downloads/2020Sum_MSFC_BhutanWater_Presentation_FD-final.pptx",
+      "licence": "Public domain (US federal work)",
+      "project": "NASA NTRS",
+      "why": "the same typeface spelled two ways -- 177 runs of 'Century Gothic' and 89 of 'Century gothic' -- plus 9 charts; the deck that prompted the spelling-variant check",
+      "sha256": "068de94bffcc3917c9ccca9b0086411704dfb4bc356d1951e96a1f98b28ea1f9",
+      "bytes": 12303742
     }
   ]
 }

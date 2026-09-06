@@ -100,6 +100,37 @@ SOURCES = [
      "2023_Raven_St_Clair_ES6_ExitPresentation_STRIVES.pptx",
      "nasa-es6-exit.pptx", "Public domain (US federal work)", "NASA NTRS",
      "real NASA project presentation"),
+
+    # ── Decks that exercise the cleanup passes. The corpus sweep showed only
+    #    real decks do: 20 of 23 fixtures needed no tidying at all, because a
+    #    library's test files are small, synthetic and well-formed. These were
+    #    selected by measuring what each would contribute, not by volume. ─────
+    ("https://ntrs.nasa.gov/api/citations/20220007613/downloads/"
+     "20220007613_Johnson_AEWG_presentation_final_2.pptx",
+     "nasa-aewg-mixed-fonts.pptx", "Public domain (US federal work)", "NASA NTRS",
+     "the densest real Franken-deck found: three typefaces mixed (Calibri, "
+     "Arial, Times New Roman) across 110 correctable runs, plus 8 near-miss "
+     "alignments"),
+    ("https://www.eia.gov/outlooks/ieo/ppt/IEO2023_Release_Presentation.pptx",
+     "eia-ieo2023-release.pptx", "Public domain (US federal work)", "US EIA",
+     "a second EIA release deck: 185 parts, 27 slides, and unlike its AEO "
+     "sibling it carries no charts at all"),
+    ("https://ntrs.nasa.gov/api/citations/20205005334/downloads/"
+     "Atkins%20and%20Lewis%20Presentation.pptx",
+     "nasa-atkins-lewis-clean.pptx", "Public domain (US federal work)", "NASA NTRS",
+     "a negative control: a real 126-part professional deck that needs no "
+     "tidying at all, so a pass that starts inventing work fails here first"),
+    ("https://ntrs.nasa.gov/api/citations/20210021297/downloads/ESM-GCD_APR-FY21.pptx",
+     "nasa-esm-annual-review.pptx", "Public domain (US federal work)", "NASA NTRS",
+     "the extreme case: a 300-part, 41-slide annual review assembled by many "
+     "hands, with 1,122 correctable runs across four typefaces and 66 "
+     "near-miss alignments"),
+    ("https://ntrs.nasa.gov/api/citations/20205005469/downloads/"
+     "2020Sum_MSFC_BhutanWater_Presentation_FD-final.pptx",
+     "nasa-bhutan-water.pptx", "Public domain (US federal work)", "NASA NTRS",
+     "the same typeface spelled two ways -- 177 runs of 'Century Gothic' and "
+     "89 of 'Century gothic' -- plus 9 charts; the deck that prompted the "
+     "spelling-variant check"),
 ]
 
 
