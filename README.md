@@ -47,6 +47,24 @@ slide-wright edit     deck.pptx \
     -o out.pptx
 ```
 
+### The reviewable path
+
+`edit` approves what it proposes, which is what you want for a change you typed
+yourself. For a change a model suggested, the decision belongs to a person —
+so proposing, reviewing and applying are separate commands, and nothing reaches
+a deck until someone approves it by id.
+
+```bash
+slide-wright propose deck.pptx --instruct "..." -o changes.json   # writes nothing else
+slide-wright review  changes.json --approve c1 --reject c2        # a human decides
+slide-wright apply   deck.pptx changes.json -o out.pptx           # only the approved
+slide-wright history deck.pptx                                    # every version
+slide-wright revert  deck.pptx --to 1                             # go back to one
+```
+
+`revert` undoes nothing. Every version is kept, so going back is choosing an
+earlier one; the discarded versions stay in the workspace.
+
 ### Refresh a recurring deck from a workbook
 
 Last quarter's deck plus this quarter's numbers. **No model is involved** —
