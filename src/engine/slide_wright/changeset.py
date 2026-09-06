@@ -38,9 +38,24 @@ class Status(str, Enum):
     FAILED = "failed"       # attempted and could not be completed
 
 
+class Origin(str, Enum):
+    """Where a change came from. Determines how much scrutiny it deserves."""
+
+    USER = "user"          # typed explicitly — highest trust
+    SOURCE = "source"      # derived from a cited spreadsheet cell — deterministic
+    MODEL = "model"        # proposed by a model — needs review
+    RULE = "rule"          # produced by a deterministic rule, e.g. brand conformance
+
+
 @dataclass
 class Change:
-    """One intended mutation, addressed to one object."""
+    """One intended mutation, addressed to one object.
+
+    A reviewer should be able to answer, from this record alone: *what* is
+    changing, *where*, *why*, *who proposed it*, *how sure are they*, and *what
+    else might it affect*. A change that cannot answer those is not reviewable,
+    and an unreviewable change set is just an opaque diff with extra steps.
+    """
 
     id: str
     op: Op
@@ -51,9 +66,30 @@ class Change:
     rationale: str = ""
     status: Status = Status.PROPOSED
 
+    # ── provenance and confidence ────────────────────────────────────────────
+    origin: Origin = Origin.USER
+    citation: str = ""               # e.g. "comps.csv!B2" — a coordinate, not a claim
+    confidence: float = 1.0          # 0-1; only meaningful for MODEL origin
+    impact: str = ""                 # what else this plausibly affects
+    object_kind: str = ""            # shape | table | chart | picture — for review UX
+
     @property
     def is_actionable(self) -> bool:
         return self.status is Status.APPROVED
+
+    @property
+    def is_grounded(self) -> bool:
+        """True when the change traces to something checkable.
+
+        A user typing a value and a spreadsheet cell are both grounded. A model
+        proposing one is not — it needs a human, which is why model-origin
+        changes are never auto-approved.
+        """
+        return self.origin in (Origin.USER, Origin.SOURCE, Origin.RULE) or bool(self.citation)
+
+    @property
+    def needs_review(self) -> bool:
+        return self.origin is Origin.MODEL and not self.citation
 
     def describe(self) -> str:
         verb = {
@@ -72,17 +108,31 @@ class Change:
         return f"{verb} {self.before} -> {self.after}"
 
 
+# Protection scopes a user can declare. Each is a promise the engine keeps,
+# enforced at the verifier as well as the planner — a guarantee checked only at
+# intent is not a guarantee.
+SCOPES = ("slide", "shape", "numbers", "wording", "layout", "tables", "charts", "media")
+
+
 @dataclass
 class Lock:
     """A user guarantee that something must not change.
 
-    Enforced at the verifier, not only at the planner. A guarantee checked only
-    at intent is not a guarantee.
+    These exist because the requests people actually make are conditional:
+    *"polish this deck but do not touch a single figure"*, *"restyle it but
+    leave slide 4 alone — the partner signed it off"*. Those are constraints,
+    not prompt text, so they live in the engine.
     """
 
-    scope: str          # "slide" | "shape" | "numbers"
+    scope: str          # one of SCOPES
     target: str = ""    # slide number or shape id; empty means deck-wide
     reason: str = ""
+
+    def __post_init__(self) -> None:
+        if self.scope not in SCOPES:
+            raise ValueError(
+                f"unknown protection scope {self.scope!r}; expected one of {', '.join(SCOPES)}"
+            )
 
     def blocks(self, change: Change) -> bool:
         if self.scope == "slide":
@@ -94,6 +144,16 @@ class Lock:
             return change.op in (Op.SET_TEXT, Op.SET_TABLE_CELL) and _contains_number(
                 str(change.before)
             )
+        if self.scope == "wording":
+            # "improve the layout, leave my words exactly as written"
+            return change.op in (Op.SET_TEXT, Op.SET_TABLE_CELL)
+        if self.scope == "layout":
+            # "rewrite the copy, do not move anything"
+            return change.op in (Op.MOVE, Op.RESIZE)
+        if self.scope in ("tables", "charts", "media"):
+            # "leave the exhibits alone" — matched on the object being edited
+            kind = {"tables": "table", "charts": "chart", "media": "picture"}[self.scope]
+            return change.object_kind == kind
         return False
 
 
@@ -128,10 +188,19 @@ class ChangeSet:
 
     # ── review ───────────────────────────────────────────────────────────────
 
-    def approve_all(self) -> None:
+    def approve_all(self, *, include_unreviewed: bool = True) -> None:
+        """Approve every proposed change.
+
+        `include_unreviewed=False` holds back model-proposed changes that carry
+        no citation — useful when a caller wants to auto-apply the grounded ones
+        and put the rest in front of a person.
+        """
         for c in self.changes:
-            if c.status is Status.PROPOSED:
-                c.status = Status.APPROVED
+            if c.status is not Status.PROPOSED:
+                continue
+            if not include_unreviewed and c.needs_review:
+                continue
+            c.status = Status.APPROVED
 
     def approve(self, *ids: str) -> None:
         for c in self.changes:
@@ -162,6 +231,15 @@ class ChangeSet:
         return [c for c in self.changes if c.status is Status.APPLIED]
 
     @property
+    def needing_review(self) -> list[Change]:
+        """Proposed changes a model invented without a citation."""
+        return [c for c in self.changes if c.status is Status.PROPOSED and c.needs_review]
+
+    @property
+    def grounded(self) -> list[Change]:
+        return [c for c in self.changes if c.is_grounded]
+
+    @property
     def target_slides(self) -> set[int]:
         """Slides the approved changes are permitted to touch."""
         return {c.slide for c in self.approved}
@@ -182,7 +260,12 @@ class ChangeSet:
                 "instruction": self.instruction,
                 "locks": [asdict(l) for l in self.locks],
                 "changes": [
-                    {**asdict(c), "op": c.op.value, "status": c.status.value}
+                    {
+                        **asdict(c),
+                        "op": c.op.value,
+                        "status": c.status.value,
+                        "origin": c.origin.value,
+                    }
                     for c in self.changes
                 ],
             },
@@ -200,6 +283,11 @@ class ChangeSet:
                     id=c["id"], op=Op(c["op"]), slide=c["slide"], target=c["target"],
                     before=c.get("before"), after=c.get("after"),
                     rationale=c.get("rationale", ""), status=Status(c["status"]),
+                    origin=Origin(c.get("origin", "user")),
+                    citation=c.get("citation", ""),
+                    confidence=c.get("confidence", 1.0),
+                    impact=c.get("impact", ""),
+                    object_kind=c.get("object_kind", ""),
                 )
             )
         return cs
@@ -233,6 +321,19 @@ class ChangeSet:
             lines.append(f"  [{mark}] {c.id}  slide {c.slide}  {c.describe()}")
             if c.rationale:
                 lines.append(f"        {c.rationale}")
+            provenance = []
+            if c.citation:
+                provenance.append(f"source {c.citation}")
+            elif c.origin is not Origin.USER:
+                provenance.append(c.origin.value)
+            if c.origin is Origin.MODEL and c.confidence < 1.0:
+                provenance.append(f"confidence {c.confidence:.0%}")
+            if c.needs_review:
+                provenance.append("NEEDS REVIEW")
+            if provenance:
+                lines.append(f"        [{' · '.join(provenance)}]")
+            if c.impact:
+                lines.append(f"        may also affect: {c.impact}")
         lines += [
             "",
             f"  {len(self.proposed)} proposed · {len(self.approved)} approved · "
