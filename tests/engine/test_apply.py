@@ -205,3 +205,55 @@ class TestIntegrityPreserved:
         ))
         apply_changes(adversarial_deck, cs, out)
         assert Package.open(out).slide_count == Package.open(adversarial_deck).slide_count
+
+
+class TestFailuresExplainThemselves:
+    """A refusal is only useful if it says what to do differently.
+
+    `_apply_one` returned a single boolean, so "the shape is not on this slide"
+    and "the shape is here but the edit does not apply to it" produced the same
+    message: "target not found on slide". That sends a reader hunting for a
+    shape id that is in fact present, and it fired on the common case of a run
+    whose font size is inherited from the layout.
+    """
+
+    def _why(self, deck, change, tmp_path) -> str:
+        cs = approved(deck, change)
+        result = apply_changes(deck, cs, tmp_path / "out.pptx")
+        assert result.failed, "expected this change to fail"
+        return result.failed[0][1]
+
+    def test_a_missing_shape_says_so_and_names_the_slide(self, adversarial_deck, tmp_path):
+        why = self._why(adversarial_deck, Change(
+            id="c1", op=Op.SET_TEXT, slide=1, target="999",
+            before="x", after="y"), tmp_path)
+        assert "no shape with id '999'" in why and "slide 1" in why
+
+    def test_wrong_before_text_names_the_text_not_the_shape(self, adversarial_deck, tmp_path):
+        shape = next(s for s in inspect(adversarial_deck).slides[0].shapes if s.has_text)
+        why = self._why(adversarial_deck, Change(
+            id="c1", op=Op.SET_TEXT, slide=1, target=shape.id,
+            before="text that is not in this deck", after="y"), tmp_path)
+        assert "does not contain the text" in why
+        assert "not found" not in why, "the shape was found; saying otherwise misleads"
+
+    def test_an_inherited_font_size_is_explained_not_denied(self, adversarial_deck, tmp_path):
+        """The commonest real case: a run with no explicit formatting override."""
+        shape = next(s for s in inspect(adversarial_deck).slides[1].shapes
+                     if s.x is not None)
+        why = self._why(adversarial_deck, Change(
+            id="c1", op=Op.SET_FONT_SIZE, slide=2, target=shape.id,
+            before=None, after=14), tmp_path)
+        assert "inherited from the layout" in why
+        assert "not found" not in why
+
+    def test_a_layout_placed_shape_explains_why_it_cannot_move(
+        self, adversarial_deck, tmp_path
+    ):
+        shape = next(s for s in inspect(adversarial_deck).slides[0].shapes
+                     if s.x is None)
+        why = self._why(adversarial_deck, Change(
+            id="c1", op=Op.MOVE, slide=1, target=shape.id,
+            before=(0, 0), after=(100, 100)), tmp_path)
+        assert "placed by the layout" in why
+        assert "not found" not in why
