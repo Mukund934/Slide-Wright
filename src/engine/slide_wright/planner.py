@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from slide_wright.changeset import Change, ChangeSet, Op
 from slide_wright.inspect import DeckInfo
 from slide_wright.llm.client import Budget, Completion, Provider, StubProvider
+from slide_wright.llm.usage import Ledger
 
 SYSTEM = """You edit PowerPoint decks. You are given the structure of a deck and an \
 instruction, and you return the smallest set of changes that satisfies it.
@@ -78,13 +79,24 @@ def plan(
     deck_path: str = "",
     provider: Provider | None = None,
     budget: Budget | None = None,
+    ledger: Ledger | None = None,
 ) -> PlanResult:
     """Ask a provider for a change set, then validate it against the deck."""
     provider = provider or StubProvider()
     budget = budget or Budget()
 
-    completion = provider.complete(SYSTEM, f"{summarise(deck)}\n\ninstruction: {instruction}")
+    try:
+        completion = provider.complete(
+            SYSTEM, f"{summarise(deck)}\n\ninstruction: {instruction}"
+        )
+    except Exception as exc:
+        # A failed call still costs quota and still tells us something.
+        if ledger is not None:
+            ledger.record("plan", provider.name, deck=deck_path, ok=False, error=str(exc))
+        raise
     budget.charge(completion.usage)
+    if ledger is not None:
+        ledger.record("plan", provider.name, completion, deck=deck_path)
 
     changeset = ChangeSet(deck=deck_path, instruction=instruction)
     result = PlanResult(changeset=changeset, provider=provider.name, completion=completion)
