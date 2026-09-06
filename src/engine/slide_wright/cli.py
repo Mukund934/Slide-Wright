@@ -11,6 +11,8 @@ one, and the loop is what needs proving.
     slide-wright profile  deck.pptx [deck.pptx ...]
     slide-wright refresh  deck.pptx --source comps.csv -o out.pptx
     slide-wright brand    house.potx deck.pptx
+    slide-wright history  deck.pptx
+    slide-wright revert   deck.pptx --to 1
 """
 
 from __future__ import annotations
@@ -163,6 +165,35 @@ def cmd_verify(args) -> int:
     return EXIT_OK if report.deliverable else EXIT_FINDINGS
 
 
+def cmd_history(args) -> int:
+    """Every version of this deck, and which one is current."""
+    session = Session.open(args.deck, workspace=args.workspace)
+    print(session.history())
+    return EXIT_OK
+
+
+def cmd_revert(args) -> int:
+    """Go back to an earlier version.
+
+    Nothing is undone and nothing is deleted -- an earlier version is simply
+    made current again. The discarded artifacts stay in the workspace.
+    """
+    session = Session.open(args.deck, workspace=args.workspace)
+    try:
+        version = session.rollback(args.to)
+    except SessionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(f"now at v{version.number:03d}"
+          + (f" — {version.note}" if version.note else ""))
+    print()
+    print(session.history())
+    if args.output:
+        print(f"\nwrote {session.export(args.output)}")
+    return EXIT_OK
+
+
 def cmd_profile(args) -> int:
     print(format_table(profile_many(args.decks)))
     return EXIT_OK
@@ -300,6 +331,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("source")
     p.add_argument("output")
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("history", help="every version of this deck")
+    p.add_argument("deck")
+    p.add_argument("--workspace", help="where versions are kept")
+    p.set_defaults(func=cmd_history)
+
+    p = sub.add_parser("revert", help="make an earlier version current again")
+    p.add_argument("deck")
+    p.add_argument("--to", type=int, default=0, metavar="N",
+                   help="version number to return to (default 0, the original)")
+    p.add_argument("-o", "--output", help="write that version here")
+    p.add_argument("--workspace", help="where versions are kept")
+    p.set_defaults(func=cmd_revert)
 
     p = sub.add_parser("profile", help="measure how adversarial decks are")
     p.add_argument("decks", nargs="+")
