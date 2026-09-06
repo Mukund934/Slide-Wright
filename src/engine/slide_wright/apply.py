@@ -28,6 +28,7 @@ from lxml import etree
 from slide_wright.changeset import Change, ChangeSet, Op, Status
 from slide_wright.inspect import NS
 from slide_wright.package import Package
+from slide_wright.smartart import SmartArtUnsupported, assert_preserved, guard_edit
 
 # Operations this module can perform in place, without a slide rebuild.
 IN_PLACE_OPS = {Op.SET_TEXT, Op.SET_TABLE_CELL, Op.SET_FONT_SIZE, Op.MOVE, Op.RESIZE}
@@ -65,6 +66,16 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
         )
 
     pkg = Package.open(deck)
+
+    # SmartArt is refused up front, before anything is written. A diagram is
+    # four correlated parts plus a drawing cache; editing one out of step with
+    # the others silently renders a stale diagram. See smartart.py.
+    for change in approved:
+        try:
+            guard_edit(pkg, change.slide, change.target)
+        except SmartArtUnsupported as exc:
+            raise ApplyError(str(exc)) from exc
+
     result = ApplyResult(output=output)
 
     # Group by slide part so each part is parsed and written once.
@@ -99,6 +110,13 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
             result.touched_parts.add(part_name)
 
     _write_package(deck, output, patched)
+
+    # Even when nothing targeted a diagram, prove none was collateral damage.
+    try:
+        assert_preserved(pkg, output)
+    except SmartArtUnsupported as exc:
+        raise ApplyError(str(exc)) from exc
+
     return result
 
 
