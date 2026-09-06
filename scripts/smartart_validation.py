@@ -179,18 +179,33 @@ def main() -> int:
         results.append(r)
         print(r.row())
 
-    read_ok = sum(1 for r in results if r.read == "ok")
+    # A and C only apply to fixtures that actually contain a diagram. Scoring
+    # them out of every fixture reads as a 76% result when it is a 100% one.
+    with_diagram = [r for r in results if r.diagrams]
+    without = [r for r in results if not r.diagrams]
+
+    read_ok = sum(1 for r in with_diagram if r.read == "ok")
     preserved = sum(1 for r in results if r.preserve.startswith("ok"))
     damaged = sum(1 for r in results if "DAMAGED" in r.preserve or "LOST" in r.roundtrip)
-    refused = sum(1 for r in results if r.refuse == "refused")
-    rt_ok = sum(1 for r in results if r.roundtrip.startswith("ok"))
+    refused = sum(1 for r in with_diagram if r.refuse == "refused")
+    rt_ok = [r for r in results if r.roundtrip.startswith("ok")]
 
     print()
-    print(f"  A read          {read_ok}/{len(results)} diagrams read completely")
+    print(f"  A read          {read_ok}/{len(with_diagram)} diagrams read completely")
     print(f"  B preserve      {preserved} edited with the diagram intact "
           f"({sum(1 for r in results if r.preserve.startswith('n/a'))} had nothing else to edit)")
-    print(f"  C refuse        {refused}/{len(results)} diagram edits correctly refused")
-    print(f"  D round-trip    {rt_ok}/{len(results)} survived the heavy engine")
+    print(f"  C refuse        {refused}/{len(with_diagram)} diagram edits correctly refused")
+    print(f"  D round-trip    {len(rt_ok)}/{len(results)} survived the heavy engine")
+
+    # The engine's refusal is NOT SmartArt-specific, and the split is the
+    # evidence: every diagram deck is refused, but so are most diagram-free
+    # ones. A diagram is sufficient to trigger it, not necessary. See ADR-0007.
+    rt_ok_names = {r.fixture for r in rt_ok}
+    print(f"                  with a diagram:    "
+          f"{sum(1 for r in with_diagram if r.fixture in rt_ok_names)}"
+          f"/{len(with_diagram)} accepted")
+    print(f"                  without a diagram: "
+          f"{sum(1 for r in without if r.fixture in rt_ok_names)}/{len(without)} accepted")
     print()
     print(f"  DIAGRAMS DAMAGED ANYWHERE: {damaged}")
     return 0 if damaged == 0 else 2
