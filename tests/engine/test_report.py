@@ -175,3 +175,62 @@ class TestUnrequestedChangesAreExplained:
         assert report.explain_unrequested() == []
         assert not report.deliverable
         assert "Changes nobody asked for" in report.render()
+
+
+class TestRepetitionIsCollapsed:
+    """A hundred identical lines is where a reviewer stops reading.
+
+    A conformance pass on a real deck produces one line per corrected run, all
+    saying the same thing. Printing them all is not transparency — the one line
+    that mattered ends up buried in the middle of it.
+    """
+
+    def _report(self, requested):
+        from slide_wright.fidelity import FidelityReport
+
+        return build(FidelityReport(source="a.pptx", output="b.pptx"), requested)
+
+    def test_identical_changes_are_grouped_and_counted(self):
+        requested = [
+            RequestedChange(slide=n, description="set typeface Arial -> +mn-lt",
+                            target=f"{n}/run/0")
+            for n in (12, 14, 15, 17)
+        ]
+        rendered = self._report(requested).render()
+        assert "4x on slides 12, 14, 15, 17" in rendered
+        assert rendered.count("set typeface Arial -> +mn-lt") == 1
+
+    def test_a_change_that_happens_once_is_printed_in_full(self):
+        """That is the one worth looking at."""
+        rendered = self._report([
+            RequestedChange(slide=3, description="move (1, 2) -> (3, 4)", target="7"),
+        ]).render()
+        assert "slide 3 · 7 — move (1, 2) -> (3, 4)" in rendered
+        assert "1x on" not in rendered
+
+    def test_a_small_group_still_names_its_targets(self):
+        """Below the threshold the individual targets are worth seeing."""
+        requested = [
+            RequestedChange(slide=1, description="set typeface Arial -> +mn-lt",
+                            target=f"9/run/{i}")
+            for i in range(3)
+        ]
+        rendered = self._report(requested).render()
+        assert "9/run/0" in rendered and "9/run/2" in rendered
+
+    def test_a_large_group_omits_the_individual_targets(self):
+        requested = [
+            RequestedChange(slide=1, description="set typeface Arial -> +mn-lt",
+                            target=f"9/run/{i}")
+            for i in range(40)
+        ]
+        rendered = self._report(requested).render()
+        assert "40x on slides 1" in rendered
+        assert "9/run/39" not in rendered
+
+    def test_different_changes_stay_separate(self):
+        rendered = self._report([
+            RequestedChange(slide=1, description="set typeface Arial -> +mn-lt", target="a"),
+            RequestedChange(slide=2, description="move (1, 2) -> (3, 4)", target="b"),
+        ]).render()
+        assert "set typeface" in rendered and "move (1, 2)" in rendered

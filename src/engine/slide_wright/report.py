@@ -76,6 +76,39 @@ class ChangeReport:
         except Exception:
             return []
 
+    def _render_requested(self, threshold: int = 8) -> list[str]:
+        """List the changes, collapsing repetition rather than printing it.
+
+        A conformance pass on a real deck produces a hundred identical-looking
+        lines -- "set typeface Arial -> +mn-lt", once per run. Printing them
+        all is not transparency; it is where a reviewer stops reading, and the
+        one line that mattered is somewhere in the middle of it.
+
+        So identical descriptions are grouped and counted, with the slides they
+        touched named. A change that appears once is still printed in full,
+        because that is the one worth looking at.
+        """
+        grouped: dict[str, list] = {}
+        for change in self.requested:
+            grouped.setdefault(change.description, []).append(change)
+
+        lines = []
+        for description, changes in grouped.items():
+            slides = sorted({c.slide for c in changes if c.slide})
+            if len(changes) == 1:
+                c = changes[0]
+                where = f"slide {c.slide}" if c.slide else "deck"
+                target = f" · {c.target}" if c.target else ""
+                lines.append(f"    · {where}{target} — {description}")
+                continue
+
+            where = ("slides " + ", ".join(str(n) for n in slides)) if slides else "deck"
+            lines.append(f"    · {len(changes)}x on {where} — {description}")
+            if len(changes) <= threshold:
+                for c in changes:
+                    lines.append(f"        {c.target}")
+        return lines
+
     @property
     def deliverable(self) -> bool:
         """Whether this output may be handed to the user.
@@ -130,10 +163,7 @@ class ChangeReport:
 
         if self.requested:
             lines += ["", "  Requested changes"]
-            for c in self.requested:
-                where = f"slide {c.slide}" if c.slide else "deck"
-                target = f" · {c.target}" if c.target else ""
-                lines.append(f"    · {where}{target} — {c.description}")
+            lines += self._render_requested()
 
         if self.unrequested_slide_changes:
             lines += ["", "  Changes nobody asked for"]
