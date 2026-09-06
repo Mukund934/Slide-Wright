@@ -53,6 +53,7 @@ class Completion:
     text: str
     usage: Usage = field(default_factory=Usage)
     model: str = ""
+    latency_s: float = 0.0
 
     def json(self) -> Any:
         """Parse the response as JSON, tolerating a fenced code block."""
@@ -163,13 +164,36 @@ class AnthropicProvider(Provider):
         return Completion(text=text, usage=usage, model=self.model)
 
 
-def default_provider() -> Provider:
-    """Anthropic when a key is present, the stub otherwise.
+def load_dotenv(path: str = ".env") -> None:
+    """Read a local .env into the environment. Never logs a value."""
+    import pathlib
 
+    file = pathlib.Path(path)
+    if not file.is_file():
+        return
+    for line in file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name, value = name.strip(), value.strip().strip('"').strip("'")
+        if value and name not in os.environ:
+            os.environ[name] = value
+
+
+def default_provider() -> Provider:
+    """Gemini when a key is present, then Anthropic, else the offline stub.
+
+    Gemini is first because it has the free tier this project develops on.
     Falling back rather than failing means the loop is always runnable; the
     planner reports which provider produced a change set, so a stub result is
     never mistaken for a real one.
     """
+    load_dotenv()
+    if os.environ.get("GEMINI_API_KEY"):
+        from slide_wright.llm.gemini import GeminiProvider
+
+        return GeminiProvider()
     if os.environ.get("ANTHROPIC_API_KEY"):
         return AnthropicProvider()
     return StubProvider()
