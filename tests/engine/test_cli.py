@@ -147,6 +147,27 @@ class TestVerify:
         assert main(["verify", str(adversarial_deck), str(copy)]) == EXIT_OK
         assert "100.00%" in capsys.readouterr().out
 
+    def test_verify_writes_nothing_beside_the_deck(self, adversarial_deck, tmp_path):
+        """A read-only command must leave no trace next to a confidential file.
+
+        `verify` used to open a session, which materialised a workspace —
+        and therefore a copy of the user's deck — in the deck's own folder.
+        Decks are confidential by default, so verifying one must not quietly
+        duplicate it somewhere the user did not ask for.
+        """
+        import shutil
+
+        folder = tmp_path / "client-materials"
+        folder.mkdir()
+        source = folder / "deck.pptx"
+        shutil.copy(adversarial_deck, source)
+        output = folder / "deck-edited.pptx"
+        shutil.copy(adversarial_deck, output)
+
+        before = sorted(p.name for p in folder.iterdir())
+        assert main(["verify", str(source), str(output)]) == EXIT_OK
+        assert sorted(p.name for p in folder.iterdir()) == before
+
 
 class TestRefusals:
     def test_hostile_file_is_refused_with_an_error_code(self, tmp_path, capsys):

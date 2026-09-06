@@ -20,6 +20,10 @@ secrets/
 # reproducible and do not belong in history.
 /tests/corpus/*.pptx
 
+# Session workspaces. `edit` keeps versions next to the deck it is working on,
+# so these folders hold copies of confidential material by construction.
+.slidewright-tmp/
+
 # ── Customer material — decks are confidential by default ────────────────────
 # Real customer/test decks must never enter history. Fixtures live in
 # tests/corpus/ and are tracked only when explicitly cleared for sharing.

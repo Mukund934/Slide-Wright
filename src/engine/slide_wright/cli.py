@@ -148,8 +148,17 @@ def cmd_brand(args) -> int:
 
 
 def cmd_verify(args) -> int:
-    session = Session.open(args.source, workspace=Path(args.source).parent / ".slidewright-tmp")
-    report = session.verify(args.source, args.output)
+    """Compare two decks. Reads only — nothing is written anywhere.
+
+    This deliberately does not open a Session. A session materialises a
+    workspace next to the deck, which for `verify` meant dropping a copy of
+    the user's file into a folder beside it. Decks are confidential by
+    default; a read-only command must leave no trace on disk.
+    """
+    from slide_wright.fidelity import compare
+    from slide_wright.report import build
+
+    report = build(compare(args.source, args.output))
     print(report.render())
     return EXIT_OK if report.deliverable else EXIT_FINDINGS
 
