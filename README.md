@@ -42,6 +42,7 @@ slide-wright audit    deck.pptx                     # what is wrong with this de
 slide-wright brand    house.potx deck.pptx          # where it departs from the template
 slide-wright brand    house.potx deck.pptx --fix    # correct it, changing no content
 slide-wright align    deck.pptx --fix              # snap near-miss edges, bounded
+slide-wright tidy     deck.pptx -o out.pptx        # both of the above, one receipt
 slide-wright refresh  deck.pptx --source comps.csv  # update figures, with citations
 slide-wright verify   before.pptx after.pptx        # part-level fidelity report
 slide-wright diff     before.pptx after.pptx        # what a reader would notice
@@ -102,6 +103,35 @@ A run whose typeface is `+mn-lt` is left alone. That is not a font, it is a
 reference to the theme's own font, so the run already follows the template in the
 only way that survives the template changing. Rewriting it to a literal name
 would quietly break that link.
+
+### Tidy an inherited deck
+
+The ordinary case: a deck assembled from other decks, carrying their typefaces
+and their almost-but-not-quite alignment. One command, one verification, one
+point to revert to.
+
+```
+SLIDES WORTH A LOOK
+
+  · slides 12, 14, 15, 17 — 4 of 25 slides hardcode a typeface (Arial)
+    where the rest inherit from the theme
+  · slides 9, 13, 15 — 3 slide(s) use a layout no other slide uses
+
+TIDY — deck.pptx
+
+  45 typeface(s) off the deck theme
+  2 shape(s) nearly, but not quite, aligned
+
+  345 of 350 package parts are byte-for-byte identical (98.57%)
+
+  45 typeface(s) conformed · 2 shape(s) nudged · 0 words or numbers changed, verified
+  revert with: slide-wright revert deck.pptx --to 0
+```
+
+Suspect slides are **named, never acted on** — calling a slide foreign is a
+judgement, and the corrections stand without it. With no template given, the
+deck's own theme is the authority: a deck assembled from several sources has a
+visual system of its own, and the pasted-in slides are the ones departing from it.
 
 ### Snap the boxes that are almost lined up
 
