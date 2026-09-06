@@ -41,6 +41,7 @@ slide-wright inspect  deck.pptx                     # structural summary
 slide-wright audit    deck.pptx                     # what is wrong with this deck
 slide-wright brand    house.potx deck.pptx          # where it departs from the template
 slide-wright brand    house.potx deck.pptx --fix    # correct it, changing no content
+slide-wright align    deck.pptx --fix              # snap near-miss edges, bounded
 slide-wright refresh  deck.pptx --source comps.csv  # update figures, with citations
 slide-wright verify   before.pptx after.pptx        # part-level fidelity report
 slide-wright diff     before.pptx after.pptx        # what a reader would notice
@@ -101,6 +102,26 @@ A run whose typeface is `+mn-lt` is left alone. That is not a font, it is a
 reference to the theme's own font, so the run already follows the template in the
 only way that survives the template changing. Rewriting it to a literal name
 would quietly break that link.
+
+### Snap the boxes that are almost lined up
+
+Three headers at 1.00in, 1.01in and 1.00in, and somebody nudging them with
+arrow keys at midnight. Automating that is easy; automating it *safely* is the
+whole problem, because the hard part is deciding which shapes were meant to line
+up at all.
+
+Three rules, and two of them exist because measurement caught the code getting
+it wrong:
+
+1. **Nothing moves further than the tolerance** (0.02in by default). A shape two
+   inches out of line is a decision; a shape a hundredth out is a slip.
+2. **An alignment that is already exact is never broken** to fix a near one.
+3. **A stray only snaps onto a line at least two shapes already share.** Without
+   this the pass never terminated — two boxes near each other on different edges
+   chased one another down the slide, one pass after another.
+
+With all three, a real deck converges in a single pass. Content is untouched and
+that is checked, not claimed.
 
 ### Refresh a recurring deck from a workbook
 
