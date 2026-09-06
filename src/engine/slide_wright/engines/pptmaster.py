@@ -71,10 +71,19 @@ class PptMasterEngine:
     # ── operations ───────────────────────────────────────────────────────────
 
     def ingest(self, deck: str | Path, workspace: str | Path) -> EngineResult:
-        """Import a .pptx into a round-trip workspace (source preserved)."""
-        return self._run(
-            ["pptx_to_svg.py", str(Path(deck)), "-o", str(Path(workspace)), "--roundtrip"]
-        )
+        """Import a .pptx into a round-trip workspace (source preserved).
+
+        Paths are resolved to absolute first. The engine runs with its own
+        scripts directory as cwd, so a relative path handed straight through
+        resolves against *that* directory and the file is silently "not found"
+        somewhere the caller never looked.
+        """
+        return self._run([
+            "pptx_to_svg.py",
+            str(Path(deck).resolve()),
+            "-o", str(Path(workspace).resolve()),
+            "--roundtrip",
+        ])
 
     def export(self, workspace: str | Path, out: str | Path) -> EngineResult:
         """Export a workspace back to .pptx.
@@ -82,11 +91,11 @@ class PptMasterEngine:
         Always round-trip mode (so untouched slides pass through with their
         original XML) and always with native charts and tables (ADR-0006).
         """
-        out = Path(out)
+        out = Path(out).resolve()
         res = self._run(
             [
                 "svg_to_pptx.py",
-                str(Path(workspace)),
+                str(Path(workspace).resolve()),
                 "-o",
                 str(out),
                 "--roundtrip",
