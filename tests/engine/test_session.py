@@ -134,6 +134,93 @@ class TestHistoryAndRollback:
         assert "v000" in out and "v001" in out and "first edit" in out
 
 
+class TestHistorySurvivesTheProcess:
+    """A session that forgets its versions cannot honour "revert".
+
+    Session.open used to rebuild the version list from scratch every time, so
+    reopening the same workspace saw only version 0. Two consequences, both
+    silent: the second edit wrote over the first edit's file, and it was
+    applied to the original rather than to the first edit's result.
+    """
+
+    def _edit(self, deck, workspace, after, note):
+        session = Session.open(deck, workspace=workspace)
+        table = next(s for s in session.deck().all_shapes() if s.kind == "table")
+        current = next(r.text for r in table.runs if "x" in r.text)
+        cs = session.propose(note)
+        cs.add(Change(id="c1", op=Op.SET_TABLE_CELL, slide=3,
+                      target=f"{table.id}/r1/c1", before=current, after=after))
+        cs.approve_all()
+        session.apply(note)
+        return session
+
+    def test_a_reopened_session_sees_earlier_versions(self, adversarial_deck, tmp_path):
+        ws = tmp_path / "ws"
+        self._edit(adversarial_deck, ws, "11.8x", "first edit")
+        second = self._edit(adversarial_deck, ws, "12.5x", "second edit")
+        assert [v.number for v in second.versions] == [0, 1, 2]
+        assert "first edit" in second.history()
+
+    def test_the_earlier_artifact_is_not_overwritten(self, adversarial_deck, tmp_path):
+        ws = tmp_path / "ws"
+        self._edit(adversarial_deck, ws, "11.8x", "first edit")
+        self._edit(adversarial_deck, ws, "12.5x", "second edit")
+        files = sorted(p.name for p in ws.glob("*.pptx"))
+        assert files == ["v000-original.pptx", "v001-edited.pptx", "v002-edited.pptx"]
+
+    def test_the_second_edit_builds_on_the_first(self, adversarial_deck, tmp_path):
+        """Not on the original. Otherwise edits silently do not accumulate."""
+        ws = tmp_path / "ws"
+        self._edit(adversarial_deck, ws, "11.8x", "first edit")
+        second = self._edit(adversarial_deck, ws, "12.5x", "second edit")
+        # The second change named 11.8x as its `before` and applied cleanly,
+        # which is only possible if it ran against the first edit's output.
+        assert second.current.number == 2
+
+    def test_rollback_reaches_a_version_from_an_earlier_process(
+        self, adversarial_deck, tmp_path
+    ):
+        ws = tmp_path / "ws"
+        self._edit(adversarial_deck, ws, "11.8x", "first edit")
+        second = self._edit(adversarial_deck, ws, "12.5x", "second edit")
+        second.rollback(1)
+        assert second.current.number == 1
+        table = next(s for s in second.deck().all_shapes() if s.kind == "table")
+        assert any("11.8x" in r.text for r in table.runs)
+
+    def test_version_numbers_are_never_reused_after_a_rollback(
+        self, adversarial_deck, tmp_path
+    ):
+        ws = tmp_path / "ws"
+        session = self._edit(adversarial_deck, ws, "11.8x", "first edit")
+        session.rollback(0)
+        table = next(s for s in session.deck().all_shapes() if s.kind == "table")
+        cs = session.propose("after rollback")
+        cs.add(Change(id="c1", op=Op.SET_TABLE_CELL, slide=3,
+                      target=f"{table.id}/r1/c1", before="9.4x", after="13.1x"))
+        cs.approve_all()
+        session.apply("after rollback")
+        assert session.current.number == 2, "reusing v001 would overwrite it"
+        assert (ws / "v001-edited.pptx").is_file(), "the discarded version is evidence"
+
+    def test_a_missing_version_file_is_refused_not_ignored(
+        self, adversarial_deck, tmp_path
+    ):
+        """A history that cannot be rolled back to must not be presented."""
+        ws = tmp_path / "ws"
+        self._edit(adversarial_deck, ws, "11.8x", "first edit")
+        (ws / "v001-edited.pptx").unlink()
+        with pytest.raises(SessionError, match="missing from the workspace"):
+            Session.open(adversarial_deck, workspace=ws)
+
+    def test_unreadable_history_is_refused(self, adversarial_deck, tmp_path):
+        ws = tmp_path / "ws"
+        self._edit(adversarial_deck, ws, "11.8x", "first edit")
+        (ws / "history.json").write_text("{not json", encoding="utf-8")
+        with pytest.raises(SessionError, match="unreadable"):
+            Session.open(adversarial_deck, workspace=ws)
+
+
 class TestExportGate:
     def test_exports_a_verified_deck(self, session, tmp_path):
         cs = session.propose()
