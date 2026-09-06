@@ -5,13 +5,17 @@ Date:    2026-09-04
 
 ## Context
 
-The obvious product is "AI generates presentations." That market is saturated: Gamma, Canva, Beautiful.ai, Plus AI, Presentations.AI, SlidesAI and others, with Microsoft Copilot bundled free into the application that owns the file format.
+The obvious product is "AI generates presentations." Established tools already do that, and the application that owns the file format bundles it free.
 
-Competitive research found the enterprise lane occupied too: Prezent.ai (~$74.3M raised, $400M valuation, $399/user/month) and Presentations.AI's shipping deck-refresh agent.
+Architecturally, they share one property: they are **generate-first**. Each authors into its own internal representation and exports outward. Outward conversion is lossy by construction, which is why exports from these tools commonly damage slides and lose template conformance.
 
-But every one of these is **generate-first**: they author into their own representation and export outward. That is lossy by construction, which is why market-leading exports damage a reported 30–40% of slides and why brand-compliance scores are poor. Reading arbitrary OOXML *back* without losing it is a harder problem that earns nothing at a $20/month price point — so nobody solved it.
+Reading arbitrary OOXML *back in* without losing it is the harder problem, and it is the one we have measured that we can solve (ADR-0001):
 
-We have measured that we can (ADR-0001).
+- a real 19-slide deck round-trips at 100% of parts byte-identical
+- a targeted edit changes exactly one package part
+- native tables, charts and embedded workbooks survive an edit
+
+*(Market sizing and competitive positioning live in the private decision log, not here. An ADR should record the technical decision and its consequences.)*
 
 ## Decision
 
@@ -23,7 +27,7 @@ We have measured that we can (ADR-0001).
 |---|---|
 | Generation-first, editing later | Enters the most crowded software market against a free bundled incumbent, with no differentiator |
 | Both simultaneously | Splits a small team across two products; neither gets good |
-| Template-conformant generation for enterprise | Prezent occupies it with $74M and enterprise distribution |
+| Template-conformant generation for enterprise | Occupied by a well-funded incumbent with enterprise distribution |
 
 ## Consequences
 
