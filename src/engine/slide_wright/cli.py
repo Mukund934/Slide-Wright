@@ -140,17 +140,96 @@ def cmd_refresh(args) -> int:
 
 
 def cmd_brand(args) -> int:
-    from slide_wright.brand import check_conformance, read_profile
+    from slide_wright.brand import check_conformance, plan_conformance, read_profile
 
     profile = read_profile(args.template)
     if args.deck is None:
         print(profile.render())
         return EXIT_OK
+
+    if args.fix:
+        return _fix_conformance(args, profile)
+
     report = check_conformance(inspect(args.deck), profile, Path(args.deck).name)
     print(report.render())
     print()
     print(f"  conformance {report.score:.1f}% of {report.checked_runs} text run(s)")
+    fixable = [d for d in report.deviations if d.kind == "font"]
+    if fixable:
+        print(f"  --fix can correct {len(fixable)} typeface deviation(s) "
+              "without changing any content")
+    other = [d for d in report.deviations if d.kind != "font"]
+    if other:
+        # Say what --fix will not touch, so nobody runs it twice expecting a
+        # clean report. Colour and size corrections are judgement calls that
+        # need a decision about which theme colour was intended.
+        kinds = ", ".join(sorted({d.kind for d in other}))
+        print(f"  {len(other)} deviation(s) --fix does not correct ({kinds})")
     return EXIT_OK if report.conforms else EXIT_FINDINGS
+
+
+def _fix_conformance(args, profile) -> int:
+    """Correct template drift, and prove no word or number moved.
+
+    The promise here is narrower and stronger than "make it match the
+    template": *change every typeface that does not conform, change nothing
+    else at all*. The second half is checked rather than asserted -- a
+    conformance pass that quietly reflowed a number would be far worse than one
+    that did nothing.
+    """
+    from slide_wright.brand import plan_conformance
+    from slide_wright.diff import diff as deck_diff
+
+    session = Session.open(args.deck, workspace=args.workspace)
+    plan = plan_conformance(session.deck(), profile, Path(args.deck).name)
+    print(plan.render())
+    print()
+
+    if plan.empty:
+        return EXIT_OK
+    if args.dry_run:
+        print("dry run — nothing was applied")
+        return EXIT_OK
+
+    changeset = session.propose(f"conform to {Path(args.template).name}")
+    for lock in args.lock or []:
+        scope, _, target = lock.partition(":")
+        try:
+            changeset.lock(scope, target)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+    for change in plan.changes:
+        changeset.add(change)
+    changeset.approve_all()
+
+    if not changeset.approved:
+        print("every correction was blocked by a lock; nothing to apply", file=sys.stderr)
+        return EXIT_FINDINGS
+
+    before = session.current.path
+    try:
+        report = session.apply(f"conform to {Path(args.template).name}")
+    except (SessionError, ApplyError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    # The guarantee, enforced. A formatting pass that changed a word or a
+    # number has done the one thing it promised not to do.
+    content = deck_diff(before, session.current.path).content_deltas
+    if content:
+        print("REFUSED — a formatting pass changed content:", file=sys.stderr)
+        for delta in content[:5]:
+            print(f"    · slide {delta.slide} — {delta.description}", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(report.render())
+    print()
+    print(f"  {len(changeset.applied)} run(s) corrected · "
+          f"0 words or numbers changed, verified")
+    if args.output:
+        print(f"wrote {session.export(args.output)}")
+    return EXIT_OK
 
 
 def cmd_verify(args) -> int:
@@ -481,6 +560,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("brand", help="check a deck against a template")
     p.add_argument("template", help=".potx or .pptx whose theme is the authority")
     p.add_argument("deck", nargs="?", help="deck to check; omit to just show the profile")
+    p.add_argument("--fix", action="store_true",
+                   help="correct off-template typefaces, changing no content")
+    p.add_argument("--lock", action="append", metavar="SCOPE[:TARGET]")
+    p.add_argument("-o", "--output", help="write the corrected deck here")
+    p.add_argument("--workspace", help="where versions are kept")
+    p.add_argument("--dry-run", action="store_true", help="show the plan and stop")
     p.set_defaults(func=cmd_brand)
 
     p = sub.add_parser("verify", help="compare an output against its source")
