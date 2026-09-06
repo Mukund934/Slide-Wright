@@ -26,7 +26,9 @@ An AI-native presentation intelligence and editing system that understands, modi
 
 Every AI presentation tool is built to *create* decks. Almost every valuable deck already exists.
 
-A board pack, a pitchbook, an IC memo, a QBR — these are inherited, not authored. Last quarter's deck is the starting point for this quarter's. A live pitchbook goes through 5–15 revision rounds, each costing hours of expensive people's evenings.
+A board pack, a pitchbook, an IC memo, a QBR — these are inherited, not authored. Last quarter's deck is the starting point for this quarter's, and each round of revisions costs hours of expensive people's evenings.
+
+How *many* rounds, and how expensive, we do not yet know. That number decides whether this is a business, and no practitioner has been asked. It is the open question, not a settled premise.
 
 And every AI tool treats an existing deck as an *import problem* — parse it, flatten it into the tool's own representation, re-emit it. That is lossy by construction. The result is a specific absurdity: **the decks that matter most are the ones AI can help with least**, because the one thing their owners cannot tolerate is a tool that touches something they did not ask it to touch.
 
