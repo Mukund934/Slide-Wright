@@ -33,6 +33,7 @@ content deltas in `diff.py`. That is asserted, not assumed.
 
 from __future__ import annotations
 
+import copy
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -128,12 +129,29 @@ class LayoutPlan:
         return "\n".join(lines)
 
 
+# Snapping a shape onto a line makes that line one member wider, which can turn
+# a value two shapes shared into one that three do -- and pull in a fourth that
+# was previously a lone stray. So one round is not a fixpoint. Measured on a
+# 41-slide deck: 66 corrections, then 11 more the pass after.
+#
+# A shape can still only move once, because once it is flush with another it is
+# anchored and held for good. Total displacement therefore stays inside the
+# tolerance however many rounds run, and that is asserted rather than trusted.
+MAX_ROUNDS = 8
+
+
 def plan_alignment(
     deck: DeckInfo,
     tolerance_emu: int = DEFAULT_TOLERANCE_EMU,
     name: str = "",
 ) -> LayoutPlan:
-    """Find edges that nearly agree, and snap them to the value most already use."""
+    """Find edges that nearly agree, and snap them to the value most already use.
+
+    Iterated to a fixpoint so that one run leaves nothing behind. The
+    alternative -- telling the user to run it again until it stops changing
+    things -- is not something to ask of anyone pointing a tool at a deck that
+    matters.
+    """
     plan = LayoutPlan(deck=name or "deck", tolerance_emu=tolerance_emu)
 
     for slide in deck.slides:
@@ -147,68 +165,40 @@ def plan_alignment(
         if len(positioned) < 2:
             continue
 
-        # A shape whose edge is *exactly* flush with another's is anchored on
-        # that axis and must not move, even to fix a near-miss on one of its
-        # other edges. Moving it would trade a real alignment for a smaller
-        # one, and the deck would be worse for it.
-        #
-        # This is also what makes the pass terminate. Without it, snapping a
-        # left edge shifts the right edge out of a flush pair, the next pass
-        # snaps it back, and the two alternate forever -- measured on a real
-        # deck as a stable cycle of nine shapes moving back and forth. With it,
-        # exact alignments can only be created and never destroyed, so repeated
-        # runs converge.
-        anchored = _anchored_axes(positioned)
+        # Copies, so rounds can be simulated without touching the caller's deck.
+        # Only x and y are ever reassigned; everything else is shared.
+        working = [copy.copy(shape) for shape in positioned]
+        origin = {shape.id: (shape.x, shape.y) for shape in positioned}
+        held_total: set[str] = set()
 
-        # Proposed new coordinates, accumulated across every edge kind so a
-        # shape misaligned both horizontally and vertically moves once.
-        moves: dict[str, dict[str, int]] = {}
+        for _round in range(MAX_ROUNDS):
+            moves, clusters, held = _plan_round(working, tolerance_emu)
+            plan.clusters.extend(clusters)
+            held_total |= held
+            if not moves:
+                break
+            for shape in working:
+                if shape.id in moves:
+                    shape.x, shape.y = moves[shape.id]
 
-        for edge, read, axis in (
-            ("left", lambda s: s.x, "x"),
-            ("right", lambda s: s.right, "x"),
-            ("centre-x", lambda s: _centre_x(s), "x"),
-            ("top", lambda s: s.y, "y"),
-            ("bottom", lambda s: s.bottom, "y"),
-            ("centre-y", lambda s: _centre_y(s), "y"),
-        ):
-            values = [(s.id, read(s)) for s in positioned if read(s) is not None]
-            for cluster in _cluster(edge, values, tolerance_emu):
-                plan.clusters.append(cluster)
-                for shape_id, current in cluster.strays:
-                    if axis in anchored.get(shape_id, ()):
-                        continue
-                    shift = cluster.target - current
-                    # Left, centre and right are three constraints on one axis,
-                    # not three corrections to apply in turn. Adding them
-                    # compounds a movement each was individually happy with.
-                    # The strongest consensus wins; ties go to the smaller move.
-                    candidate = (len(cluster.members), -abs(shift), shift)
-                    best = moves.setdefault(shape_id, {}).get(axis)
-                    if best is None or candidate[:2] > best[:2]:
-                        moves[shape_id][axis] = candidate
-
-        held = sorted(sid for sid, axes in anchored.items() if axes)
-        if held:
+        if held_total:
             plan.skipped.append(
-                f"slide {slide.number}: {len(held)} shape(s) already exactly "
+                f"slide {slide.number}: {len(held_total)} shape(s) already exactly "
                 "flush with another, so held still"
             )
 
-        by_id = {s.id: s for s in positioned}
-        for shape_id, shifts in sorted(moves.items()):
-            shape = by_id[shape_id]
-            new_x = shape.x + (shifts["x"][2] if "x" in shifts else 0)
-            new_y = shape.y + (shifts["y"][2] if "y" in shifts else 0)
-            if (new_x, new_y) == (shape.x, shape.y):
+        for shape in working:
+            was = origin[shape.id]
+            if (shape.x, shape.y) == was:
                 continue
-            shift_emu = max(abs(new_x - shape.x), abs(new_y - shape.y))
+            shift_emu = max(abs(shape.x - was[0]), abs(shape.y - was[1]))
             if shift_emu > tolerance_emu:
-                # Unreachable if the clustering is right. Kept because the bound
-                # is the whole safety argument, and a silent violation of it is
-                # exactly the failure that would destroy trust in this feature.
+                # A shape is anchored the moment it becomes flush, so it should
+                # move at most once and stay inside the bound. This is kept
+                # because the bound is the whole safety argument, and it is now
+                # guarding a loop rather than a single step.
                 plan.skipped.append(
-                    f"slide {slide.number} shape {shape_id}: refused a "
+                    f"slide {slide.number} shape {shape.id}: refused a "
                     f"{shift_emu / EMU_PER_INCH:.4f}in move exceeding the "
                     f"{tolerance_emu / EMU_PER_INCH:.3f}in tolerance"
                 )
@@ -217,19 +207,63 @@ def plan_alignment(
                 id=f"a{len(plan.changes) + 1}",
                 op=Op.MOVE,
                 slide=slide.number,
-                target=shape_id,
-                before=(shape.x, shape.y),
-                after=(new_x, new_y),
+                target=shape.id,
+                before=was,
+                after=(shape.x, shape.y),
                 rationale=(
                     f"snapped to a near-miss edge "
-                    f"({(new_x - shape.x) / EMU_PER_INCH:+.4f}, "
-                    f"{(new_y - shape.y) / EMU_PER_INCH:+.4f})in"
+                    f"({(shape.x - was[0]) / EMU_PER_INCH:+.4f}, "
+                    f"{(shape.y - was[1]) / EMU_PER_INCH:+.4f})in"
                 ),
-                # A deterministic rule, not a model's opinion about design.
                 origin=Origin.RULE,
                 object_kind=shape.kind,
             ))
     return plan
+
+
+def _plan_round(
+    shapes: list[ShapeInfo], tolerance: int
+) -> tuple[dict[str, tuple[int, int]], list[Cluster], set[str]]:
+    """One round of snapping: the moves it wants, the clusters, and what it held."""
+    anchored = _anchored_axes(shapes)
+    clusters: list[Cluster] = []
+    shifts: dict[str, dict[str, tuple]] = {}
+
+    for edge, read, axis in (
+        ("left", lambda s: s.x, "x"),
+        ("right", lambda s: s.right, "x"),
+        ("centre-x", _centre_x, "x"),
+        ("top", lambda s: s.y, "y"),
+        ("bottom", lambda s: s.bottom, "y"),
+        ("centre-y", _centre_y, "y"),
+    ):
+        values = [(s.id, read(s)) for s in shapes if read(s) is not None]
+        for cluster in _cluster(edge, values, tolerance):
+            clusters.append(cluster)
+            for shape_id, current in cluster.strays:
+                if axis in anchored.get(shape_id, ()):
+                    continue
+                shift = cluster.target - current
+                # Left, centre and right are three constraints on one axis, not
+                # three corrections to apply in turn. Adding them compounds a
+                # movement each was individually happy with. The strongest
+                # consensus wins; ties go to the smaller move.
+                candidate = (len(cluster.members), -abs(shift), shift)
+                best = shifts.setdefault(shape_id, {}).get(axis)
+                if best is None or candidate[:2] > best[:2]:
+                    shifts[shape_id][axis] = candidate
+
+    by_id = {s.id: s for s in shapes}
+    moves: dict[str, tuple[int, int]] = {}
+    for shape_id, axes in shifts.items():
+        shape = by_id[shape_id]
+        new_x = shape.x + (axes["x"][2] if "x" in axes else 0)
+        new_y = shape.y + (axes["y"][2] if "y" in axes else 0)
+        if (new_x, new_y) != (shape.x, shape.y):
+            moves[shape_id] = (new_x, new_y)
+
+    held = {sid for sid, axes in anchored.items() if axes}
+    return moves, clusters, held
 
 
 def _anchored_axes(shapes: list[ShapeInfo]) -> dict[str, set[str]]:
