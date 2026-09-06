@@ -26,7 +26,8 @@ class Op(str, Enum):
     MOVE = "move"                   # change x/y
     RESIZE = "resize"               # change cx/cy
     SET_FONT_SIZE = "set_font_size"
-    SET_COLOR = "set_color"
+    SET_FONT = "set_font"           # typeface of one run
+    SET_COLOR = "set_color"         # colour of one run
     DELETE_SHAPE = "delete_shape"
 
 
@@ -92,12 +93,16 @@ class Change:
         return self.origin is Origin.MODEL and not self.citation
 
     def describe(self) -> str:
+        # Every member of Op must appear here. A missing entry raises KeyError
+        # at report time -- after the edit has already been written -- so the
+        # completeness of this map is asserted by a test.
         verb = {
             Op.SET_TEXT: "set text",
             Op.SET_TABLE_CELL: "set cell",
             Op.MOVE: "move",
             Op.RESIZE: "resize",
             Op.SET_FONT_SIZE: "set font size",
+            Op.SET_FONT: "set typeface",
             Op.SET_COLOR: "set colour",
             Op.DELETE_SHAPE: "delete",
         }[self.op]
@@ -111,7 +116,8 @@ class Change:
 # Protection scopes a user can declare. Each is a promise the engine keeps,
 # enforced at the verifier as well as the planner — a guarantee checked only at
 # intent is not a guarantee.
-SCOPES = ("slide", "shape", "numbers", "wording", "layout", "tables", "charts", "media")
+SCOPES = ("slide", "shape", "numbers", "wording", "layout", "formatting",
+          "tables", "charts", "media")
 
 
 @dataclass
@@ -150,6 +156,10 @@ class Lock:
         if self.scope == "layout":
             # "rewrite the copy, do not move anything"
             return change.op in (Op.MOVE, Op.RESIZE)
+        if self.scope == "formatting":
+            # "fix the words, leave my styling exactly as it is" -- the inverse
+            # of `wording`, and the one a brand-conformance pass must honour.
+            return change.op in (Op.SET_FONT, Op.SET_COLOR, Op.SET_FONT_SIZE)
         if self.scope in ("tables", "charts", "media"):
             # "leave the exhibits alone" — matched on the object being edited
             kind = {"tables": "table", "charts": "chart", "media": "picture"}[self.scope]
