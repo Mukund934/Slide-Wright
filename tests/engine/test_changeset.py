@@ -7,15 +7,18 @@ when the change set is saved and reloaded is worse than no guarantee.
 
 from __future__ import annotations
 
-from slide_wright.changeset import Change, ChangeSet, Lock, Op, Status
+import pytest
+
+from slide_wright.changeset import Change, ChangeSet, Lock, Op, Origin, Status
 
 
 def cs(**kw) -> ChangeSet:
     return ChangeSet(deck="deck.pptx", **kw)
 
 
-def change(cid="c1", op=Op.SET_TEXT, slide=1, target="7", before="old", after="new") -> Change:
-    return Change(id=cid, op=op, slide=slide, target=target, before=before, after=after)
+def change(cid="c1", op=Op.SET_TEXT, slide=1, target="7", before="old", after="new",
+           **kw) -> Change:
+    return Change(id=cid, op=op, slide=slide, target=target, before=before, after=after, **kw)
 
 
 class TestReviewLifecycle:
@@ -160,3 +163,134 @@ class TestRendering:
         assert "set text" in change().describe()
         assert "move" in change(op=Op.MOVE, before=1, after=2).describe()
         assert change(op=Op.DELETE_SHAPE).describe() == "delete"
+
+
+class TestProvenance:
+    """A reviewer must be able to tell where a change came from."""
+
+    def test_a_user_change_is_grounded(self):
+        assert change().is_grounded
+        assert not change().needs_review
+
+    def test_a_model_change_without_a_citation_needs_review(self):
+        c = Change(id="c1", op=Op.SET_TEXT, slide=1, target="7",
+                   before="a", after="b", origin=Origin.MODEL)
+        assert not c.is_grounded
+        assert c.needs_review
+
+    def test_a_model_change_with_a_citation_is_grounded(self):
+        c = Change(id="c1", op=Op.SET_TABLE_CELL, slide=1, target="7/r1/c1",
+                   before="9.4x", after="11.8x", origin=Origin.MODEL,
+                   citation="comps.csv!B2")
+        assert c.is_grounded
+        assert not c.needs_review
+
+    def test_source_changes_are_grounded_without_review(self):
+        c = Change(id="r1", op=Op.SET_TABLE_CELL, slide=1, target="7/r1/c1",
+                   before="9.4x", after="11.8x", origin=Origin.SOURCE,
+                   citation="comps.csv!B2")
+        assert c.is_grounded and not c.needs_review
+
+    def test_approve_all_can_hold_back_unreviewed_model_changes(self):
+        s = cs()
+        s.add(Change(id="grounded", op=Op.SET_TEXT, slide=1, target="7",
+                     before="a", after="b", origin=Origin.SOURCE, citation="x!A1"))
+        s.add(Change(id="invented", op=Op.SET_TEXT, slide=1, target="7",
+                     before="a", after="b", origin=Origin.MODEL))
+        s.approve_all(include_unreviewed=False)
+        assert [c.id for c in s.approved] == ["grounded"]
+        assert [c.id for c in s.needing_review] == ["invented"]
+
+    def test_render_flags_changes_needing_review(self):
+        s = cs()
+        s.add(Change(id="c1", op=Op.SET_TEXT, slide=1, target="7",
+                     before="a", after="b", origin=Origin.MODEL, confidence=0.6))
+        out = s.render()
+        assert "NEEDS REVIEW" in out
+        assert "confidence 60%" in out
+
+    def test_render_shows_a_citation_instead_of_origin(self):
+        s = cs()
+        s.add(Change(id="r1", op=Op.SET_TABLE_CELL, slide=1, target="7/r1/c1",
+                     before="9.4x", after="11.8x", origin=Origin.SOURCE,
+                     citation="comps.csv!B2"))
+        assert "source comps.csv!B2" in s.render()
+
+    def test_impact_is_surfaced(self):
+        s = cs()
+        s.add(Change(id="c1", op=Op.RESIZE, slide=1, target="7",
+                     before=(100, 100), after=(50, 100),
+                     impact="text in this box may reflow"))
+        assert "may also affect: text in this box may reflow" in s.render()
+
+    def test_provenance_survives_a_round_trip(self):
+        s = cs()
+        s.add(Change(id="r1", op=Op.SET_TABLE_CELL, slide=1, target="7/r1/c1",
+                     before="9.4x", after="11.8x", origin=Origin.SOURCE,
+                     citation="comps.csv!B2", confidence=0.9,
+                     impact="totals row", object_kind="table"))
+        back = ChangeSet.from_json(s.to_json()).changes[0]
+        assert back.origin is Origin.SOURCE
+        assert back.citation == "comps.csv!B2"
+        assert back.confidence == 0.9
+        assert back.impact == "totals row"
+        assert back.object_kind == "table"
+
+
+class TestProtectionScopes:
+    """The conditional requests people actually make, as engine constraints."""
+
+    def test_wording_lock_protects_text_but_permits_layout(self):
+        s = cs()
+        s.lock("wording", reason="legal signed off on this copy")
+        assert s.add(change(cid="text", op=Op.SET_TEXT)).status is Status.REJECTED
+        assert s.add(Change(id="move", op=Op.MOVE, slide=1, target="7",
+                            before=(0, 0), after=(10, 0))).status is Status.PROPOSED
+
+    def test_layout_lock_protects_geometry_but_permits_text(self):
+        s = cs()
+        s.lock("layout", reason="template-controlled positions")
+        assert s.add(Change(id="move", op=Op.MOVE, slide=1, target="7",
+                            before=(0, 0), after=(10, 0))).status is Status.REJECTED
+        assert s.add(change(cid="text")).status is Status.PROPOSED
+
+    def test_tables_lock_protects_table_objects(self):
+        s = cs()
+        s.lock("tables", reason="exhibits are final")
+        blocked = s.add(Change(id="t", op=Op.SET_TABLE_CELL, slide=1,
+                               target="7/r1/c1", before="1", after="2",
+                               object_kind="table"))
+        assert blocked.status is Status.REJECTED
+
+    def test_tables_lock_leaves_ordinary_text_alone(self):
+        s = cs()
+        s.lock("tables")
+        assert s.add(change(cid="c1")).status is Status.PROPOSED
+
+    def test_charts_lock_protects_chart_objects(self):
+        s = cs()
+        s.lock("charts")
+        blocked = s.add(Change(id="c", op=Op.SET_TEXT, slide=1, target="9",
+                               before="a", after="b", object_kind="chart"))
+        assert blocked.status is Status.REJECTED
+
+    def test_media_lock_protects_pictures(self):
+        s = cs()
+        s.lock("media")
+        blocked = s.add(Change(id="p", op=Op.MOVE, slide=1, target="9",
+                               before=(0, 0), after=(1, 1), object_kind="picture"))
+        assert blocked.status is Status.REJECTED
+
+    def test_an_unknown_scope_is_refused_at_construction(self):
+        """A silently-ignored lock is worse than no lock."""
+        with pytest.raises(ValueError, match="unknown protection scope"):
+            Lock(scope="vibes")
+
+    def test_combining_locks_narrows_further(self):
+        s = cs()
+        s.lock("numbers")
+        s.lock("layout")
+        assert s.add(change(before="Revenue 4.2M")).status is Status.REJECTED
+        assert s.add(Change(id="m", op=Op.MOVE, slide=1, target="7",
+                            before=(0, 0), after=(9, 9))).status is Status.REJECTED
+        assert s.add(change(cid="ok", before="Strategy", after="Our strategy")).status is Status.PROPOSED
