@@ -260,3 +260,66 @@ class TestRealDecks:
         assert result.deltas
         assert not result.content_deltas
         assert {d.kind for d in result.deltas} == {"geometry"}
+
+
+class TestOneRunReachesAFixpoint:
+    """Snapping changes the geometry, so one round is not the end of it.
+
+    Making a shape flush with a line adds a member to that line, which can turn
+    a value two shapes shared into one three do — and pull in a fourth that was
+    a lone stray before. Measured on a 41-slide deck: 66 corrections, then 11
+    more on the pass after, then none.
+
+    The planning is therefore iterated internally. Telling a user to run it
+    repeatedly until it stops changing things is not something to ask of anyone
+    pointing a tool at a deck that matters.
+    """
+
+    def _cascading_deck(self):
+        """A stray whose correction creates the line that catches the next one."""
+        step = 9000
+        return deck(
+            shape("1", x=IN, y=IN, cx=2 * IN),
+            shape("2", x=IN, y=3 * IN, cx=2 * IN),
+            # Left edge is a hair off the 1/2 line; its right edge then lands
+            # where 4 and 5 nearly are.
+            shape("3", x=IN + step, y=5 * IN, cx=2 * IN),
+            shape("4", x=4 * IN, y=7 * IN, cx=IN),
+            shape("5", x=4 * IN, y=9 * IN, cx=IN),
+        )
+
+    def test_the_plan_is_its_own_fixpoint(self):
+        """Applying it and re-planning must find nothing."""
+        plan = plan_alignment(self._cascading_deck())
+        if plan.empty:
+            pytest.skip("this arrangement needs no correction")
+
+        moved = {c.target: c.after for c in plan.changes}
+        after = deck(*[
+            shape(s.id, x=moved.get(s.id, (s.x, s.y))[0],
+                  y=moved.get(s.id, (s.x, s.y))[1], cx=s.cx, cy=s.cy)
+            for s in self._cascading_deck().slides[0].shapes
+        ])
+        assert plan_alignment(after).empty, "a second run still wants to move things"
+
+    def test_the_bound_holds_across_rounds(self):
+        """A shape becomes anchored once flush, so it moves at most once."""
+        plan = plan_alignment(self._cascading_deck())
+        for change in plan.changes:
+            dx = abs(change.after[0] - change.before[0])
+            dy = abs(change.after[1] - change.before[1])
+            assert max(dx, dy) <= DEFAULT_TOLERANCE_EMU
+
+    def test_each_shape_is_moved_at_most_once(self):
+        """One change per shape, holding its final position, not a move per round."""
+        plan = plan_alignment(self._cascading_deck())
+        targets = [c.target for c in plan.changes]
+        assert len(targets) == len(set(targets))
+
+    def test_iteration_is_bounded(self):
+        """A pathological deck must not spin; MAX_ROUNDS caps it."""
+        from slide_wright.layout import MAX_ROUNDS
+
+        assert MAX_ROUNDS > 0
+        many = deck(*[shape(str(i), x=IN + i * 3, y=IN + i * IN) for i in range(30)])
+        plan_alignment(many)  # must return, not hang

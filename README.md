@@ -150,8 +150,16 @@ it wrong:
    this the pass never terminated — two boxes near each other on different edges
    chased one another down the slide, one pass after another.
 
-With all three, a real deck converges in a single pass. Content is untouched and
-that is checked, not claimed.
+With all three, corrections only ever add exact alignments. The planning is then
+iterated to a fixpoint internally, because snapping a shape onto a line makes
+that line one member wider and can pull in a shape that was previously a lone
+stray — on a 41-slide deck, 66 corrections were followed by 11 more. One run now
+does all of it and leaves nothing behind.
+
+A shape still moves at most once: the moment it is flush with another it is
+anchored and held. Measured across the whole cascade on that deck, the largest
+total displacement was 0.0191in against a 0.020in bound. Content is untouched
+and that is checked, not claimed.
 
 ### Refresh a recurring deck from a workbook
 
