@@ -11,6 +11,9 @@ one, and the loop is what needs proving.
     slide-wright profile  deck.pptx [deck.pptx ...]
     slide-wright refresh  deck.pptx --source comps.csv -o out.pptx
     slide-wright brand    house.potx deck.pptx
+    slide-wright propose  deck.pptx --instruct "..." -o changes.json
+    slide-wright review   changes.json --approve c1 --reject c2
+    slide-wright apply    deck.pptx changes.json -o out.pptx
     slide-wright history  deck.pptx
     slide-wright revert   deck.pptx --to 1
 """
@@ -24,7 +27,7 @@ from pathlib import Path
 from slide_wright import __version__
 from slide_wright.apply import ApplyError
 from slide_wright.audit import audit as audit_deck
-from slide_wright.changeset import Change, Op
+from slide_wright.changeset import Change, ChangeSet, Op
 from slide_wright.corpus.profile import format_table, profile_many
 from slide_wright.gate import check
 from slide_wright.inspect import EMU_PER_INCH, inspect
@@ -163,6 +166,145 @@ def cmd_verify(args) -> int:
     report = build(compare(args.source, args.output))
     print(report.render())
     return EXIT_OK if report.deliverable else EXIT_FINDINGS
+
+
+def _build_changes(session, args, changeset) -> int | None:
+    """Fill a change set from --set and --instruct. Returns an exit code on error."""
+    for lock in args.lock or []:
+        scope, _, target = lock.partition(":")
+        try:
+            changeset.lock(scope, target)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+
+    for i, spec in enumerate(args.set or [], start=1):
+        try:
+            changeset.add(_parse_set(spec, i))
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+
+    if getattr(args, "instruct", None):
+        from slide_wright.llm.client import default_provider
+        from slide_wright.planner import plan
+
+        result = plan(
+            session.deck(), args.instruct,
+            deck_path=str(session.current.path), provider=default_provider(),
+        )
+        if result.is_stub:
+            print(
+                "note: no GEMINI_API_KEY set, so no model was consulted. "
+                "Copy .env.example to .env and add a free-tier key, "
+                "or use --set to make changes directly.",
+                file=sys.stderr,
+            )
+        for raw, reason in result.dropped:
+            print(f"note: dropped proposed change ({raw.get('op', '?')}): {reason}",
+                  file=sys.stderr)
+        for change in result.changeset.changes:
+            changeset.add(change)
+    return None
+
+
+def cmd_propose(args) -> int:
+    """Work out what to change and write it down. Nothing is applied.
+
+    The change set is the reviewable artifact: a reviewer reads it, approves
+    what they want, and only then is anything written to a deck.
+    """
+    session = Session.open(args.deck, workspace=args.workspace)
+    changeset = session.propose(args.message or args.instruct or "")
+
+    failed = _build_changes(session, args, changeset)
+    if failed is not None:
+        return failed
+    if not changeset.changes:
+        print("error: no changes (use --set, or --instruct with a key)", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(changeset.render())
+    path = changeset.save(args.output or session.workspace / "changes.json")
+    print()
+    print(f"wrote {path}")
+    print(f"review it, then: slide-wright apply {args.deck} {path} -o out.pptx")
+    return EXIT_OK
+
+
+def cmd_review(args) -> int:
+    """Approve or reject individual changes in a saved change set."""
+    path = Path(args.changes)
+    try:
+        changeset = ChangeSet.from_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot read change set: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    known = {c.id for c in changeset.changes}
+    asked = set(args.approve or []) | set(args.reject or [])
+    unknown = sorted(asked - known)
+    if unknown:
+        # Silently ignoring an id means a reviewer believes they rejected
+        # something they did not.
+        print(f"error: no such change(s): {', '.join(unknown)}", file=sys.stderr)
+        print(f"       this change set has: {', '.join(sorted(known))}", file=sys.stderr)
+        return EXIT_ERROR
+
+    if args.approve:
+        changeset.approve(*args.approve)
+    if args.reject:
+        for cid in args.reject:
+            changeset.reject(cid)
+    if args.approve_all:
+        changeset.approve_all(include_unreviewed=args.include_unreviewed)
+
+    print(changeset.render())
+    if args.approve or args.reject or args.approve_all:
+        changeset.save(path)
+        print()
+        print(f"updated {path}")
+    return EXIT_OK
+
+
+def cmd_apply(args) -> int:
+    """Apply the approved changes from a reviewed change set."""
+    session = Session.open(args.deck, workspace=args.workspace)
+    try:
+        changeset = ChangeSet.from_json(Path(args.changes).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot read change set: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    # A change set describes one specific version. Applying it to a different
+    # one would fail later with a confusing "target not found"; say so now.
+    if changeset.deck and Path(changeset.deck) != session.current.path:
+        print(f"error: this change set was built against {Path(changeset.deck).name}, "
+              f"but the session is on {session.current.path.name}", file=sys.stderr)
+        print("       re-propose against the current version", file=sys.stderr)
+        return EXIT_ERROR
+
+    if not changeset.approved:
+        print("error: nothing is approved; run slide-wright review first",
+              file=sys.stderr)
+        print(changeset.render(), file=sys.stderr)
+        return EXIT_FINDINGS
+
+    session.changeset = changeset
+    try:
+        report = session.apply(args.message or "")
+    except (SessionError, ApplyError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(report.render())
+    if not report.deliverable:
+        print("not delivered - verification failed", file=sys.stderr)
+        return EXIT_FINDINGS
+    if args.output:
+        print()
+        print(f"wrote {session.export(args.output)}")
+    return EXIT_OK
 
 
 def cmd_history(args) -> int:
@@ -331,6 +473,41 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("source")
     p.add_argument("output")
     p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("propose", help="work out changes and write them down, applying nothing")
+    p.add_argument("deck")
+    p.add_argument("--set", action="append", metavar="SLIDE:TARGET:BEFORE=AFTER",
+                   help="a change; repeatable")
+    p.add_argument("--instruct", metavar="TEXT",
+                   help="describe the change in plain language (needs a model key)")
+    p.add_argument("--lock", action="append", metavar="SCOPE[:TARGET]",
+                   help="protect content: numbers, wording, layout, tables, "
+                        "charts, media, slide:4, shape:7")
+    p.add_argument("-o", "--output", help="where to write the change set")
+    p.add_argument("-m", "--message", help="what this edit is for")
+    p.add_argument("--workspace", help="where versions are kept")
+    p.set_defaults(func=cmd_propose)
+
+    p = sub.add_parser("review", help="approve or reject individual changes")
+    p.add_argument("changes", help="a change set written by propose")
+    p.add_argument("--approve", action="append", metavar="ID",
+                   help="approve one change; repeatable")
+    p.add_argument("--reject", action="append", metavar="ID",
+                   help="reject one change; repeatable")
+    p.add_argument("--approve-all", action="store_true",
+                   help="approve everything still proposed")
+    p.add_argument("--include-unreviewed", action="store_true",
+                   help="with --approve-all, also approve model changes that "
+                        "carry no citation")
+    p.set_defaults(func=cmd_review)
+
+    p = sub.add_parser("apply", help="apply the approved changes from a change set")
+    p.add_argument("deck")
+    p.add_argument("changes")
+    p.add_argument("-o", "--output", help="write the verified deck here")
+    p.add_argument("-m", "--message", help="what this edit is for")
+    p.add_argument("--workspace", help="where versions are kept")
+    p.set_defaults(func=cmd_apply)
 
     p = sub.add_parser("history", help="every version of this deck")
     p.add_argument("deck")
