@@ -195,3 +195,129 @@ class TestRealDecks:
         assert result.slide_count == 19
         assert result.observations, "a real student deck should have observations"
         assert all(o.suggestion for o in result.observations), "every finding needs an action"
+
+
+def with_layout(number: int, title: str, layout: str, *extra: ShapeInfo) -> SlideInfo:
+    slide = titled(number, title, *extra)
+    slide.layout = layout
+    return slide
+
+
+class TestForeignSlides:
+    """Slides that came from another deck.
+
+    The pasted-together deck is the ordinary case. Deck-level checks say "five
+    typefaces are in use" and stop, which tells a user their deck is
+    inconsistent without telling them where to look.
+    """
+
+    def _consistency(self, result):
+        return [o for o in result.observations if o.area is Area.CONSISTENCY]
+
+    def test_a_minority_hardcoding_a_typeface_is_named(self):
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent", shape("Inherits the theme")),
+            titled(2, "Margins improved", shape("Inherits the theme")),
+            titled(3, "Churn fell to 1.9 percent", shape("Inherits the theme")),
+            titled(4, "Pipeline is healthy", shape("Pasted in", font="Arial")),
+        ))
+        found = [o for o in self._consistency(result) if "hardcode" in o.message]
+        assert found and found[0].slides == [4]
+
+    def test_a_deck_that_hardcodes_throughout_is_not_flagged(self):
+        """Consistent is consistent, even if it never uses the theme."""
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent", shape("A", font="Arial")),
+            titled(2, "Margins improved", shape("B", font="Arial")),
+            titled(3, "Churn fell to 1.9 percent", shape("C", font="Arial")),
+        ))
+        assert not [o for o in self._consistency(result) if "hardcode" in o.message]
+
+    def test_a_theme_reference_is_not_a_hardcoded_font(self):
+        """`+mn-lt` is the slide deferring to the template, not overriding it."""
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent", shape("A")),
+            titled(2, "Margins improved", shape("B")),
+            titled(3, "Churn fell to 1.9 percent", shape("C")),
+            titled(4, "Pipeline is healthy", shape("D", font="+mn-lt")),
+        ))
+        assert not [o for o in self._consistency(result) if "hardcode" in o.message]
+
+    def test_a_bare_majority_hardcoding_is_not_an_outlier(self):
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent", shape("A", font="Arial")),
+            titled(2, "Margins improved", shape("B", font="Arial")),
+            titled(3, "Churn fell to 1.9 percent", shape("C")),
+        ))
+        assert not [o for o in self._consistency(result) if "hardcode" in o.message]
+
+
+class TestLayoutOutliers:
+    def _layout_findings(self, result):
+        return [o for o in result.observations
+                if o.area is Area.CONSISTENCY and "layout" in o.message]
+
+    def _deck_with_interior_outlier(self):
+        """The outlier must be interior: slide 1 and the last are structural."""
+        return deck(
+            with_layout(1, "Revenue grew 38 percent", "Title and Content"),
+            with_layout(2, "Margins improved", "Title and Content"),
+            with_layout(3, "Churn fell to 1.9 percent", "Two Content"),
+            with_layout(4, "Pipeline is healthy", "Title and Content"),
+            with_layout(5, "Cash runway is 26 months", "Title and Content"),
+        )
+
+    def test_a_one_off_layout_is_named(self):
+        found = self._layout_findings(audit(self._deck_with_interior_outlier()))
+        assert found and found[0].slides == [3]
+
+    def test_it_admits_the_finding_may_be_deliberate(self):
+        """A one-off layout is often a divider. Say so rather than assert."""
+        found = self._layout_findings(audit(self._deck_with_interior_outlier()))
+        assert "deliberate divider" in found[0].suggestion
+
+    def test_a_title_slide_layout_is_not_an_outlier(self):
+        """It is unique by convention, and flagging it was a real false positive."""
+        result = audit(deck(
+            with_layout(1, "Revenue grew 38 percent", "Title Slide"),
+            with_layout(2, "Margins improved", "Title and Content"),
+            with_layout(3, "Churn fell to 1.9 percent", "Title and Content"),
+            with_layout(4, "Pipeline is healthy", "Title and Content"),
+        ))
+        assert not self._layout_findings(result)
+
+    def test_a_closing_slide_layout_is_not_an_outlier(self):
+        result = audit(deck(
+            with_layout(1, "Revenue grew 38 percent", "Title and Content"),
+            with_layout(2, "Margins improved", "Title and Content"),
+            with_layout(3, "Churn fell to 1.9 percent", "Title and Content"),
+            with_layout(4, "Questions", "Closing"),
+        ))
+        assert not self._layout_findings(result)
+
+    def test_a_deck_using_one_layout_throughout_is_not_flagged(self):
+        result = audit(deck(
+            with_layout(1, "Revenue grew 38 percent", "Title and Content"),
+            with_layout(2, "Margins improved", "Title and Content"),
+            with_layout(3, "Churn fell to 1.9 percent", "Title and Content"),
+            with_layout(4, "Pipeline is healthy", "Title and Content"),
+        ))
+        assert not self._layout_findings(result)
+
+    def test_a_deck_where_every_layout_is_unique_is_not_flagged(self):
+        """Many layouts is a style, not a defect."""
+        result = audit(deck(
+            with_layout(1, "Revenue grew 38 percent", "A"),
+            with_layout(2, "Margins improved", "B"),
+            with_layout(3, "Churn fell to 1.9 percent", "C"),
+            with_layout(4, "Pipeline is healthy", "D"),
+        ))
+        assert not self._layout_findings(result)
+
+    def test_slides_without_a_layout_are_ignored(self):
+        result = audit(deck(
+            titled(1, "Revenue grew 38 percent"),
+            titled(2, "Margins improved"),
+            titled(3, "Churn fell to 1.9 percent"),
+        ))
+        assert not self._layout_findings(result)
