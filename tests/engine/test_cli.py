@@ -169,6 +169,110 @@ class TestVerify:
         assert sorted(p.name for p in folder.iterdir()) == before
 
 
+class TestReviewLoop:
+    """propose -> review -> apply, with a human decision in the middle.
+
+    `edit` approves everything it proposes, which is fine for a change you
+    typed yourself and wrong for one a model suggested. These three commands
+    are the reviewable path: nothing reaches a deck until someone approves it
+    by id.
+    """
+
+    def _table(self, deck):
+        return next(s for s in inspect(deck).all_shapes() if s.kind == "table")
+
+    def _propose(self, deck, ws, out, capsys, extra=()):
+        table = self._table(deck)
+        code = main(["propose", str(deck), "--workspace", str(ws), "-o", str(out),
+                     "--set", f"3:{table.id}/r1/c1:9.4x=11.8x",
+                     "--set", f"3:{table.id}/r2/c1:11.2x=12.9x",
+                     *extra])
+        capsys.readouterr()
+        return code
+
+    def test_propose_writes_a_change_set_and_applies_nothing(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        ws, changes = tmp_path / "ws", tmp_path / "changes.json"
+        assert self._propose(adversarial_deck, ws, changes, capsys) == EXIT_OK
+        assert changes.is_file()
+        assert not list(ws.glob("*edited*")), "propose must not write a deck"
+        assert adversarial_deck.read_bytes() == (ws / "v000-original.pptx").read_bytes()
+
+    def test_apply_refuses_a_change_set_nobody_approved(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        ws, changes = tmp_path / "ws", tmp_path / "changes.json"
+        self._propose(adversarial_deck, ws, changes, capsys)
+        assert main(["apply", str(adversarial_deck), str(changes),
+                     "--workspace", str(ws)]) == EXIT_FINDINGS
+        assert "nothing is approved" in capsys.readouterr().err
+
+    def test_only_approved_changes_reach_the_deck(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        ws, changes = tmp_path / "ws", tmp_path / "changes.json"
+        self._propose(adversarial_deck, ws, changes, capsys)
+
+        assert main(["review", str(changes), "--approve", "c1",
+                     "--reject", "c2"]) == EXIT_OK
+        capsys.readouterr()
+
+        out = tmp_path / "out.pptx"
+        assert main(["apply", str(adversarial_deck), str(changes),
+                     "--workspace", str(ws), "-o", str(out)]) == EXIT_OK
+        capsys.readouterr()
+
+        values = [r.text for r in self._table(out).runs]
+        assert "11.8x" in values, "the approved change was not applied"
+        assert "11.2x" in values, "the rejected change was applied anyway"
+        assert "12.9x" not in values, "the rejected change was applied anyway"
+
+    def test_a_review_decision_survives_being_written_out(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        """The reviewer and the applier are separate processes."""
+        ws, changes = tmp_path / "ws", tmp_path / "changes.json"
+        self._propose(adversarial_deck, ws, changes, capsys)
+        main(["review", str(changes), "--reject", "c2"])
+        capsys.readouterr()
+
+        assert main(["review", str(changes)]) == EXIT_OK
+        assert "1 rejected" in capsys.readouterr().out
+
+    def test_an_unknown_change_id_is_refused(self, adversarial_deck, tmp_path, capsys):
+        """Ignoring it would let a reviewer believe they rejected something."""
+        ws, changes = tmp_path / "ws", tmp_path / "changes.json"
+        self._propose(adversarial_deck, ws, changes, capsys)
+        assert main(["review", str(changes), "--reject", "c9"]) == EXIT_ERROR
+        err = capsys.readouterr().err
+        assert "no such change" in err and "c9" in err
+
+    def test_a_change_set_for_another_version_is_refused(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        """Applying it would fail later as a confusing 'target not found'."""
+        ws, changes = tmp_path / "ws", tmp_path / "changes.json"
+        self._propose(adversarial_deck, ws, changes, capsys)
+        main(["review", str(changes), "--approve", "c1"])
+        main(["apply", str(adversarial_deck), str(changes), "--workspace", str(ws)])
+        capsys.readouterr()
+
+        # The session has moved to v001; this change set describes v000.
+        assert main(["apply", str(adversarial_deck), str(changes),
+                     "--workspace", str(ws)]) == EXIT_ERROR
+        assert "built against" in capsys.readouterr().err
+
+    def test_approve_all_holds_back_uncited_model_changes(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        ws, changes = tmp_path / "ws", tmp_path / "changes.json"
+        self._propose(adversarial_deck, ws, changes, capsys)
+        assert main(["review", str(changes), "--approve-all"]) == EXIT_OK
+        # Both of these are USER changes, so both are grounded and approved.
+        assert "2 approved" in capsys.readouterr().out
+
+
 class TestHistoryAndRevert:
     """The half of the loop the CLI did not expose.
 
