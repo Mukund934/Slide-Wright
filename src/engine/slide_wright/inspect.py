@@ -157,8 +157,52 @@ def inspect(pkg: Package | str) -> DeckInfo:
 
 # ── slide parsing ────────────────────────────────────────────────────────────
 
+def _layout_for(pkg: Package, part_name: str) -> str | None:
+    """Which slide layout this slide is built on.
+
+    `SlideInfo.layout` was declared from the start and never populated, so it
+    read as None on every slide of every deck -- a field that quietly answers
+    "no information" to every question is worse than an absent one, because
+    callers believe they checked.
+
+    It is worth having: a slide pasted in from another deck usually carries a
+    different layout, which makes this the cheapest signal there is for finding
+    the parts of a deck that came from somewhere else.
+    """
+    rels_name = part_name.replace("slides/", "slides/_rels/") + ".rels"
+    if rels_name not in pkg.parts:
+        return None
+    try:
+        root = etree.fromstring(pkg.read(rels_name))
+    except etree.XMLSyntaxError:
+        return None
+
+    for rel in root.iter(
+        "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
+    ):
+        target = rel.get("Target", "")
+        if "slideLayout" not in target:
+            continue
+        resolved = target.replace("\\", "/").split("/")[-1]
+        layout_part = f"ppt/slideLayouts/{resolved}"
+        if layout_part not in pkg.parts:
+            return resolved
+        # Prefer the layout's declared name over its filename: slideLayout7
+        # says nothing, "Title and Content" says what the slide was built on.
+        try:
+            layout = etree.fromstring(pkg.read(layout_part))
+        except etree.XMLSyntaxError:
+            return resolved
+        name = layout.find(".//p:cSld", NS)
+        if name is not None and name.get("name"):
+            return name.get("name")
+        return resolved
+    return None
+
+
 def _read_slide(pkg: Package, part_name: str, number: int) -> SlideInfo:
     slide = SlideInfo(number=number, part_name=part_name)
+    slide.layout = _layout_for(pkg, part_name)
     root = etree.fromstring(pkg.read(part_name))
     tree = root.find(".//p:cSld/p:spTree", NS)
     if tree is None:

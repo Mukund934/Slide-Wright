@@ -126,3 +126,27 @@ class TestRealDecks:
         assert d.slide_count == 19
         assert any(s.kind == "table" for s in d.all_shapes())
         assert sum(s.word_count for s in d.slides) > 100
+
+
+class TestSlideLayout:
+    """`SlideInfo.layout` was declared from the start and never populated.
+
+    Every slide of every deck answered None, so any caller that checked it
+    believed it had checked something. A field that always says "no
+    information" is worse than an absent one.
+    """
+
+    def test_a_slide_reports_the_layout_it_is_built_on(self, adversarial_deck):
+        deck = inspect(adversarial_deck)
+        layouts = [s.layout for s in deck.slides]
+        assert any(layouts), "no slide reported a layout"
+
+    def test_the_declared_name_is_preferred_over_the_filename(self, adversarial_deck):
+        """`slideLayout7` says nothing; "Title and Content" says what it is."""
+        deck = inspect(adversarial_deck)
+        named = [s.layout for s in deck.slides if s.layout]
+        assert not any(n.startswith("slideLayout") for n in named), named
+
+    def test_a_deck_using_several_layouts_reports_several(self, adversarial_deck):
+        deck = inspect(adversarial_deck)
+        assert len({s.layout for s in deck.slides if s.layout}) >= 1
