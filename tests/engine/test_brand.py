@@ -230,39 +230,55 @@ class TestThemeReferencesAreNotDrift:
 
 
 class TestConformancePlan:
+    PROFILE = BrandProfile(source="t.potx", major_font="Georgia",
+                           minor_font="Georgia")
+
     def test_an_off_template_font_is_planned_for_correction(self):
-        profile = BrandProfile(source="t.potx", major_font="Georgia",
-                               minor_font="Georgia")
-        plan = plan_conformance(_deck_with_fonts(["Arial"]), profile)
+        plan = plan_conformance(_deck_with_fonts(["Arial"]), self.PROFILE)
         assert len(plan.changes) == 1
         change = plan.changes[0]
         assert change.op is Op.SET_FONT
-        assert change.before == "Arial" and change.after == "Georgia"
+        assert change.before == "Arial"
         assert change.origin is Origin.RULE, "a deterministic rule, not a model"
 
-    def test_a_conforming_deck_plans_nothing(self):
-        profile = BrandProfile(source="t.potx", major_font="Georgia",
-                               minor_font="Georgia")
-        assert plan_conformance(_deck_with_fonts(["Georgia"]), profile).empty
+    def test_corrections_target_the_theme_reference_not_a_font_name(self):
+        """Writing "Georgia" would look conformant and stay just as detached.
 
-    def test_the_target_addresses_one_run(self):
-        profile = BrandProfile(source="t.potx", major_font="Georgia",
-                               minor_font="Georgia")
-        plan = plan_conformance(_deck_with_fonts(["Georgia", "Arial"]), profile)
-        assert plan.changes[0].target.endswith("/run/1"), \
-            "only the offending run may be addressed"
+        Change the template later and every run corrected to a literal name is
+        missed all over again. A reference is what a slide authored in this
+        template carries, so it is what a corrected slide should carry.
+        """
+        plan = plan_conformance(_deck_with_fonts(["Arial"]), self.PROFILE)
+        assert plan.changes[0].after == "+mn-lt"
+
+    def test_a_title_defers_to_the_major_font(self):
+        deck = _deck_with_fonts(["Arial"], placeholder="title")
+        plan = plan_conformance(deck, self.PROFILE)
+        assert plan.changes[0].after == "+mj-lt", "headings follow the major font"
+
+    def test_a_run_hardcoding_the_templates_own_font_is_corrected(self):
+        """Indistinguishable to look at, and still detached from the template."""
+        plan = plan_conformance(_deck_with_fonts(["Georgia"]), self.PROFILE)
+        assert len(plan.changes) == 1
+        assert plan.changes[0].before == "Georgia"
+        assert plan.changes[0].after == "+mn-lt"
+        assert "hardcodes" in plan.changes[0].rationale
+
+    def test_a_deck_already_using_references_plans_nothing(self):
+        assert plan_conformance(_deck_with_fonts(["+mn-lt"]), self.PROFILE).empty
+
+    def test_a_run_with_no_explicit_font_is_left_alone(self):
+        """It already defers to the layout, which is what this restores."""
+        assert plan_conformance(_deck_with_fonts([None]), self.PROFILE).empty
+
+    def test_each_change_addresses_one_run(self):
+        plan = plan_conformance(_deck_with_fonts(["Georgia", "Arial"]), self.PROFILE)
+        assert [c.target for c in plan.changes] == ["7/run/0", "7/run/1"]
 
     def test_whitespace_runs_are_corrected_too(self):
-        """Otherwise the fix cannot satisfy its own report.
-
-        `check_conformance` counts a whitespace run's typeface as drift, so
-        skipping it leaves a deck reporting as non-conformant immediately after
-        being conformed.
-        """
-        profile = BrandProfile(source="t.potx", major_font="Georgia",
-                               minor_font="Georgia")
+        """Otherwise the fix cannot satisfy its own report."""
         deck = _deck_with_fonts(["Arial", "Arial"], texts=["Hello", "   "])
-        assert len(plan_conformance(deck, profile).changes) == 2
+        assert len(plan_conformance(deck, self.PROFILE).changes) == 2
 
     def test_a_template_naming_no_font_corrects_nothing(self):
         plan = plan_conformance(_deck_with_fonts(["Arial"]),
@@ -270,17 +286,16 @@ class TestConformancePlan:
         assert plan.empty and plan.skipped
 
     def test_the_plan_says_it_changes_no_content(self):
-        profile = BrandProfile(source="t.potx", major_font="Georgia",
-                               minor_font="Georgia")
-        rendered = plan_conformance(_deck_with_fonts(["Arial"]), profile).render()
+        rendered = plan_conformance(_deck_with_fonts(["Arial"]), self.PROFILE).render()
         assert "No word or number is changed" in rendered
 
 
-def _deck_with_fonts(fonts: list[str], texts: list[str] | None = None) -> DeckInfo:
+def _deck_with_fonts(fonts: list, texts: list[str] | None = None,
+                     placeholder: str | None = None) -> DeckInfo:
     """A one-slide deck whose single text box carries the given run fonts."""
     texts = texts or [f"Run {i}" for i in range(len(fonts))]
     shape = ShapeInfo(
-        id="7", name="Body", kind="shape",
+        id="7", name="Body", kind="shape", placeholder_type=placeholder,
         runs=[TextRun(text=t, font=f) for t, f in zip(texts, fonts)],
     )
     return DeckInfo(slides=[SlideInfo(number=1, part_name="ppt/slides/slide1.xml",
