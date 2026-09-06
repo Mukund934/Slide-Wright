@@ -42,6 +42,7 @@ slide-wright audit    deck.pptx                     # what is wrong with this de
 slide-wright brand    house.potx deck.pptx          # where it departs from the template
 slide-wright refresh  deck.pptx --source comps.csv  # update figures, with citations
 slide-wright verify   before.pptx after.pptx        # part-level fidelity report
+slide-wright diff     before.pptx after.pptx        # what a reader would notice
 slide-wright profile  deck.pptx                     # how adversarial is this deck?
 slide-wright edit     deck.pptx \
     --set "3:5/r1/c1:9.4x=11.8x" \
@@ -66,6 +67,22 @@ slide-wright revert  deck.pptx --to 1                             # go back to o
 
 `revert` undoes nothing. Every version is kept, so going back is choosing an
 earlier one; the discarded versions stay in the workspace.
+
+### Two questions, two commands
+
+`verify` asks whether the package is intact — which parts differ, byte for
+byte, and whether any native object was lost. It is the guarantee, and it is
+the one that cannot be argued with.
+
+`diff` asks what a reader would notice — which shape's text changed and to
+what, what moved and by how far, what was resized. When a deck is blocked
+because something changed that nobody asked for, the report now names the
+figure that moved rather than the file that contains it:
+
+```
+  Changes nobody asked for
+    · slide 3 — Table 2 (id=3) text …Alpha Corp[9.4 -> 11.8]x22.1%…
+```
 
 ### Refresh a recurring deck from a workbook
 
