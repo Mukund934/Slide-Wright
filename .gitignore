@@ -57,3 +57,7 @@ Thumbs.db
 # Vendored upstream engine. Large, not ours, and reproducible from
 # scripts/vendor_engine.py plus vendor/pin.json.
 /vendor/ppt-master/
+
+# Third-party fixtures. Downloaded, never redistributed.
+# Reproduce with: python scripts/fetch_fixtures.py
+/tests/fixtures/third-party/
