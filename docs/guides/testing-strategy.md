@@ -16,7 +16,7 @@ So the benchmark corpus is not a QA artifact. **It is the product's evidence bas
 
 Current measurement, on a real 19-slide deck: **104/105 = 99.05%**.
 
-Every generate-first competitor scores near zero on this metric **by construction** — they cannot preserve bytes they never read. That asymmetry is why this metric is worth owning publicly.
+A tool that regenerates a deck rather than editing it scores near zero here by construction: it cannot preserve bytes it never read. That is what makes the number worth measuring — it is a property of the approach, not of the effort.
 
 ### Corpus requirements
 
@@ -58,7 +58,7 @@ Note that most of these are **assertions on bytes**, not screenshots. Visual reg
 
 **Every real deck that breaks becomes a permanent corpus entry, the same day.**
 
-This is how the corpus becomes an asset rather than a chore. Competitors starting later cannot buy an accumulated set of real decks that broke in interesting ways.
+This is what keeps the corpus honest. A deck that broke once is the only reliable evidence that it stays fixed.
 
 ## Competitive benchmarking
 
