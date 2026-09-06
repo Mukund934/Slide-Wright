@@ -102,20 +102,47 @@ class TestPrivateDocsNeverTracked:
 
 
 class TestNoStrategyInPublicDocs:
-    """Competitive positioning belongs in private/, not a public repository."""
+    """Commercial strategy belongs in private/, not a public repository.
 
-    FORBIDDEN = ["Prezent", "$74M", "$400M", "beachhead"]
+    This is a denylist, not a guarantee. It catches the vocabulary of market
+    positioning, which is cheap to check and hard to write by accident; it
+    cannot catch positioning expressed in ordinary words. Two such lines sat
+    in `docs/guides/testing-strategy.md` for days -- one arguing a metric was
+    "worth owning publicly", one about what competitors starting later could
+    not buy -- and this test passed the whole time. Treat a green run as
+    "no known strategy vocabulary", not as "no strategy".
 
-    def test_tracked_docs_carry_no_competitor_positioning(self):
+    Naming tools we benchmark against is deliberately *allowed*. A public,
+    reproducible benchmark has to say what it compares against; that is
+    engineering, not positioning.
+    """
+
+    # Strategy vocabulary that has no reason to appear in engineering prose.
+    FORBIDDEN = [
+        r"Prezent",
+        r"\$\d+(?:\.\d+)?[MB]\b",          # funding rounds and market sizes
+        r"beachhead",
+        r"go-to-market",
+        r"\bTAM\b",
+        r"total addressable market",
+        r"\bICP\b",
+        r"\bmoat\b",
+        r"pricing power",
+        r"worth owning publicly",
+        r"competitors starting later",
+    ]
+
+    def test_tracked_docs_carry_no_strategy_vocabulary(self):
         offenders = []
         for rel in tracked_files():
             if not (rel.endswith(".md") and (rel.startswith("docs/") or rel == "README.md")):
                 continue
             content = read(rel)
-            for term in self.FORBIDDEN:
-                if term in content:
-                    offenders.append(f"{rel}: {term!r}")
-        assert not offenders, "competitive strategy in a public doc: " + "; ".join(offenders)
+            for pattern in self.FORBIDDEN:
+                found = re.search(pattern, content, re.IGNORECASE)
+                if found:
+                    offenders.append(f"{rel}: {found.group(0)!r}")
+        assert not offenders, "commercial strategy in a public doc: " + "; ".join(offenders)
 
 
 class TestCommitHygiene:
