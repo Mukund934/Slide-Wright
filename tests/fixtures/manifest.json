@@ -1,0 +1,99 @@
+{
+  "note": "Third-party PPTX fixtures. NOT committed \u2014 they belong to their projects. Reproduce with `python scripts/fetch_fixtures.py`.",
+  "attribution": {
+    "Apache POI": "Apache-2.0 \u2014 https://poi.apache.org/",
+    "LibreOffice": "MPL-2.0 \u2014 https://www.libreoffice.org/"
+  },
+  "fixtures": [
+    {
+      "name": "poi-smartart.pptx",
+      "url": "https://raw.githubusercontent.com/apache/poi/trunk/test-data/slideshow/SmartArt.pptx",
+      "licence": "Apache-2.0",
+      "project": "Apache POI",
+      "why": "complete diagram quad with an 8 KB cached drawing",
+      "sha256": "b97e4c6d2ee1dd4094f50f9043820610268dd452d7717c537f5456636adcc353",
+      "bytes": 41382
+    },
+    {
+      "name": "poi-smartart-rotated-text.pptx",
+      "url": "https://raw.githubusercontent.com/apache/poi/trunk/test-data/slideshow/smartart-rotated-text.pptx",
+      "licence": "Apache-2.0",
+      "project": "Apache POI",
+      "why": "14 KB cached drawing; rotated text inside diagram nodes",
+      "sha256": "a357985aec81b0bfa8a71138bbe94c9b3f6e00dee110c0da34302e22253de260",
+      "bytes": 43459
+    },
+    {
+      "name": "poi-smartart-simple.pptx",
+      "url": "https://raw.githubusercontent.com/apache/poi/trunk/test-data/slideshow/smartart-simple.pptx",
+      "licence": "Apache-2.0",
+      "project": "Apache POI",
+      "why": "diagram rels pointing at media; largest layout part",
+      "sha256": "238ff6433dac00b2722edb9a29d97f56ab4f3c9c37f33a73d6f53baf494916aa",
+      "bytes": 71102
+    },
+    {
+      "name": "lo-smartart-org-chart.pptx",
+      "url": "https://raw.githubusercontent.com/LibreOffice/core/master/sd/qa/unit/data/pptx/smartart-org-chart.pptx",
+      "licence": "MPL-2.0",
+      "project": "LibreOffice",
+      "why": "hierarchy layout \u2014 the canonical org chart",
+      "sha256": "7a457c32c73efed6244cf79e184994a2f2a0cb65901f6ce4f3dfcd22dbcf4ac1",
+      "bytes": 57764
+    },
+    {
+      "name": "lo-smartart-three-diagrams.pptx",
+      "url": "https://raw.githubusercontent.com/LibreOffice/core/master/sd/qa/unit/data/pptx/smartart-autoTxRot.pptx",
+      "licence": "MPL-2.0",
+      "project": "LibreOffice",
+      "why": "THREE diagram sets in one deck; no drawing cache \u2014 part-numbering stress",
+      "sha256": "7c5e882567fbe88bdbd7afd7b021008c427216e55f4c5058b480074032d4635e",
+      "bytes": 58937
+    },
+    {
+      "name": "lo-smartart-picture-strip.pptx",
+      "url": "https://raw.githubusercontent.com/LibreOffice/core/master/sd/qa/unit/data/pptx/smartart-picture-strip.pptx",
+      "licence": "MPL-2.0",
+      "project": "LibreOffice",
+      "why": "diagram relationships pointing at image parts",
+      "sha256": "6424c0c3dd8a19884365cf9d7c8bf2e24963fc9233afb4846345ea52cb9978d0",
+      "bytes": 52395
+    },
+    {
+      "name": "lo-smartart-groupshape.pptx",
+      "url": "https://raw.githubusercontent.com/LibreOffice/core/master/oox/qa/unit/data/smartart-groupshape.pptx",
+      "licence": "MPL-2.0",
+      "project": "LibreOffice",
+      "why": "SmartArt rendered as a group shape",
+      "sha256": "1f61a6d19fccdc0fc6807e517252d13d15264ed7edbd663fd1b943d3217eade4",
+      "bytes": 40995
+    },
+    {
+      "name": "lo-smartart-cycle-matrix.pptx",
+      "url": "https://raw.githubusercontent.com/LibreOffice/core/master/sd/qa/unit/data/pptx/smartart-cycle-matrix.pptx",
+      "licence": "MPL-2.0",
+      "project": "LibreOffice",
+      "why": "cycle-matrix layout",
+      "sha256": "48f18cdc8bac44bd07bd36eddacac33397f41f1b4ab9ced27663c028fff227f1",
+      "bytes": 56986
+    },
+    {
+      "name": "lo-smartart-pyramid.pptx",
+      "url": "https://raw.githubusercontent.com/LibreOffice/core/master/sd/qa/unit/data/pptx/smartart-pyramid-1child.pptx",
+      "licence": "MPL-2.0",
+      "project": "LibreOffice",
+      "why": "pyramid layout with a single child node",
+      "sha256": "38aef336872cb79e3e4bfa313f511db85c6f60d19118ec63dc3aa8d25c1ae3cc",
+      "bytes": 40075
+    },
+    {
+      "name": "lo-smartart-gear.pptx",
+      "url": "https://raw.githubusercontent.com/LibreOffice/core/master/sd/qa/unit/data/pptx/tdf149551_SmartArt_Gear.pptx",
+      "licence": "MPL-2.0",
+      "project": "LibreOffice",
+      "why": "gear layout; regression fixture for a real rendering bug",
+      "sha256": "c1d2823c0928c852ae8cb78ca3cb1140197d91848199849e1888e28d24a6548d",
+      "bytes": 25487
+    }
+  ]
+}
