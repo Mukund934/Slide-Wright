@@ -20,7 +20,25 @@ A tool that regenerates a deck rather than editing it scores near zero here by c
 
 ### Corpus requirements
 
-The corpus must contain what real decks contain. Both decks tested so far were student/technical projects with **zero** SmartArt, embedded charts or grouped shapes — so current evidence does not cover the hard cases.
+The corpus must contain what real decks contain — and the difference between a
+test fixture and a real deck turned out to matter more than expected.
+
+A sweep of the cleanup passes over 23 fixtures found that **20 of them needed no
+work at all**. That is not a good result; it means the corpus could not exercise
+what the code was built for. Library test files are small, synthetic and
+well-formed. Real decks are assembled by several people over months, and that is
+where the mess this code exists to handle actually lives.
+
+Five real professional decks were added. They immediately exposed a bug that
+every existing check had missed: a run addressed by index was being written to a
+different run, because two parts of the system enumerated runs differently. The
+content check passed, the native-object check passed, the fidelity score was
+fine — writing the right change to the wrong run is still the right *kind* of
+change. Only running the pass twice and finding it had not converged revealed it.
+
+**Two lessons, both cheap to state and expensive to learn:** a corpus of test
+fixtures validates the code against other people's test fixtures, and a property
+worth claiming is worth running twice.
 
 | Class | Must include |
 |---|---|
