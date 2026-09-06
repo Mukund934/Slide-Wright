@@ -19,6 +19,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
 
+from slide_wright.brand import is_theme_reference
 from slide_wright.gate import GateResult, Severity, check
 from slide_wright.inspect import DeckInfo, SlideInfo
 
@@ -151,6 +152,7 @@ def audit(deck: DeckInfo, name: str = "") -> DeckAudit:
         _font_sprawl,
         _colour_sprawl,
         _foreign_slides,
+        _detached_from_the_template,
         _layout_outliers,
         _typeface_spellings,
         _unsourced_figures,
@@ -394,11 +396,19 @@ def _layout_outliers(deck: DeckInfo, out: DeckAudit) -> None:
     if len(slides) > deck.slide_count / 3:
         return
 
+    # Name only the layouts belonging to the slides actually reported. `rare`
+    # can include a layout whose single slide was excluded as structural, and
+    # listing it made the message describe slides that are not in the finding:
+    # three layout names for two slides, on two different real decks.
+    named = sorted({
+        s.layout for s in deck.slides
+        if s.number in set(slides) and s.layout
+    })
     out.observations.append(Observation(
         Area.CONSISTENCY,
         slides,
         f"{len(slides)} slide(s) use a layout no other slide uses "
-        f"({', '.join(sorted(rare))})",
+        f"({', '.join(named)})",
         "worth a look: a one-off layout is often a slide brought in from "
         "another deck, though it may equally be a deliberate divider",
     ))
@@ -434,4 +444,46 @@ def _typeface_spellings(deck: DeckInfo, out: DeckAudit) -> None:
         f"{len(inconsistent)} typeface(s) are spelled more than one way: {detail}",
         "the same font typed differently by different people; harmless to look "
         "at, but it doubles every count that groups by typeface",
+    ))
+
+
+def _detached_from_the_template(deck: DeckInfo, out: DeckAudit) -> None:
+    """Most of the deck's text hardcodes a typeface instead of deferring to the theme.
+
+    `_foreign_slides` names the odd slides out and deliberately goes quiet once
+    more than half the deck hardcodes, because a deck that is consistently
+    hardcoded is consistent -- it is not foreign to itself. That left the decks
+    with the *most* template drift saying nothing at all: one fixture mixes
+    three typefaces across 111 of its 149 runs and produced no typeface finding.
+
+    So this picks up exactly where that check stops. The threshold is the same
+    one, so between them the two partition rather than overlap or leave a gap.
+
+    Measured across the corpus, the two populations are far apart: decks that
+    defer to the theme sit at 0-14% hardcoded, and decks that do not sit at
+    74-100%. Nothing lands near the boundary.
+
+    The finding is deliberately factual rather than a judgement. Hardcoding is
+    not wrong; it just means a later template change will not reach this text.
+    """
+    runs = [run for shape in deck.all_shapes() for run in shape.runs]
+    if len(runs) < 20:
+        return
+
+    hardcoded = [
+        run for run in runs
+        if run.font and not is_theme_reference(run.font)
+    ]
+    share = len(hardcoded) / len(runs)
+    if share <= 0.5:
+        return
+
+    fonts = sorted({run.font for run in hardcoded})
+    listed = ", ".join(fonts[:4]) + (" …" if len(fonts) > 4 else "")
+    out.observations.append(Observation(
+        Area.CONSISTENCY, [],
+        f"{len(hardcoded)} of {len(runs)} text runs ({share:.0%}) name a typeface "
+        f"directly rather than deferring to the theme: {listed}",
+        "not wrong in itself, but a later template change will not reach any of "
+        "them; `brand --fix` re-links them without altering a word",
     ))
