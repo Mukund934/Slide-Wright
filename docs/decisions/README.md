@@ -32,3 +32,4 @@ Never delete an ADR. Supersede it and link forward — the record of changing ou
 | [0006](0006-force-native-charts-and-tables.md) | Force native charts and tables on every export | Accepted |
 | [0007](0007-smartart-read-only.md) | SmartArt is read-only; the in-place applier is its only path | Accepted |
 | [0008](0008-local-first-deployment.md) | The document does not leave the machine — local execution is the primary delivery model | Accepted |
+| [0009](0009-chart-data-read-only.md) | Chart data is read-only; charts and their workbooks are preserved | Accepted |

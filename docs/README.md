@@ -16,7 +16,7 @@ Engineering documentation, safe to share. Strategy, pricing, customer research a
 
 ## Decisions
 
-[ADR index](decisions/README.md) — eight accepted records. Start with [ADR-0002](decisions/0002-editing-before-generation.md) (editing before generation), [ADR-0006](decisions/0006-force-native-charts-and-tables.md) (the defect that must never reach a customer) and [ADR-0008](decisions/0008-local-first-deployment.md) (the document does not leave the machine).
+[ADR index](decisions/README.md) — nine accepted records. Start with [ADR-0002](decisions/0002-editing-before-generation.md) (editing before generation), [ADR-0006](decisions/0006-force-native-charts-and-tables.md) (the defect that must never reach a customer) and [ADR-0008](decisions/0008-local-first-deployment.md) (the document does not leave the machine).
 
 ## Guides
 
