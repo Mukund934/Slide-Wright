@@ -34,7 +34,8 @@ from slide_wright.charts import guard_edit as guard_chart_edit
 from slide_wright.smartart import SmartArtUnsupported, assert_preserved, guard_edit
 
 # Operations this module can perform in place, without a slide rebuild.
-IN_PLACE_OPS = {Op.SET_TEXT, Op.SET_TABLE_CELL, Op.SET_FONT_SIZE, Op.MOVE, Op.RESIZE}
+IN_PLACE_OPS = {Op.SET_TEXT, Op.SET_TABLE_CELL, Op.SET_FONT_SIZE, Op.SET_FONT,
+                Op.SET_COLOR, Op.MOVE, Op.RESIZE}
 
 
 class ApplyError(Exception):
@@ -153,6 +154,11 @@ def _apply_one(root, change: Change) -> tuple[bool, str]:
         if _set_table_cell(shape, change):
             return True, ""
         return False, f"cell {change.target} does not hold {str(change.before)!r}"
+    if change.op in (Op.SET_FONT, Op.SET_COLOR):
+        if _set_run_format(shape, change):
+            return True, ""
+        return False, (f"run {change.target} not found, or it carries no explicit "
+                       f"formatting to change")
     if change.op is Op.SET_FONT_SIZE:
         if _set_font_size(shape, float(change.after)):
             return True, ""
@@ -253,6 +259,52 @@ def _set_font_size(shape, size_pt: float) -> bool:
     for rpr in shape.findall(".//a:rPr", NS):
         rpr.set("sz", hundredths)
         changed = True
+    return changed
+
+
+def _set_run_format(shape, change: Change) -> bool:
+    """Change one run's typeface or colour, touching nothing else.
+
+    Targets are `<shape>/run/<index>`; a bare shape id applies to every run in
+    the shape. Addressing a single run matters for conformance work: a text box
+    where one word was pasted in the wrong font should come back with that word
+    fixed and every other run byte-identical, which is what makes "we changed
+    only what did not conform" a checkable claim rather than a slogan.
+    """
+    runs = shape.findall(".//a:r", NS)
+    if not runs:
+        return False
+
+    parts = change.target.split("/")
+    if len(parts) >= 3 and parts[1] == "run":
+        try:
+            index = int(parts[2])
+        except ValueError:
+            return False
+        if not 0 <= index < len(runs):
+            return False
+        runs = [runs[index]]
+
+    changed = False
+    for run in runs:
+        rpr = run.find("a:rPr", NS)
+        if rpr is None:
+            # A run with no explicit formatting inherits from the layout. We do
+            # not invent an override here: doing so would silently detach the
+            # run from a template change made later, which is the opposite of
+            # what a conformance pass is for.
+            continue
+        if change.op is Op.SET_FONT:
+            for tag in ("a:latin", "a:cs", "a:ea"):
+                element = rpr.find(tag, NS)
+                if element is not None:
+                    element.set("typeface", str(change.after))
+                    changed = True
+        else:
+            fill = rpr.find("a:solidFill/a:srgbClr", NS)
+            if fill is not None:
+                fill.set("val", str(change.after).lstrip("#").upper())
+                changed = True
     return changed
 
 
