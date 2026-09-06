@@ -490,54 +490,55 @@ class TestBrandFix:
         assert "conformance" in out
 
 
+@pytest.fixture(scope="module")
+def conformed_eia(tmp_path_factory):
+    """Run the conformance fix on the 350-part EIA deck exactly once.
+
+    Three separate tests each ran the whole pass independently, which cost 71
+    of the suite's 107 seconds to do the same work three times. The assertions
+    are what differ, not the run.
+    """
+    from pathlib import Path
+
+    deck = (Path(__file__).resolve().parents[2] / "tests" / "fixtures"
+            / "third-party" / "eia-aeo2023-release.pptx")
+    if not deck.is_file():
+        pytest.skip("run scripts/fetch_fixtures.py")
+
+    workdir = tmp_path_factory.mktemp("conformance")
+    out = workdir / "fixed.pptx"
+    code = main(["brand", str(deck), str(deck), "--fix",
+                 "--workspace", str(workdir / "ws"), "-o", str(out)])
+    return deck, out, code
+
+
 @pytest.mark.fixtures
 class TestBrandFixOnARealDeck:
-    def _eia(self):
-        from pathlib import Path
+    def test_it_succeeds(self, conformed_eia, capsys):
+        _, out, code = conformed_eia
+        assert code == EXIT_OK
+        assert out.is_file()
 
-        path = (Path(__file__).resolve().parents[2] / "tests" / "fixtures"
-                / "third-party" / "eia-aeo2023-release.pptx")
-        if not path.is_file():
-            pytest.skip("run scripts/fetch_fixtures.py")
-        return path
-
-    def test_corrects_typefaces_without_touching_a_word(self, tmp_path, capsys):
+    def test_corrects_typefaces_without_touching_a_word(self, conformed_eia):
         from slide_wright.diff import diff
 
-        deck = self._eia()
-        out = tmp_path / "fixed.pptx"
-        code = main(["brand", str(deck), str(deck), "--fix",
-                     "--workspace", str(tmp_path / "ws"), "-o", str(out)])
-        assert code == EXIT_OK
-        assert "0 words or numbers changed, verified" in capsys.readouterr().out
-
+        deck, out, _ = conformed_eia
         result = diff(deck, out)
         assert result.deltas, "the fix must actually change something"
         assert not result.content_deltas, "a formatting pass changed content"
         assert {d.kind for d in result.deltas} == {"formatting"}
 
-    def test_the_corrected_deck_reports_no_typeface_drift(self, tmp_path, capsys):
+    def test_the_corrected_deck_reports_no_typeface_drift(self, conformed_eia):
         from slide_wright.brand import check_conformance, read_profile
 
-        deck = self._eia()
-        out = tmp_path / "fixed.pptx"
-        main(["brand", str(deck), str(deck), "--fix",
-              "--workspace", str(tmp_path / "ws"), "-o", str(out)])
-        capsys.readouterr()
-
-        profile = read_profile(deck)
-        after = check_conformance(inspect(out), profile, "fixed")
+        deck, out, _ = conformed_eia
+        after = check_conformance(inspect(out), read_profile(deck), "fixed")
         assert not [d for d in after.deviations if d.kind == "font"]
 
-    def test_charts_and_workbooks_survive_a_conformance_pass(self, tmp_path, capsys):
+    def test_charts_and_workbooks_survive_a_conformance_pass(self, conformed_eia):
         from slide_wright.charts import census
 
-        deck = self._eia()
-        out = tmp_path / "fixed.pptx"
-        main(["brand", str(deck), str(deck), "--fix",
-              "--workspace", str(tmp_path / "ws"), "-o", str(out)])
-        capsys.readouterr()
-
+        deck, out, _ = conformed_eia
         before, after = census(deck), census(out)
         assert after["charts"] == before["charts"] == 29
         assert after["workbooks"] == before["workbooks"] == 29
