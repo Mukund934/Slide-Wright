@@ -40,6 +40,7 @@ Slide-Wright starts from the opposite premise. **Your file is evidence, not inpu
 slide-wright inspect  deck.pptx                     # structural summary
 slide-wright audit    deck.pptx                     # what is wrong with this deck
 slide-wright brand    house.potx deck.pptx          # where it departs from the template
+slide-wright brand    house.potx deck.pptx --fix    # correct it, changing no content
 slide-wright refresh  deck.pptx --source comps.csv  # update figures, with citations
 slide-wright verify   before.pptx after.pptx        # part-level fidelity report
 slide-wright diff     before.pptx after.pptx        # what a reader would notice
@@ -83,6 +84,23 @@ figure that moved rather than the file that contains it:
   Changes nobody asked for
     · slide 3 — Table 2 (id=3) text …Alpha Corp[9.4 -> 11.8]x22.1%…
 ```
+
+### Conform a deck to its template, without touching a word
+
+Slides pasted in from other decks arrive carrying their old typefaces. `--fix`
+corrects them and nothing else — the guarantee is inverted but the same in kind:
+*change every typeface that does not conform, change not one word or number, and
+prove it.*
+
+On a real 350-part US government deck: 45 runs corrected, all 29 charts and 29
+embedded workbooks byte-identical, and **zero content changes** in the structural
+diff. The check is enforced, not asserted — if a formatting pass alters content,
+the deck is refused rather than delivered.
+
+A run whose typeface is `+mn-lt` is left alone. That is not a font, it is a
+reference to the theme's own font, so the run already follows the template in the
+only way that survives the template changing. Rewriting it to a literal name
+would quietly break that link.
 
 ### Refresh a recurring deck from a workbook
 
