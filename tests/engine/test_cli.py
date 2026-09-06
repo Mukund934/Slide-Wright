@@ -169,6 +169,71 @@ class TestVerify:
         assert sorted(p.name for p in folder.iterdir()) == before
 
 
+class TestHistoryAndRevert:
+    """The half of the loop the CLI did not expose.
+
+    propose -> review -> apply -> verify -> revert is the product's promise.
+    Until these commands existed a user could edit and verify from the command
+    line but had no way to see what versions existed or to go back to one.
+    """
+
+    def _edit(self, deck, ws, before, after, message):
+        table = next(s for s in inspect(deck).all_shapes() if s.kind == "table")
+        return main(["edit", str(deck), "--workspace", str(ws),
+                     "--set", f"3:{table.id}/r1/c1:{before}={after}",
+                     "-m", message])
+
+    def test_history_lists_every_version(self, adversarial_deck, tmp_path, capsys):
+        ws = tmp_path / "ws"
+        assert self._edit(adversarial_deck, ws, "9.4x", "11.8x", "Q3") == EXIT_OK
+        assert self._edit(adversarial_deck, ws, "11.8x", "12.5x", "Q4") == EXIT_OK
+        capsys.readouterr()
+
+        assert main(["history", str(adversarial_deck), "--workspace", str(ws)]) == EXIT_OK
+        out = capsys.readouterr().out
+        assert "v000" in out and "v001" in out and "v002" in out
+        assert "Q3" in out and "Q4" in out
+
+    def test_revert_makes_an_earlier_version_current(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        ws = tmp_path / "ws"
+        self._edit(adversarial_deck, ws, "9.4x", "11.8x", "Q3")
+        self._edit(adversarial_deck, ws, "11.8x", "12.5x", "Q4")
+        capsys.readouterr()
+
+        out_file = tmp_path / "back.pptx"
+        code = main(["revert", str(adversarial_deck), "--workspace", str(ws),
+                     "--to", "1", "-o", str(out_file)])
+        assert code == EXIT_OK
+        assert "v001" in capsys.readouterr().out
+
+        table = next(s for s in inspect(out_file).all_shapes() if s.kind == "table")
+        values = [r.text for r in table.runs]
+        assert "11.8x" in values, "reverted to the wrong version"
+        assert "12.5x" not in values, "the reverted deck still carries the later edit"
+
+    def test_revert_defaults_to_the_original(self, adversarial_deck, tmp_path, capsys):
+        ws = tmp_path / "ws"
+        self._edit(adversarial_deck, ws, "9.4x", "11.8x", "Q3")
+        capsys.readouterr()
+
+        out_file = tmp_path / "orig.pptx"
+        assert main(["revert", str(adversarial_deck), "--workspace", str(ws),
+                     "-o", str(out_file)]) == EXIT_OK
+        assert out_file.read_bytes() == adversarial_deck.read_bytes()
+
+    def test_reverting_to_a_version_that_does_not_exist_is_refused(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        ws = tmp_path / "ws"
+        self._edit(adversarial_deck, ws, "9.4x", "11.8x", "Q3")
+        capsys.readouterr()
+        assert main(["revert", str(adversarial_deck), "--workspace", str(ws),
+                     "--to", "9"]) == EXIT_ERROR
+        assert "no version 9" in capsys.readouterr().err
+
+
 class TestRefusals:
     def test_hostile_file_is_refused_with_an_error_code(self, tmp_path, capsys):
         bad = tmp_path / "bad.pptx"
