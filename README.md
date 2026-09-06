@@ -129,7 +129,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 291 tests
+python -m pytest tests -q          # 366 tests
 ```
 
 Python 3.11+. No API key is required: the planner falls back to an offline stub, and every deterministic layer runs without credentials or network access.
@@ -152,11 +152,12 @@ src/engine/slide_wright/    the engine — deterministic, no model calls
   brand.py                  template conformance
   sources.py                spreadsheets, with cell-level citations
   refresh.py                update figures from a source, deterministically
+  smartart.py               diagram detection; read-only by design
   planner.py                instruction -> validated change set
-  llm/                      provider abstraction, budgets, offline stub
+  llm/                      provider abstraction, Gemini, budgets, usage ledger
   corpus/                   deck profiler and adversarial generator
 docs/                       architecture, 6 ADRs, guides
-tests/                      291 tests, including regressions from real decks
+tests/                      366 tests, including regressions from real decks
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
 ```
