@@ -53,6 +53,29 @@ class ChangeReport:
         """
         return [d.name for d in self.fidelity.changed if d.slide_number is None]
 
+    def explain_unrequested(self):
+        """What actually changed on the slides nobody authorised.
+
+        Computed lazily and only when it is needed. Naming the part is enough
+        when everything was requested; when it was not, the reviewer is about
+        to decide whether to ship a deck, and "slide4.xml changed" is not
+        something anyone can decide on.
+
+        Returns an empty list if the decks are no longer both readable -- an
+        explanation is a courtesy, and failing to produce one must never turn
+        a blocked report into an error.
+        """
+        if not self.unrequested_slide_changes:
+            return []
+        try:
+            from slide_wright.diff import diff
+
+            unrequested = set(self.unrequested_slide_changes)
+            return [d for d in diff(self.fidelity.source, self.fidelity.output).deltas
+                    if d.slide in unrequested]
+        except Exception:
+            return []
+
     @property
     def deliverable(self) -> bool:
         """Whether this output may be handed to the user.
@@ -111,6 +134,20 @@ class ChangeReport:
                 where = f"slide {c.slide}" if c.slide else "deck"
                 target = f" · {c.target}" if c.target else ""
                 lines.append(f"    · {where}{target} — {c.description}")
+
+        if self.unrequested_slide_changes:
+            lines += ["", "  Changes nobody asked for"]
+            explained = self.explain_unrequested()
+            for delta in explained[:12]:
+                lines.append(f"    · slide {delta.slide} — {delta.description}")
+            if len(explained) > 12:
+                lines.append(f"    · … {len(explained) - 12} more")
+            if not explained:
+                # The diff could not account for it, which is itself worth
+                # saying: something changed below the level this can describe.
+                for n in self.unrequested_slide_changes:
+                    lines.append(f"    · slide {n} changed, with no structural "
+                                 f"difference this can name")
 
         if self.unrequested_part_changes:
             lines += ["", "  Other parts changed (review)"]
