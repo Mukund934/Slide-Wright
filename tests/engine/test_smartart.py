@@ -51,8 +51,14 @@ def org_chart():
 
 @pytest.fixture
 def picture_strip():
-    """The only fixture carrying both a diagram and other editable text."""
+    """A diagram plus other editable text — the shape the preserve case needs."""
     return fixture("lo-smartart-picture-strip.pptx")
+
+
+@pytest.fixture
+def chart_types():
+    """No diagram at all. A control for claims about what SmartArt causes."""
+    return fixture("pypptx-chart-types.pptx")
 
 
 @pytest.fixture
@@ -229,16 +235,19 @@ class TestAssertPreserved:
 
 
 class TestRoundTripEngineLimitation:
-    """A measured, causal limitation — recorded rather than papered over.
+    """A measured limitation — recorded rather than papered over.
 
-    The heavy round-trip engine cannot ingest a deck containing SmartArt. This
-    was isolated on 6 Sep 2026 by taking one fixture, removing only the diagram,
-    and re-running: with SmartArt the engine refuses at the authoring
-    projection; without it, the same deck is accepted.
+    The heavy round-trip engine refuses every deck containing SmartArt at the
+    authoring projection. Removing only the diagram from a fixture turns that
+    refusal into an acceptance, so a diagram is *sufficient* to trigger it.
 
-    The in-place applier handles these decks fine, which is why it is the
-    primary path. This test documents the boundary so nobody claims support the
-    system does not have.
+    It is not *necessary*. Diagram-free decks are refused with a byte-identical
+    message, so the constraint belongs to the engine's font-family projection,
+    not to SmartArt. Both facts are pinned below: calling this a SmartArt
+    restriction would misdirect anyone debugging a refused chart-only deck.
+
+    The in-place applier handles all of these decks, which is why it is the
+    primary path. See ADR-0007.
     """
 
     def test_in_place_path_handles_smartart_decks(self, picture_strip):
@@ -267,6 +276,28 @@ class TestRoundTripEngineLimitation:
             assert not result.ok, (
                 "engine unexpectedly accepted a SmartArt deck — if this now "
                 "passes, the limitation is fixed and the docs need updating"
+            )
+
+    @pytest.mark.engine
+    def test_round_trip_engine_also_refuses_a_deck_with_no_diagram(self, chart_types):
+        """The refusal is not SmartArt-specific, and the record must not say so."""
+        from slide_wright.engines.pptmaster import EngineError, PptMasterEngine
+
+        assert not find_all(Package.open(chart_types)), "control deck gained a diagram"
+        try:
+            engine = PptMasterEngine()
+        except EngineError:
+            pytest.skip("round-trip engine not vendored on this machine")
+        with tempfile.TemporaryDirectory() as tmp:
+            result = engine.ingest(chart_types, Path(tmp) / "ws")
+            assert not result.ok, (
+                "a diagram-free deck was accepted — if every diagram-free deck "
+                "now passes, SmartArt really is the sole cause and ADR-0007's "
+                "correction should be revisited"
+            )
+            assert "font-family" in (result.stderr or ""), (
+                "refused for a different reason than the SmartArt decks; "
+                "ADR-0007 claims the message is identical"
             )
 
 
