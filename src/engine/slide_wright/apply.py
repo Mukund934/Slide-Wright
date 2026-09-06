@@ -28,6 +28,9 @@ from lxml import etree
 from slide_wright.changeset import Change, ChangeSet, Op, Status
 from slide_wright.inspect import NS
 from slide_wright.package import Package
+from slide_wright.charts import ChartUnsupported
+from slide_wright.charts import assert_preserved as assert_charts_preserved
+from slide_wright.charts import guard_edit as guard_chart_edit
 from slide_wright.smartart import SmartArtUnsupported, assert_preserved, guard_edit
 
 # Operations this module can perform in place, without a slide rebuild.
@@ -67,13 +70,15 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
 
     pkg = Package.open(deck)
 
-    # SmartArt is refused up front, before anything is written. A diagram is
-    # four correlated parts plus a drawing cache; editing one out of step with
-    # the others silently renders a stale diagram. See smartart.py.
+    # Two constructs are refused up front, before anything is written. Both
+    # keep the same information twice and go quietly wrong when the copies
+    # drift: a diagram's model against its drawing cache (smartart.py), and a
+    # chart's cached series against its embedded workbook (charts.py).
     for change in approved:
         try:
             guard_edit(pkg, change.slide, change.target)
-        except SmartArtUnsupported as exc:
+            guard_chart_edit(pkg, change.slide, change.target)
+        except (SmartArtUnsupported, ChartUnsupported) as exc:
             raise ApplyError(str(exc)) from exc
 
     result = ApplyResult(output=output)
@@ -112,10 +117,13 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
 
     _write_package(deck, output, patched)
 
-    # Even when nothing targeted a diagram, prove none was collateral damage.
+    # Even when nothing targeted them, prove neither was collateral damage. A
+    # chart that loses its workbook still looks correct and only fails when
+    # someone clicks "Edit Data", so it is checked rather than assumed.
     try:
         assert_preserved(pkg, output)
-    except SmartArtUnsupported as exc:
+        assert_charts_preserved(pkg, output)
+    except (SmartArtUnsupported, ChartUnsupported) as exc:
         raise ApplyError(str(exc)) from exc
 
     return result
