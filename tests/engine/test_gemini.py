@@ -25,7 +25,11 @@ from slide_wright.llm.gemini import (
     _scrub,
 )
 
-FAKE_KEY = "AQ.Ab8RN6FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE"
+# Deliberately shares nothing with any real key beyond the "AQ." format marker.
+# An earlier version copied the first nine characters of a live key, which made
+# every secret scan fire on our own test file — and a scanner that cries wolf
+# stops being read.
+FAKE_KEY = "AQ.NOTAREALKEY0000000000000000000000000000"
 
 
 def ok_payload(text="[]", prompt_tokens=100, out_tokens=20) -> dict:
@@ -218,9 +222,9 @@ class TestSecretHygiene:
     """An API key must never survive into anything a human can read."""
 
     def test_scrub_removes_key_shaped_strings(self):
-        assert "AQ.Ab8RN6" not in _scrub("failed for key AQ.Ab8RN6abcdefghijklmnop")
+        assert "AQ.ZZZ" not in _scrub("failed for key AQ.ZZZQQQ0000000000000000")
         assert "AIzaSy" not in _scrub("bad key AIzaSyABCDEFGHIJKLMNOPQRSTUVWX")
-        assert "[redacted]" in _scrub("key AQ.Ab8RN6abcdefghijklmnop rejected")
+        assert "[redacted]" in _scrub("key AQ.ZZZQQQ0000000000000000 rejected")
 
     def test_scrub_leaves_ordinary_text_alone(self):
         assert _scrub("model not found") == "model not found"
