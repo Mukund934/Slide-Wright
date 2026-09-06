@@ -30,4 +30,5 @@ Never delete an ADR. Supersede it and link forward — the record of changing ou
 | [0004](0004-supabase-backend.md) | Supabase as the backend | Accepted |
 | [0005](0005-python-engine-typescript-product.md) | Python engine, TypeScript product | Accepted |
 | [0006](0006-force-native-charts-and-tables.md) | Force native charts and tables on every export | Accepted |
-| [0007](0007-smartart-read-only.md) | SmartArt is read-only; the round-trip engine cannot ingest it | Accepted |
+| [0007](0007-smartart-read-only.md) | SmartArt is read-only; the in-place applier is its only path | Accepted |
+| [0008](0008-local-first-deployment.md) | The document does not leave the machine — local execution is the primary delivery model | Accepted |
