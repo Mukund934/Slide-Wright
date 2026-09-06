@@ -185,9 +185,10 @@ Phase 3's *engine* capabilities were built ahead of that gate because each is de
 
 **Known gaps, stated plainly:**
 
-- **SmartArt is untested.** No deck available for testing contains a `ppt/diagrams/` part, and it cannot be generated faithfully. Fidelity on SmartArt is unproven — not claimed.
+- **SmartArt cannot be edited.** It is read, counted and preserved — 16 diagram-bearing fixtures, 0 damaged — but any change *targeting* a diagram is refused before anything is written. A diagram is four correlated parts plus a cached rendering; editing one out of step with the others corrupts the file with no error. Refusing is the honest answer until that can be done deterministically. See ADR-0007.
 - **Per-deck model cost is barely measured.** The usage ledger records every call, but only a handful of real edits have run through it — not enough to price a deck.
-- Also unproven: OLE embedded objects, licensed fonts not installed locally, packages above ~300 parts.
+- **Licensed fonts not installed locally are unproven.**
+- **The round-trip engine ingests only 2 of 21 fixtures.** It is the secondary path; the in-place applier handles all 21.
 
 ## What this project has learned the hard way
 
