@@ -14,6 +14,7 @@ one, and the loop is what needs proving.
     slide-wright propose  deck.pptx --instruct "..." -o changes.json
     slide-wright review   changes.json --approve c1 --reject c2
     slide-wright apply    deck.pptx changes.json -o out.pptx
+    slide-wright tidy     deck.pptx -o out.pptx
     slide-wright align    deck.pptx --fix
     slide-wright diff     before.pptx after.pptx
     slide-wright history  deck.pptx
@@ -388,6 +389,110 @@ def cmd_apply(args) -> int:
     return EXIT_OK
 
 
+def cmd_tidy(args) -> int:
+    """Clean up an inherited deck in one pass, and prove the content survived.
+
+    The workflow this serves is the ordinary one: a deck assembled from other
+    decks, carrying their typefaces and their almost-but-not-quite alignment.
+    Doing that as three separate commands means three files, three
+    verifications and three places to lose track of what changed.
+
+    So it is one session, one change set, one verification and one point to
+    revert to. Every change is presentational by construction, and the promise
+    is the same as always, inverted: *change what does not conform, change not
+    one word or number, and prove it.*
+
+    With no template given, the deck's own theme is the authority. That is the
+    right default here rather than a fallback -- a deck assembled from several
+    sources has a visual system of its own, and the pasted-in slides are the
+    ones that depart from it.
+    """
+    from slide_wright.audit import audit as audit_deck
+    from slide_wright.brand import plan_conformance, read_profile
+    from slide_wright.diff import diff as deck_diff
+    from slide_wright.inspect import EMU_PER_INCH
+    from slide_wright.layout import plan_alignment
+
+    session = Session.open(args.deck, workspace=args.workspace)
+    deck = session.deck()
+    name = Path(args.deck).name
+
+    # What looks like it came from somewhere else. Reported, never acted on:
+    # naming a slide foreign is a judgement, and the corrections below stand on
+    # their own without it.
+    findings = [
+        o for o in audit_deck(deck, name).observations
+        if o.area.value == "consistency" and o.slides
+    ]
+    if findings:
+        print("SLIDES WORTH A LOOK")
+        print()
+        for observation in findings:
+            print(f"  · slides {', '.join(str(n) for n in observation.slides)} — "
+                  f"{observation.message}")
+        print()
+
+    profile = read_profile(args.template or args.deck)
+    conformance = plan_conformance(deck, profile, name)
+    alignment = plan_alignment(deck, int(round(args.tolerance * EMU_PER_INCH)), name)
+
+    print(f"TIDY — {name}")
+    print()
+    print(f"  {len(conformance.changes)} typeface(s) off the "
+          f"{'template' if args.template else 'deck theme'}")
+    print(f"  {len(alignment.changes)} shape(s) nearly, but not quite, aligned")
+    print()
+
+    if not conformance.changes and not alignment.changes:
+        print("  Nothing to tidy.")
+        return EXIT_OK
+    if args.dry_run:
+        print("dry run — nothing was applied")
+        return EXIT_OK
+
+    changeset = session.propose(f"tidy {name}")
+    for lock in args.lock or []:
+        scope, _, target = lock.partition(":")
+        try:
+            changeset.lock(scope, target)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+    for change in [*conformance.changes, *alignment.changes]:
+        changeset.add(change)
+    changeset.approve_all()
+
+    if not changeset.approved:
+        print("every change was blocked by a lock; nothing to apply", file=sys.stderr)
+        return EXIT_FINDINGS
+
+    before = session.current.path
+    try:
+        report = session.apply(f"tidy {name}")
+    except (SessionError, ApplyError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    content = deck_diff(before, session.current.path).content_deltas
+    if content:
+        print("REFUSED — tidying changed content:", file=sys.stderr)
+        for delta in content[:5]:
+            print(f"    · slide {delta.slide} — {delta.description}", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(report.render())
+    print()
+    typefaces = sum(1 for c in changeset.applied if c.op is Op.SET_FONT)
+    nudges = sum(1 for c in changeset.applied if c.op is Op.MOVE)
+    print(f"  {typefaces} typeface(s) conformed · {nudges} shape(s) nudged · "
+          f"0 words or numbers changed, verified")
+    print(f"  revert with: slide-wright revert {args.deck} --to "
+          f"{session.current.number - 1}")
+    if args.output:
+        print(f"wrote {session.export(args.output)}")
+    return EXIT_OK
+
+
 def cmd_align(args) -> int:
     """Find shapes that are nearly aligned, and optionally snap them.
 
@@ -681,6 +786,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=40,
                    help="maximum differences to list (default 40)")
     p.set_defaults(func=cmd_diff)
+
+    p = sub.add_parser(
+        "tidy",
+        help="conform typefaces and snap near-miss alignment in one pass",
+    )
+    p.add_argument("deck")
+    p.add_argument("--template", help=".potx whose theme is the authority; "
+                                     "defaults to the deck's own theme")
+    p.add_argument("--tolerance", type=float, default=0.02, metavar="INCHES",
+                   help="how far out of line still counts as a slip (default 0.02)")
+    p.add_argument("--lock", action="append", metavar="SCOPE[:TARGET]")
+    p.add_argument("-o", "--output", help="write the tidied deck here")
+    p.add_argument("--workspace", help="where versions are kept")
+    p.add_argument("--dry-run", action="store_true", help="show the plan and stop")
+    p.set_defaults(func=cmd_tidy)
 
     p = sub.add_parser("align", help="find shapes that are nearly, but not quite, aligned")
     p.add_argument("deck")

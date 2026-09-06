@@ -590,3 +590,97 @@ class TestAlignOnARealDeck:
         assert result.deltas
         assert not result.content_deltas
         assert {d.kind for d in result.deltas} == {"geometry"}
+
+
+class TestTidy:
+    """The wedge as one command.
+
+    Conformance and alignment were reachable only as separate commands, which
+    meant three files, three verifications and three places to lose track of
+    what changed. `tidy` is one session, one change set, one verification and
+    one point to revert to.
+    """
+
+    def test_a_clean_deck_needs_no_tidying(self, adversarial_deck, tmp_path, capsys):
+        code = main(["tidy", str(adversarial_deck),
+                     "--workspace", str(tmp_path / "ws")])
+        assert code == EXIT_OK
+        assert "Nothing to tidy" in capsys.readouterr().out
+
+    def test_dry_run_writes_nothing(self, adversarial_deck, tmp_path, capsys):
+        ws = tmp_path / "ws"
+        assert main(["tidy", str(adversarial_deck), "--workspace", str(ws),
+                     "--dry-run"]) == EXIT_OK
+        assert not list(ws.glob("*edited*"))
+
+    def test_it_defaults_to_the_decks_own_theme(self, adversarial_deck, tmp_path, capsys):
+        """A deck assembled from several sources has a visual system of its own."""
+        assert main(["tidy", str(adversarial_deck),
+                     "--workspace", str(tmp_path / "ws")]) == EXIT_OK
+        assert "deck theme" in capsys.readouterr().out
+
+    def test_an_explicit_template_is_named_as_the_authority(
+        self, adversarial_deck, tmp_path, capsys
+    ):
+        assert main(["tidy", str(adversarial_deck), "--template", str(adversarial_deck),
+                     "--workspace", str(tmp_path / "ws")]) == EXIT_OK
+        assert "template" in capsys.readouterr().out
+
+
+@pytest.fixture(scope="module")
+def tidied_eia(tmp_path_factory):
+    """One `tidy` run over the 350-part EIA deck, shared by its assertions."""
+    from pathlib import Path
+
+    deck = (Path(__file__).resolve().parents[2] / "tests" / "fixtures"
+            / "third-party" / "eia-aeo2023-release.pptx")
+    if not deck.is_file():
+        pytest.skip("run scripts/fetch_fixtures.py")
+
+    workdir = tmp_path_factory.mktemp("tidy")
+    out = workdir / "tidied.pptx"
+    code = main(["tidy", str(deck), "--workspace", str(workdir / "ws"), "-o", str(out)])
+    return deck, out, code
+
+
+@pytest.mark.fixtures
+class TestTidyOnARealDeck:
+    def test_it_succeeds_and_writes_the_deck(self, tidied_eia):
+        _, out, code = tidied_eia
+        assert code == EXIT_OK
+        assert out.is_file()
+
+    def test_both_passes_ran_in_one_change_set(self, tidied_eia):
+        """Typefaces and geometry, applied together rather than in sequence."""
+        from slide_wright.diff import diff
+
+        deck, out, _ = tidied_eia
+        kinds = {d.kind for d in diff(deck, out).deltas}
+        assert "formatting" in kinds and "geometry" in kinds
+
+    def test_not_one_word_or_number_changed(self, tidied_eia):
+        from slide_wright.diff import diff
+
+        deck, out, _ = tidied_eia
+        assert not diff(deck, out).content_deltas
+
+    def test_every_chart_and_workbook_survived(self, tidied_eia):
+        from slide_wright.charts import census
+
+        deck, out, _ = tidied_eia
+        before, after = census(deck), census(out)
+        assert after["charts"] == before["charts"] == 29
+        assert after["workbooks"] == before["workbooks"] == 29
+        assert after["values"] == before["values"]
+
+    def test_the_deck_reports_no_typeface_drift_afterwards(self, tidied_eia):
+        from slide_wright.brand import check_conformance, read_profile
+
+        deck, out, _ = tidied_eia
+        after = check_conformance(inspect(out), read_profile(deck), "tidied")
+        assert not [d for d in after.deviations if d.kind == "font"]
+
+    def test_it_converges(self, tidied_eia, tmp_path):
+        """Running it again finds nothing left to do."""
+        _, out, _ = tidied_eia
+        assert main(["tidy", str(out), "--workspace", str(tmp_path / "ws2")]) == EXIT_OK
