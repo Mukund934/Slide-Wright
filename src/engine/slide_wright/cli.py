@@ -14,6 +14,7 @@ one, and the loop is what needs proving.
     slide-wright propose  deck.pptx --instruct "..." -o changes.json
     slide-wright review   changes.json --approve c1 --reject c2
     slide-wright apply    deck.pptx changes.json -o out.pptx
+    slide-wright align    deck.pptx --fix
     slide-wright diff     before.pptx after.pptx
     slide-wright history  deck.pptx
     slide-wright revert   deck.pptx --to 1
@@ -387,6 +388,72 @@ def cmd_apply(args) -> int:
     return EXIT_OK
 
 
+def cmd_align(args) -> int:
+    """Find shapes that are nearly aligned, and optionally snap them.
+
+    Deliberately conservative: a shape is only touched when its edge already
+    sits within the tolerance of a group's, so nothing can move further than
+    the distance that made it a near-miss. A deliberate offset never joins a
+    group and is never seen by this at all.
+    """
+    from slide_wright.diff import diff as deck_diff
+    from slide_wright.inspect import EMU_PER_INCH
+    from slide_wright.layout import plan_alignment
+
+    tolerance = int(round(args.tolerance * EMU_PER_INCH))
+    session = Session.open(args.deck, workspace=args.workspace)
+    plan = plan_alignment(session.deck(), tolerance, Path(args.deck).name)
+    print(plan.render())
+    print()
+
+    if plan.empty:
+        return EXIT_OK
+    if not args.fix:
+        print("  run again with --fix to apply these")
+        return EXIT_FINDINGS
+
+    changeset = session.propose("align near-miss edges")
+    for lock in args.lock or []:
+        scope, _, target = lock.partition(":")
+        try:
+            changeset.lock(scope, target)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+    for change in plan.changes:
+        changeset.add(change)
+    changeset.approve_all()
+
+    if not changeset.approved:
+        print("every nudge was blocked by a lock; nothing to apply", file=sys.stderr)
+        return EXIT_FINDINGS
+
+    before = session.current.path
+    try:
+        report = session.apply("align near-miss edges")
+    except (SessionError, ApplyError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    # Same guarantee as the conformance pass: geometry may change, content
+    # never. Checked, because a layout pass that reflowed a number would be
+    # the worst kind of quiet failure.
+    content = deck_diff(before, session.current.path).content_deltas
+    if content:
+        print("REFUSED — an alignment pass changed content:", file=sys.stderr)
+        for delta in content[:5]:
+            print(f"    · slide {delta.slide} — {delta.description}", file=sys.stderr)
+        return EXIT_ERROR
+
+    print(report.render())
+    print()
+    print(f"  {len(changeset.applied)} shape(s) nudged · "
+          f"0 words or numbers changed, verified")
+    if args.output:
+        print(f"wrote {session.export(args.output)}")
+    return EXIT_OK
+
+
 def cmd_history(args) -> int:
     """Every version of this deck, and which one is current."""
     session = Session.open(args.deck, workspace=args.workspace)
@@ -614,6 +681,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=40,
                    help="maximum differences to list (default 40)")
     p.set_defaults(func=cmd_diff)
+
+    p = sub.add_parser("align", help="find shapes that are nearly, but not quite, aligned")
+    p.add_argument("deck")
+    p.add_argument("--fix", action="store_true", help="snap them; changes no content")
+    p.add_argument("--tolerance", type=float, default=0.02, metavar="INCHES",
+                   help="how far out of line still counts as a slip (default 0.02); "
+                        "nothing ever moves further than this")
+    p.add_argument("--lock", action="append", metavar="SCOPE[:TARGET]")
+    p.add_argument("-o", "--output", help="write the corrected deck here")
+    p.add_argument("--workspace", help="where versions are kept")
+    p.set_defaults(func=cmd_align)
 
     p = sub.add_parser("history", help="every version of this deck")
     p.add_argument("deck")

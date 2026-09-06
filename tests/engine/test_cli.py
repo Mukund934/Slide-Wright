@@ -542,3 +542,50 @@ class TestBrandFixOnARealDeck:
         assert after["charts"] == before["charts"] == 29
         assert after["workbooks"] == before["workbooks"] == 29
         assert after["values"] == before["values"]
+
+
+class TestAlignCommand:
+    def test_reporting_does_not_apply(self, adversarial_deck, tmp_path, capsys):
+        code = main(["align", str(adversarial_deck), "--workspace", str(tmp_path / "ws")])
+        assert code in (EXIT_OK, EXIT_FINDINGS)
+        assert "ALIGNMENT PLAN" in capsys.readouterr().out
+        assert not list((tmp_path / "ws").glob("*edited*"))
+
+    def test_a_clean_deck_exits_zero(self, adversarial_deck, tmp_path, capsys):
+        code = main(["align", str(adversarial_deck), "--workspace", str(tmp_path / "ws")])
+        out = capsys.readouterr().out
+        if "out of line" in out:
+            assert code == EXIT_OK
+
+    def test_the_tolerance_is_configurable(self, adversarial_deck, tmp_path, capsys):
+        assert main(["align", str(adversarial_deck), "--tolerance", "0.5",
+                     "--workspace", str(tmp_path / "ws")]) in (EXIT_OK, EXIT_FINDINGS)
+        assert "0.500in" in capsys.readouterr().out
+
+
+@pytest.mark.fixtures
+class TestAlignOnARealDeck:
+    def _fixture(self, name):
+        from pathlib import Path
+
+        path = (Path(__file__).resolve().parents[2] / "tests" / "fixtures"
+                / "third-party" / name)
+        if not path.is_file():
+            pytest.skip("run scripts/fetch_fixtures.py")
+        return path
+
+    def test_fix_nudges_shapes_and_changes_no_content(self, tmp_path, capsys):
+        from slide_wright.diff import diff
+
+        deck = self._fixture("eia-aeo2023-release.pptx")
+        out = tmp_path / "aligned.pptx"
+        code = main(["align", str(deck), "--fix",
+                     "--workspace", str(tmp_path / "ws"), "-o", str(out)])
+        if "Nothing within" in capsys.readouterr().out:
+            pytest.skip("this fixture has nothing to align")
+        assert code == EXIT_OK
+
+        result = diff(deck, out)
+        assert result.deltas
+        assert not result.content_deltas
+        assert {d.kind for d in result.deltas} == {"geometry"}
