@@ -292,10 +292,10 @@ Phase 3's *engine* capabilities were built ahead of that gate because each is de
 **Known gaps, stated plainly:**
 
 - **Chart data cannot be edited.** Charts are read, counted and preserved — a real 350-part government deck with 29 charts and 29 linked workbooks came through a text edit with every chart, workbook and data link byte-identical — but changing a figure *inside* a chart is refused. A chart stores its numbers twice, in a cached series and an embedded workbook, and changing one without the other produces a deck whose picture disagrees with its own "Edit Data". See ADR-0009.
-- **SmartArt cannot be edited.** It is read, counted and preserved — 16 diagram-bearing fixtures, 0 damaged — but any change *targeting* a diagram is refused before anything is written. A diagram is four correlated parts plus a cached rendering; editing one out of step with the others corrupts the file with no error. Refusing is the honest answer until that can be done deterministically. See ADR-0007.
+- **SmartArt cannot be edited.** It is read, counted and preserved — 16 diagram-bearing fixtures of 26, 0 damaged — but any change *targeting* a diagram is refused before anything is written. A diagram is four correlated parts plus a cached rendering; editing one out of step with the others corrupts the file with no error. Refusing is the honest answer until that can be done deterministically. See ADR-0007.
 - **Per-deck model cost is barely measured.** The usage ledger records every call, but only a handful of real edits have run through it — not enough to price a deck.
 - **Licensed fonts not installed locally are unproven.**
-- **The round-trip engine ingests only 2 of 21 fixtures.** It is the secondary path; the in-place applier handles all 21.
+- **The round-trip engine ingests only 2 of 21 fixtures** measured. It is the secondary path; the in-place applier handles every deck in the corpus.
 
 ## What this project has learned the hard way
 

@@ -19,7 +19,7 @@ ppt/diagrams/drawing1.xml     a cached rendering
 
 The slide binds them through a single `<dgm:relIds>` element carrying four relationship ids. Edit one part out of step with the others and PowerPoint either repairs the file, re-renders from the stale cache, or flattens the diagram to a picture — with no error anywhere.
 
-Twenty-one third-party fixtures were obtained (Apache POI, Apache-2.0; LibreOffice, MPL-2.0; python-pptx, ts-pptx, pptx-automizer and dotnet/Open-XML-SDK, MIT; US EIA and NASA, public domain) and the validation matrix run against them. Sixteen contain a diagram; five deliberately do not, as controls.
+Twenty-six third-party fixtures have been obtained (Apache POI, Apache-2.0; LibreOffice, MPL-2.0; python-pptx, ts-pptx, pptx-automizer and dotnet/Open-XML-SDK, MIT; US EIA and NASA, public domain) and the validation matrix run against them. Sixteen contain a diagram; ten deliberately do not, as controls.
 
 ## Measurements
 
@@ -28,7 +28,7 @@ Twenty-one third-party fixtures were obtained (Apache POI, Apache-2.0; LibreOffi
 | **A · read** | **16/16** diagrams read completely — parts, authored text, structural points |
 | **B · preserve** | **9 decks** edited with every diagram byte-identical, 96.7–99.7% package fidelity (12 fixtures are diagram-only, with nothing else to edit) |
 | **C · refuse** | **16/16** attempted diagram edits refused |
-| **D · round-trip** | **2/21** ingested by the heavy engine |
+| **D · round-trip** | **2/21** ingested by the heavy engine (measured before the corpus grew to 26) |
 | **Damage** | **0** diagrams damaged anywhere |
 
 The hardest case is `nasa-es6-exit.pptx`: a real 52-slide, 340-part NASA presentation carrying 11 diagrams across 55 diagram parts, 323 structural points and 93 media parts. One text edit changed exactly one part — 99.7% fidelity — with all 11 diagrams intact.
@@ -53,7 +53,7 @@ An earlier version of this ADR concluded from that "the diagram is the cause", o
 
 So a diagram is **sufficient** to trigger the refusal, not **necessary**. The real constraint is the engine's font-family projection, which SmartArt reliably violates and which other content violates too. Naming SmartArt as the cause would have sent anyone debugging a refused chart-only deck in the wrong direction.
 
-This does not weaken the decision below. It is *stronger* evidence for it: our own in-place applier handles all 21 fixtures, including the 19 the heavy engine will not ingest.
+This does not weaken the decision below. It is *stronger* evidence for it: our own in-place applier handles every fixture in the corpus, including the ones the heavy engine will not ingest.
 
 ## Decision
 
