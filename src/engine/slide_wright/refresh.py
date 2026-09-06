@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from slide_wright.changeset import Change, ChangeSet, Op
+from slide_wright.changeset import Change, ChangeSet, Op, Origin
 from slide_wright.inspect import DeckInfo, ShapeInfo
 from slide_wright.sources import Citation, SourceSet, SourceTable, _normalise
 
@@ -73,6 +73,11 @@ class RefreshPlan:
                 before=match.current,
                 after=match.citation.value,
                 rationale=f"source: {match.citation.reference}",
+                # Grounded in a coordinate, not a model's opinion — so this is
+                # SOURCE origin and does not need human review to be trusted.
+                origin=Origin.SOURCE,
+                citation=match.citation.reference,
+                object_kind="table",
             ))
         return changeset
 

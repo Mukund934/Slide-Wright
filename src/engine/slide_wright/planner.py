@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from slide_wright.changeset import Change, ChangeSet, Op
+from slide_wright.changeset import Change, ChangeSet, Op, Origin
 from slide_wright.inspect import DeckInfo
 from slide_wright.llm.client import Budget, Completion, Provider, StubProvider
 from slide_wright.llm.usage import Ledger
@@ -169,6 +169,10 @@ def _validate(raw, deck: DeckInfo, index: int) -> tuple[Change | None, str]:
             before=raw.get("before"),
             after=raw.get("after"),
             rationale=str(raw.get("rationale", "")),
+            # A model proposed this. It is not grounded in anything checkable,
+            # so it carries MODEL origin and will be flagged as needing review.
+            origin=Origin.MODEL,
+            object_kind=shape.kind,
         ),
         "",
     )
