@@ -1,0 +1,215 @@
+/**
+ * The proof.
+ *
+ * This panel has one job and it is not reassurance: it is accuracy. Every
+ * number is computed by the engine from part hashes and object counts, and this
+ * component adds no interpretation of its own beyond arranging them.
+ *
+ * The rule that shapes it: **there is no green state unless the engine said
+ * deliverable.** Not "mostly fine", not "verified with warnings" invented in
+ * the client. The engine fails closed — an unattributed slide change, a removed
+ * part, native object loss or suspected rasterisation each block delivery — and
+ * a UI that softened any of those would be lying about the only thing this
+ * product sells.
+ */
+
+import { motion } from "motion/react";
+
+import type { ApplyProgress, Verification } from "../api/types";
+import { PanelHeading, Pill, Stat } from "../design/primitives";
+import { enter, reveal } from "../motion/tokens";
+
+export function VerificationPanel({
+  verification,
+  progress,
+  applying,
+  onGoToSlide,
+}: {
+  verification: Verification | null;
+  progress: ApplyProgress[];
+  applying: boolean;
+  onGoToSlide: (n: number) => void;
+}) {
+  if (applying) return <Progress progress={progress} />;
+  if (!verification) return null;
+
+  const blocked = !verification.deliverable;
+
+  return (
+    <motion.section
+      variants={enter}
+      initial="hidden"
+      animate="shown"
+      className="shrink-0 border-t border-[--color-line]"
+      aria-live="polite"
+    >
+      <PanelHeading
+        trailing={
+          <Pill verdict={blocked ? "blocked" : "verified"}>
+            {blocked ? "Not delivered" : "Verified"}
+          </Pill>
+        }
+      >
+        {blocked ? "Blocked" : "Result"}
+      </PanelHeading>
+
+      <div className="px-3 py-2">
+        {blocked ? (
+          <Blocked verification={verification} onGoToSlide={onGoToSlide} />
+        ) : (
+          <Delivered verification={verification} />
+        )}
+
+        <div className="mt-2 border-t border-[--color-line] pt-2">
+          {verification.census.map((row) => (
+            <Stat
+              key={row.label}
+              label={row.label}
+              value={`${row.source} → ${row.output}`}
+              intact={row.intact}
+            />
+          ))}
+        </div>
+      </div>
+    </motion.section>
+  );
+}
+
+function Delivered({ verification }: { verification: Verification }) {
+  return (
+    <>
+      <p className="text-xs leading-relaxed text-[--color-ink]">
+        <strong className="font-medium">
+          {verification.identical_parts} of {verification.total_parts}
+        </strong>{" "}
+        package parts are byte-for-byte identical to the file you supplied
+        <span className="text-[--color-ink-faint]">
+          {" "}
+          ({verification.fidelity_score.toFixed(2)}%)
+        </span>
+        .
+      </p>
+      <p className="mt-1 text-xs text-[--color-ink-muted]">
+        {verification.untouched_slides} slide
+        {verification.untouched_slides === 1 ? "" : "s"} untouched ·{" "}
+        {verification.requested.length} requested change
+        {verification.requested.length === 1 ? "" : "s"} applied ·{" "}
+        <span className="text-[--color-verified]">0 unexpected</span>
+      </p>
+    </>
+  );
+}
+
+/**
+ * A refusal, explained.
+ *
+ * The UX architecture flags this as the state most likely to be misread: users
+ * trained by other tools read a refusal as breakage. It is the guarantee
+ * working, and the copy has to say so without being smug about withholding
+ * someone's deck.
+ */
+function Blocked({
+  verification,
+  onGoToSlide,
+}: {
+  verification: Verification;
+  onGoToSlide: (n: number) => void;
+}) {
+  return (
+    <>
+      <p className="text-xs leading-relaxed text-[--color-ink]">
+        Slide-Wright checked the result and found changes it cannot account for,
+        so it did not deliver the deck. Your original is untouched.
+      </p>
+      <ul className="mt-2 space-y-1">
+        {verification.blocking_reasons.map((reason) => (
+          <li key={reason} className="flex gap-1.5 text-xs text-[--color-blocked]">
+            <span aria-hidden>·</span>
+            <span className="leading-relaxed">{reason}</span>
+          </li>
+        ))}
+      </ul>
+      {verification.unrequested_slides.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-2xs text-[--color-ink-faint]">Inspect:</span>
+          {verification.unrequested_slides.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => onGoToSlide(n)}
+              className="rounded-[--radius-sm] bg-[--color-blocked-wash] px-1.5 py-0.5 text-evidence text-[--color-blocked] transition-colors duration-[--duration-fast] hover:brightness-125"
+            >
+              slide {n}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
+ * What is happening, while it happens.
+ *
+ * Stages, not a percentage. The engine reports each transition as it occurs and
+ * knows nothing about how long the next one takes, so a bar would be a
+ * fabrication — and fabricated confidence is the specific thing this product
+ * exists to replace.
+ */
+const STAGE_COPY: Record<string, string> = {
+  applying: "Writing the approved changes",
+  applied: "Changes written",
+  verifying: "Comparing every part against your original",
+  verified: "Verified",
+  blocked: "Verification failed — the deck was not delivered",
+  refused: "Refused before writing anything",
+};
+
+function Progress({ progress }: { progress: ApplyProgress[] }) {
+  return (
+    <section
+      className="shrink-0 border-t border-[--color-line] px-3 py-3"
+      aria-live="polite"
+      aria-busy
+    >
+      <ol className="space-y-1.5">
+        {progress.map((stage, index) => {
+          const current = index === progress.length - 1;
+          return (
+            <motion.li
+              key={`${stage.stage}-${index}`}
+              variants={enter}
+              initial="hidden"
+              animate="shown"
+              transition={reveal}
+              className="flex items-start gap-2 text-xs"
+            >
+              <span
+                aria-hidden
+                className={[
+                  "mt-1.5 size-1.5 shrink-0 rounded-full",
+                  current ? "bg-[--color-changed]" : "bg-[--color-line-strong]",
+                ].join(" ")}
+              />
+              <span className={current ? "text-[--color-ink]" : "text-[--color-ink-faint]"}>
+                {STAGE_COPY[stage.stage] ?? stage.detail}
+                {stage.slides?.length ? (
+                  <span className="text-[--color-ink-faint]">
+                    {" "}
+                    · slide{stage.slides.length === 1 ? "" : "s"} {stage.slides.join(", ")}
+                  </span>
+                ) : null}
+              </span>
+            </motion.li>
+          );
+        })}
+        {progress.length === 0 && (
+          <li className="text-xs text-[--color-ink-faint]">Starting…</li>
+        )}
+      </ol>
+      <p className="mt-2 text-2xs leading-relaxed text-[--color-ink-faint]">
+        A large deck takes minutes. Nothing is delivered until verification passes.
+      </p>
+    </section>
+  );
+}
