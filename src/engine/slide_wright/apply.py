@@ -148,6 +148,57 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
 
 # ── per-operation handlers ───────────────────────────────────────────────────
 
+# Operations whose replacement is text. A number is fine -- a model writing 42
+# where a cell wants "42" is not an error -- but a structure is not: `after` as
+# {"value": 12} used to be written into the slide as the literal Python repr of
+# a dict, on a board slide, with the report calling it verified.
+_TEXTUAL_OPS = {Op.SET_TEXT, Op.SET_TABLE_CELL, Op.SET_FONT, Op.SET_COLOR}
+
+
+def _unusable_value(change: Change) -> str:
+    """Whether `after` is the kind of thing this operation can write.
+
+    The applier is the last thing between a proposal and the file, and it was
+    reachable with values no validator upstream had ruled out. Two shapes of
+    failure, both live:
+
+      · a structure or None reached the file, stringified. `{'nested': 'x'}`
+        and `None` were written into slide text verbatim.
+      · a non-numeric size raised ValueError out of `float()`, which is not an
+        ApplyError, so it escaped the caller's handler and surfaced as a 500
+        rather than as a refusal with a reason.
+
+    Refusing here rather than upstream is deliberate: the planner is not the
+    only way a change is built, and a guarantee that lives in one caller is a
+    guarantee the next caller does not have.
+    """
+    after = change.after
+    if change.op in _TEXTUAL_OPS:
+        if not isinstance(after, (str, int, float)) or isinstance(after, bool):
+            return (f"the replacement for {change.target} is "
+                    f"{type(after).__name__}, and this writes text")
+        return ""
+    if change.op is Op.SET_FONT_SIZE:
+        try:
+            float(after)
+        except (TypeError, ValueError):
+            return f"{after!r} is not a point size"
+        return ""
+    if change.op in (Op.MOVE, Op.RESIZE):
+        pair = after if isinstance(after, (list, tuple)) else (after, None)
+        if len(pair) != 2:
+            return f"{change.op.value} needs two coordinates, got {after!r}"
+        for value in pair:
+            if value is None:
+                continue
+            try:
+                int(value)
+            except (TypeError, ValueError):
+                return f"{value!r} is not a coordinate"
+        return ""
+    return ""
+
+
 def _apply_one(root, change: Change) -> tuple[bool, str]:
     """Apply one change, returning whether it worked and, if not, why.
 
@@ -161,6 +212,10 @@ def _apply_one(root, change: Change) -> tuple[bool, str]:
     if shape is None:
         return False, f"no shape with id {shape_id!r} on slide {change.slide}"
 
+    unusable = _unusable_value(change)
+    if unusable:
+        return False, unusable
+
     if change.op is Op.SET_TEXT:
         if _set_text(shape, str(change.before), str(change.after)):
             return True, ""
@@ -169,6 +224,13 @@ def _apply_one(root, change: Change) -> tuple[bool, str]:
     if change.op is Op.SET_TABLE_CELL:
         if _set_table_cell(shape, change):
             return True, ""
+        size = _table_size(shape)
+        m = re.search(r"/r(\d+)/c(\d+)$", change.target)
+        if m and size and (int(m.group(1)) >= size[0] or int(m.group(2)) >= size[1]):
+            # "does not hold 'None'" for a cell that is not on the table sends
+            # a reader looking for a value in a cell that does not exist.
+            return False, (f"the table on slide {change.slide} is "
+                           f"{size[0]}x{size[1]}; {change.target} is off it")
         return False, f"cell {change.target} does not hold {str(change.before)!r}"
     if change.op in (Op.SET_FONT, Op.SET_COLOR):
         if _set_run_format(shape, change):
@@ -267,6 +329,13 @@ def _set_table_cell(shape, change: Change) -> bool:
         first.text = str(change.after)
         return True
     return False
+
+
+def _table_size(shape) -> tuple[int, int] | None:
+    rows = shape.findall(".//a:tr", NS)
+    if not rows:
+        return None
+    return len(rows), max(len(r.findall("a:tc", NS)) for r in rows)
 
 
 def _set_font_size(shape, size_pt: float) -> bool:

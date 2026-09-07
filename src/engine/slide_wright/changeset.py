@@ -179,7 +179,18 @@ class ChangeSet:
     # ── construction ─────────────────────────────────────────────────────────
 
     def add(self, change: Change) -> Change:
-        """Add a change, refusing anything a lock forbids."""
+        """Add a change, refusing anything a lock forbids.
+
+        The id is made unique on the way in. It is what the review surface
+        addresses a change by -- `approve("c1")` walks the list and approves
+        every match -- so two changes sharing one id means clicking Approve on
+        the row you read also approves the row you did not. A model chooses
+        these ids, and nothing stopped it from repeating one.
+
+        Renamed rather than rejected: the second change may be perfectly good,
+        and the id is bookkeeping the reviewer never sees.
+        """
+        change.id = self._unique(change.id)
         for lock in self.locks:
             if lock.blocks(change):
                 change.status = Status.REJECTED
@@ -190,6 +201,16 @@ class ChangeSet:
                 break
         self.changes.append(change)
         return change
+
+    def _unique(self, wanted: str) -> str:
+        taken = {c.id for c in self.changes}
+        if wanted and wanted not in taken:
+            return wanted
+        stem = wanted or "c"
+        n = 2
+        while f"{stem}.{n}" in taken:
+            n += 1
+        return f"{stem}.{n}"
 
     def lock(self, scope: str, target: str = "", reason: str = "") -> Lock:
         lk = Lock(scope=scope, target=target, reason=reason)

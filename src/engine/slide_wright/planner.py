@@ -131,7 +131,7 @@ def _validate(raw, deck: DeckInfo, index: int) -> tuple[Change | None, str]:
     except ValueError:
         return None, f"unknown op {raw.get('op')!r}"
 
-    from slide_wright.apply import IN_PLACE_OPS
+    from slide_wright.apply import IN_PLACE_OPS, _unusable_value
 
     if op not in IN_PLACE_OPS:
         return None, f"op {op.value} cannot be applied surgically"
@@ -159,6 +159,19 @@ def _validate(raw, deck: DeckInfo, index: int) -> tuple[Change | None, str]:
         before = str(raw.get("before", ""))
         if before and before not in shape.text:
             return None, f"before text is not present in shape {shape_id}"
+
+    proposal = Change(
+        id=raw.get("id") or f"c{index}", op=op, slide=slide_no,
+        target=target, before=raw.get("before"), after=raw.get("after"),
+    )
+    # The applier refuses these too -- it has to, since it is not the only way
+    # a change is built -- but a proposal that can never be written should not
+    # reach a review queue at all. A reviewer's attention is the scarce thing
+    # here, and asking them to read a change that was never applicable spends it
+    # for nothing.
+    unusable = _unusable_value(proposal)
+    if unusable:
+        return None, unusable
 
     return (
         Change(

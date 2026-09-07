@@ -185,3 +185,131 @@ class TestBudget:
         budget = Budget(max_output_tokens=1)
         with pytest.raises(BudgetExceeded, match="output tokens"):
             plan(deck, "x" * 4000, provider=StubProvider(["[]" + " " * 4000]), budget=budget)
+
+
+@pytest.fixture
+def text_target(deck):
+    """A shape with text of its own, and the slide it is on."""
+    for slide in deck.slides:
+        for shape in slide.shapes:
+            if shape.kind not in ("table", "chart") and shape.text.strip():
+                return slide.number, shape
+    pytest.skip("fixture has no editable text")
+
+
+class TestAValueTheDeckCannotHold:
+    """`after` was passed through untyped, and the applier stringified it.
+
+    A model returning `{"value": 12}` where a cell wants a figure had that dict
+    written into the slide as `{'value': 12}` — on the deck, in the file, with
+    the change report calling the result verified because the slide was in the
+    change set. A `None` was written as `None`.
+
+    A non-numeric point size was the other half: `float("huge")` raised
+    ValueError, which is not an ApplyError, so it escaped the caller's handler
+    and reached the API as a 500 rather than as a refusal with a reason.
+    """
+
+    def _proposal(self, slide, shape, **over):
+        return [{"op": "set_text", "slide": slide, "target": shape.id,
+                 "before": shape.text[:6], **over}]
+
+    @pytest.mark.parametrize("value", [{"nested": "payload"}, ["a", "b"], None, True])
+    def test_a_structure_is_never_a_replacement(self, deck, text_target, value):
+        slide, shape = text_target
+        result = plan(deck, "x", provider=responding(
+            self._proposal(slide, shape, after=value)))
+        assert not result.changeset.changes
+        assert result.dropped
+
+    def test_a_number_still_is_one(self, deck, text_target):
+        """Narrow: a model writing 42 where a cell wants "42" is not an error."""
+        slide, shape = text_target
+        result = plan(deck, "x", provider=responding(
+            self._proposal(slide, shape, after=42)))
+        assert len(result.changeset.changes) == 1
+
+    def test_a_point_size_must_be_a_number(self, deck, text_target):
+        slide, shape = text_target
+        result = plan(deck, "x", provider=responding([
+            {"op": "set_font_size", "slide": slide, "target": shape.id, "after": "huge"}]))
+        assert not result.changeset.changes
+        assert "point size" in result.dropped[0][1]
+
+    def test_a_coordinate_must_be_a_number(self, deck, text_target):
+        slide, shape = text_target
+        result = plan(deck, "x", provider=responding([
+            {"op": "move", "slide": slide, "target": shape.id, "after": "far away"}]))
+        assert not result.changeset.changes
+
+    def test_the_applier_refuses_them_too(self, adversarial_deck, tmp_path, text_target):
+        """The planner is not the only way a change is built, and a guarantee
+        that lives in one caller is one the next caller does not have."""
+        from slide_wright.apply import apply_changes
+        from slide_wright.changeset import Change, ChangeSet
+
+        slide, shape = text_target
+        cs = ChangeSet(deck=str(adversarial_deck))
+        cs.add(Change(id="x", op=Op.SET_TEXT, slide=slide, target=shape.id,
+                      before=shape.text[:6], after={"nested": "payload"}))
+        cs.approve_all()
+        result = apply_changes(adversarial_deck, cs, tmp_path / "out.pptx")
+        assert result.failed
+        assert "writes text" in result.failed[0][1]
+
+
+class TestEveryChangeHasItsOwnId:
+    """The review surface addresses a change by id.
+
+    `approve("c1")` walks the list and approves every match, so two changes
+    sharing one id means clicking Approve on the row you read also approves the
+    row you did not — in a product whose whole claim is that a person decided.
+    A model picks these ids and nothing stopped it repeating one.
+    """
+
+    def test_a_repeated_id_is_made_unique(self, deck, text_target):
+        slide, shape = text_target
+        result = plan(deck, "x", provider=responding([
+            {"id": "c1", "op": "set_text", "slide": slide, "target": shape.id,
+             "before": shape.text[:6], "after": "one"},
+            {"id": "c1", "op": "set_text", "slide": slide, "target": shape.id,
+             "before": shape.text[:6], "after": "two"},
+        ]))
+        ids = [c.id for c in result.changeset.changes]
+        assert len(ids) == len(set(ids)) == 2
+
+    def test_approving_one_does_not_approve_the_other(self, deck, text_target):
+        slide, shape = text_target
+        result = plan(deck, "x", provider=responding([
+            {"id": "c1", "op": "set_text", "slide": slide, "target": shape.id,
+             "before": shape.text[:6], "after": "one"},
+            {"id": "c1", "op": "set_text", "slide": slide, "target": shape.id,
+             "before": shape.text[:6], "after": "two"},
+        ]))
+        changeset = result.changeset
+        changeset.approve(changeset.changes[0].id)
+        assert len(changeset.approved) == 1
+        assert changeset.approved[0].after == "one"
+
+
+class TestACellOffTheTable:
+    def test_the_refusal_says_the_table_is_smaller_than_that(
+        self, adversarial_deck, tmp_path, deck, table_id
+    ):
+        """"does not hold 'None'" sent a reader looking for a value in a cell
+        that does not exist."""
+        from slide_wright.apply import apply_changes
+        from slide_wright.changeset import Change, ChangeSet
+
+        # By kind, not by id. Shape ids are per-slide in OOXML, so "the slide
+        # with a shape whose id is 3" is a different slide from "the slide with
+        # the table" more often than not.
+        slide = next(s.number for s in deck.slides
+                     if any(x.kind == "table" for x in s.shapes))
+        cs = ChangeSet(deck=str(adversarial_deck))
+        cs.add(Change(id="x", op=Op.SET_TABLE_CELL, slide=slide,
+                      target=f"{table_id}/r99/c99", after="x"))
+        cs.approve_all()
+        result = apply_changes(adversarial_deck, cs, tmp_path / "out.pptx")
+        assert result.failed
+        assert "is off it" in result.failed[0][1]
