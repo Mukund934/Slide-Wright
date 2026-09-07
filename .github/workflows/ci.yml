@@ -35,6 +35,77 @@ jobs:
       - name: Test
         run: python -m pytest tests -v --tb=short
 
+  product:
+    name: Product surface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: src/product/web/package-lock.json
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "src/engine[dev]"
+          pip install -e "src/product/api[dev]"
+          npm --prefix src/product/web ci
+
+      - name: API tests
+        run: python -m pytest tests/product -v --tb=short
+
+      - name: Client typecheck
+        run: npm --prefix src/product/web run typecheck
+
+      - name: Client tests
+        run: npm --prefix src/product/web test
+
+      - name: Client builds
+        run: npm --prefix src/product/web run build
+
+      # ADR-0008: the client must load with the network unplugged. A build that
+      # fetches from an external origin breaks that silently -- the page still
+      # works on the machine that built it and fails on an air-gapped one.
+      #
+      # Matched on positions that actually load something. A bare URL is not a
+      # fetch: React ships doc links inside its error messages and Tailwind
+      # writes its own homepage into a CSS comment, and failing on those would
+      # be a guard nobody could keep green.
+      - name: Assert the client loads nothing from outside
+        run: |
+          if grep -rnoE '(src|href)="https?://|url\(["'"'"']?https?://|@import[^;]*https?://|from *["'"'"']https?://|import\(["'"'"']https?://|fetch\(["'"'"']https?://'                src/product/web/dist/ --include='*.html' --include='*.css' --include='*.js'; then
+            echo "FAIL the built client loads from an external origin"
+            exit 1
+          fi
+          echo "client is self-contained"
+
+      # ADR-0010: bound to loopback, with no flag to change it. Matched on the
+      # argparse call rather than the string, because the module's own docstring
+      # explains that --host is deliberately absent.
+      - name: Assert the API cannot be bound to a public interface
+        run: |
+          if grep -qE 'add_argument\( *["'"'"']--host' src/product/api/slide_wright_api/__main__.py; then
+            echo "FAIL the app exposes a --host flag"
+            exit 1
+          fi
+          if ! grep -q 'HOST = "127.0.0.1"' src/product/api/slide_wright_api/__main__.py; then
+            echo "FAIL the app no longer pins loopback"
+            exit 1
+          fi
+          if grep -nE 'host *= *["'"'"'](0\.0\.0\.0|::)' src/product/api/slide_wright_api/*.py; then
+            echo "FAIL something binds a public interface"
+            exit 1
+          fi
+          echo "loopback binding intact"
+
   fidelity-corpus:
     name: Fidelity corpus integrity
     runs-on: ubuntu-latest
