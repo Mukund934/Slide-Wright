@@ -26,9 +26,10 @@ import { Filmstrip } from "./workspace/Filmstrip";
 import { History } from "./workspace/History";
 import { OpenDeck } from "./workspace/OpenDeck";
 import { SlideCanvas } from "./workspace/SlideCanvas";
+import { SourcesPanel } from "./workspace/SourcesPanel";
 import { VerificationPanel } from "./workspace/VerificationPanel";
 
-type RightTab = "audit" | "changes" | "history";
+type RightTab = "audit" | "sources" | "changes" | "history";
 
 export default function App() {
   const workspace = useWorkspace();
@@ -108,6 +109,17 @@ export default function App() {
                   // leaving them on the audit would hide the thing they now
                   // have to approve.
                   void workspace.tidy();
+                  setTab("changes");
+                }}
+              />
+            ) : tab === "sources" ? (
+              <SourcesPanel
+                documentId={workspace.document.id}
+                busy={workspace.phase === "proposing" || workspace.phase === "applying"}
+                onGoToSlide={(n) => workspace.select(n, null)}
+                onRefresh={(sources) => {
+                  // Same as tidy: land the reviewer where the decision is.
+                  void workspace.refresh(sources);
                   setTab("changes");
                 }}
               />
@@ -228,14 +240,14 @@ function Tabs({ tab, onChange }: { tab: RightTab; onChange: (t: RightTab) => voi
       role="tablist"
       className="flex h-9 shrink-0 items-stretch border-b border-line"
     >
-      {(["audit", "changes", "history"] as const).map((value) => (
+      {(["audit", "sources", "changes", "history"] as const).map((value) => (
         <button
           key={value}
           role="tab"
           aria-selected={tab === value}
           onClick={() => onChange(value)}
           className={[
-            "relative flex-1 text-2xs font-medium uppercase tracking-[0.08em]",
+            "relative flex-1 truncate px-1 text-2xs font-medium uppercase tracking-[0.06em]",
             "transition-colors duration-[120ms]",
             tab === value
               ? "text-ink"
