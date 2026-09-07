@@ -62,7 +62,7 @@ export default function App() {
       />
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-panel">
+        <aside className="flex w-44 shrink-0 flex-col border-r border-line bg-panel xl:w-56">
           <Filmstrip
             slides={workspace.document.deck.slides}
             selected={workspace.selectedSlide}
@@ -75,21 +75,17 @@ export default function App() {
           />
         </aside>
 
-        <main className="flex min-w-0 flex-1 flex-col">
+        {/* The canvas is what needs width, so the canvas is what goes.
+            Below a laptop the three regions cannot all be useful at once, and
+            cramming them makes all three useless rather than one of them
+            absent. What survives is the review — the change set, the verdict
+            and the filmstrip — which is the part someone is most likely to be
+            doing on a smaller screen anyway. */}
+        <main className="hidden min-w-0 flex-1 flex-col lg:flex">
           <Stage workspace={workspace} />
-          <CommandBar
-            scopeLabel={scopeLabel(workspace)}
-            modelConfigured={health?.model_configured ?? false}
-            modelName={health?.model ?? "none"}
-            busy={workspace.phase === "proposing" || workspace.phase === "applying"}
-            onPropose={(instruction: string, locks: LockSpec[]) =>
-              workspace.propose({ instruction, locks })
-            }
-            onClearSelection={() => workspace.select(workspace.selectedSlide, null)}
-          />
         </main>
 
-        <aside className="flex w-80 shrink-0 flex-col border-l border-line bg-panel">
+        <aside className="flex min-w-0 flex-1 flex-col border-l border-line bg-panel lg:w-72 lg:flex-none xl:w-80">
           <Tabs tab={tab} onChange={setTab} />
 
           <div className="flex min-h-0 flex-1 flex-col">
@@ -138,6 +134,17 @@ export default function App() {
           )}
         </aside>
       </div>
+
+      <CommandBar
+        scopeLabel={scopeLabel(workspace)}
+        modelConfigured={health?.model_configured ?? false}
+        modelName={health?.model ?? "none"}
+        busy={workspace.phase === "proposing" || workspace.phase === "applying"}
+        onPropose={(instruction: string, locks: LockSpec[]) =>
+          workspace.propose({ instruction, locks })
+        }
+        onClearSelection={() => workspace.select(workspace.selectedSlide, null)}
+      />
 
       <ErrorBar message={workspace.error} onDismiss={workspace.dismissError} />
     </div>
