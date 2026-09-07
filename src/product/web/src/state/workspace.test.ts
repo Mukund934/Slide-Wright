@@ -23,6 +23,7 @@ const initial: WorkspaceState = {
   selectedShape: null,
   carriedShape: null,
   comparison: null,
+  locks: [],
   error: null,
 };
 
@@ -355,5 +356,65 @@ describe("the canvas follows the selection", () => {
     }
     expect(state.selectedSlide).toBe(4);
     expect(shown(state)).toBe(4);
+  });
+});
+
+describe("protection stands across proposals", () => {
+  /**
+   * A guarantee that had to be re-declared on every request would be forgotten
+   * on the one that mattered, so locks are session state. The failure this
+   * guards against is worse than the feature being absent: the interface showed
+   * an object protected while the lock never reached the engine, because two of
+   * three proposing callbacks read the locks without listing them as a
+   * dependency and `useCallback` handed back an empty closure.
+   */
+  it("holds a lock until it is lifted", () => {
+    let state = reducer(initial, { type: "lock", lock: { scope: "shape", target: "7" } });
+    expect(state.locks).toEqual([{ scope: "shape", target: "7" }]);
+
+    state = reducer(state, { type: "lock", lock: { scope: "numbers" } });
+    expect(state.locks).toHaveLength(2);
+
+    state = reducer(state, { type: "unlock", lock: { scope: "shape", target: "7" } });
+    expect(state.locks).toEqual([{ scope: "numbers" }]);
+  });
+
+  it("locking the same thing twice is a slip, not two guarantees", () => {
+    const once = reducer(initial, { type: "lock", lock: { scope: "slide", target: "4" } });
+    const twice = reducer(once, { type: "lock", lock: { scope: "slide", target: "4" } });
+    expect(twice.locks).toHaveLength(1);
+    expect(twice).toBe(once);
+  });
+
+  it("tells apart the same scope on different targets", () => {
+    let state = reducer(initial, { type: "lock", lock: { scope: "shape", target: "7" } });
+    state = reducer(state, { type: "lock", lock: { scope: "shape", target: "9" } });
+    state = reducer(state, { type: "unlock", lock: { scope: "shape", target: "7" } });
+    expect(state.locks).toEqual([{ scope: "shape", target: "9" }]);
+  });
+
+  it("is cleared by opening a deck, because ids do not carry across", () => {
+    // A shape lock names an id and a slide lock names a number. Both mean
+    // something different in a different deck, so carrying them over would
+    // silently protect the wrong objects — the worst possible outcome for a
+    // guarantee, because it would still look like it was working.
+    const held = reducer(initial, { type: "lock", lock: { scope: "shape", target: "7" } });
+    expect(reducer(held, { type: "opened", document: document() }).locks).toEqual([]);
+  });
+
+  it("survives everything that moves the document within one deck", () => {
+    // Applying and reverting replace large parts of the state. A lock lost to
+    // either is a guarantee silently withdrawn while the deck stays open.
+    let state = reducer(initial, { type: "opened", document: document() });
+    state = reducer(state, { type: "lock", lock: { scope: "numbers" } });
+    state = reducer(state, {
+      type: "settled",
+      verification: verification(),
+      document: document(),
+    });
+    expect(state.locks, "an apply must not clear them").toEqual([{ scope: "numbers" }]);
+
+    state = reducer(state, { type: "reverted", document: document() });
+    expect(state.locks, "a revert must not clear them").toEqual([{ scope: "numbers" }]);
   });
 });

@@ -185,6 +185,22 @@
       0 12px 32px -8px rgb(0 0 0 / 0.45);
   }
 
+  /* Protected. A hatch and a border style, not a colour.
+     The diff and lock states must be distinguishable by someone who cannot
+     separate the hues -- WCAG 1.4.1, and the research names it a procurement
+     requirement for enterprise buyers. The changed ring is a solid line; this
+     is a dashed one over diagonal hatching, so the two are told apart by shape
+     before colour is consulted at all. */
+  .protected-hatch {
+    outline: 1.5px dashed var(--color-ink-faint);
+    outline-offset: -1px;
+    background-image: repeating-linear-gradient(
+      45deg,
+      color-mix(in oklab, var(--color-paper-ink), transparent 92%) 0 3px,
+      transparent 3px 7px
+    );
+  }
+
   .text-evidence {
     font-family: var(--font-mono);
     font-size: var(--text-2xs);

@@ -37,6 +37,8 @@ export interface CanvasProps {
   slideHeight: number;
   /** Shape ids the current change set touches. The only thing outlined. */
   changedShapes: Set<string>;
+  /** Shape ids the user has declared must not change. */
+  protectedShapes?: Set<string>;
   /** The shape just navigated to, if any: the one the eye is being carried to. */
   carriedShape?: string | null;
   selectedShape?: string | null;
@@ -48,6 +50,7 @@ export function SlideCanvas({
   slideWidth,
   slideHeight,
   changedShapes,
+  protectedShapes,
   carriedShape,
   selectedShape,
   onSelectShape,
@@ -92,6 +95,7 @@ export function SlideCanvas({
             key={shape.id}
             shape={shape}
             changed={changedShapes.has(shape.id)}
+            locked={protectedShapes?.has(shape.id) ?? false}
             carried={carriedShape === shape.id}
             selected={selectedShape === shape.id}
             onSelect={onSelectShape}
@@ -105,12 +109,14 @@ export function SlideCanvas({
 function ShapeBox({
   shape,
   changed,
+  locked,
   carried,
   selected,
   onSelect,
 }: {
   shape: Shape;
   changed: boolean;
+  locked: boolean;
   carried: boolean;
   selected: boolean;
   onSelect?: (id: string | null) => void;
@@ -134,6 +140,7 @@ function ShapeBox({
       transition={carry}
       className={[
         "absolute overflow-hidden",
+        locked ? "protected-hatch" : "",
         changed ? "ring-changed" : "",
         selected && !changed ? "ring-selected" : "",
         interactive ? "cursor-pointer" : "",
@@ -157,6 +164,8 @@ function ShapeBox({
       }
       data-shape-id={shape.id}
       data-changed={changed || undefined}
+      data-protected={locked || undefined}
+      aria-label={locked ? `${shape.name || shape.kind} — protected` : undefined}
     >
       <ShapeBody shape={shape} />
     </motion.div>

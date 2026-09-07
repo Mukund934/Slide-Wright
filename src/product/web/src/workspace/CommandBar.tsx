@@ -17,23 +17,16 @@
 import { motion } from "motion/react";
 import { useState } from "react";
 
-import { LOCK_SCOPES, type LockScope, type LockSpec } from "../api/types";
+import { LOCK_SCOPES, type LockSpec } from "../api/types";
 import { Button, Pill } from "../design/primitives";
 import { reveal } from "../motion/tokens";
-
-/** The scopes worth one click. The rest are available, just not in the way. */
-const QUICK_LOCKS: { scope: LockScope; label: string; hint: string }[] = [
-  { scope: "numbers", label: "numbers", hint: "no figure may change" },
-  { scope: "wording", label: "wording", hint: "no text may change" },
-  { scope: "layout", label: "layout", hint: "nothing may move or resize" },
-  { scope: "formatting", label: "formatting", hint: "no typeface, size or colour" },
-];
 
 export function CommandBar({
   scopeLabel,
   modelConfigured,
   modelName,
   busy,
+  protect,
   onPropose,
   onClearSelection,
 }: {
@@ -41,20 +34,19 @@ export function CommandBar({
   modelConfigured: boolean;
   modelName: string;
   busy: boolean;
+  protect: React.ReactNode;
   onPropose: (instruction: string, locks: LockSpec[]) => void;
   onClearSelection: () => void;
 }) {
   const [instruction, setInstruction] = useState("");
-  const [locks, setLocks] = useState<LockScope[]>([]);
   const [detail, setDetail] = useState(false);
 
   const submit = () => {
     const text = instruction.trim();
     if (!text || busy) return;
-    onPropose(
-      text,
-      locks.map((scope) => ({ scope })),
-    );
+    // Locks are session state now, carried by every proposal path. Nothing
+    // extra to attach here.
+    onPropose(text, []);
     setInstruction("");
   };
 
@@ -71,31 +63,7 @@ export function CommandBar({
           <Pill verdict="changed">{scopeLabel}</Pill>
         </button>
 
-        <span className="ml-2 text-2xs text-ink-faint">Protect</span>
-        {QUICK_LOCKS.map((lock) => {
-          const on = locks.includes(lock.scope);
-          return (
-            <button
-              key={lock.scope}
-              type="button"
-              title={lock.hint}
-              aria-pressed={on}
-              onClick={() =>
-                setLocks((current) =>
-                  on ? current.filter((s) => s !== lock.scope) : [...current, lock.scope],
-                )
-              }
-              className={[
-                "rounded-full px-2 py-0.5 text-2xs transition-colors duration-[120ms]",
-                on
-                  ? "bg-ink font-medium text-ground"
-                  : "bg-raised text-ink-faint hover:text-ink",
-              ].join(" ")}
-            >
-              {lock.label}
-            </button>
-          );
-        })}
+        {protect}
       </div>
 
       {/* Capped, not stretched.

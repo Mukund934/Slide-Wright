@@ -26,6 +26,7 @@ import { Export } from "./workspace/Export";
 import { Filmstrip } from "./workspace/Filmstrip";
 import { History } from "./workspace/History";
 import { OpenDeck } from "./workspace/OpenDeck";
+import { Protect, ProtectedList } from "./workspace/Protect";
 import { SlideCanvas } from "./workspace/SlideCanvas";
 import { SourcesPanel } from "./workspace/SourcesPanel";
 import { VerificationPanel } from "./workspace/VerificationPanel";
@@ -104,6 +105,9 @@ export default function App() {
 
         <aside className="flex min-w-0 flex-1 flex-col border-l border-line bg-panel md:w-64 md:flex-none lg:w-72 xl:w-80 2xl:w-96">
           {!workspace.comparison && <Tabs tab={tab} onChange={setTab} />}
+          {!workspace.comparison && (
+            <ProtectedList locks={workspace.locks} onUnlock={workspace.unlock} />
+          )}
 
           <div
             id="deck-panel"
@@ -192,6 +196,15 @@ export default function App() {
       </div>
 
       <CommandBar
+        protect={
+          <Protect
+            slide={workspace.selectedSlide}
+            shape={selectedShapeOf(workspace)}
+            locks={workspace.locks}
+            onLock={workspace.lock}
+            onUnlock={workspace.unlock}
+          />
+        }
         scopeLabel={scopeLabel(workspace)}
         modelConfigured={health?.model_configured ?? false}
         modelName={health?.model ?? "none"}
@@ -381,6 +394,7 @@ function Stage({ workspace }: { workspace: ReturnType<typeof useWorkspace> }) {
             slideWidth={doc.deck.slide_width}
             slideHeight={doc.deck.slide_height}
             changedShapes={workspace.changedShapes}
+            protectedShapes={workspace.protectedShapes}
             carriedShape={workspace.carriedShape}
             selectedShape={workspace.selectedShape}
             onSelectShape={(id) => workspace.select(workspace.selectedSlide, id)}
@@ -436,9 +450,14 @@ function StructuralNote() {
   );
 }
 
+function selectedShapeOf(workspace: ReturnType<typeof useWorkspace>) {
+  if (!workspace.selectedShape) return null;
+  return workspace.slide?.shapes.find((s) => s.id === workspace.selectedShape) ?? null;
+}
+
 function scopeLabel(workspace: ReturnType<typeof useWorkspace>): string {
+  const shape = selectedShapeOf(workspace);
   if (workspace.selectedShape) {
-    const shape = workspace.slide?.shapes.find((s) => s.id === workspace.selectedShape);
     return shape ? `${shape.kind} on slide ${workspace.selectedSlide}` : "one object";
   }
   return `slide ${workspace.selectedSlide}`;

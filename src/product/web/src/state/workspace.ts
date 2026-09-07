@@ -8,7 +8,7 @@
  * safety argument rests on it not being.
  */
 
-import { useCallback, useMemo, useReducer } from "react";
+import { useCallback, useMemo, useReducer, useRef } from "react";
 
 import { ApiError, api, applyStreaming } from "../api/client";
 import type {
@@ -62,6 +62,16 @@ export interface WorkspaceState {
   carriedShape: string | null;
   /** Non-null while two versions are being compared. */
   comparison: Comparison | null;
+  /**
+   * What the user has declared must not change.
+   *
+   * Session state rather than a property of one request. "Do not touch slide 4,
+   * the partner signed it off" is a standing guarantee, and a lock that had to
+   * be re-declared on every proposal would be forgotten on the one that
+   * mattered. Every path that proposes — typed edits, a tidy, a refresh —
+   * carries these, so there is no door they do not cover.
+   */
+  locks: LockSpec[];
   error: string | null;
 }
 
@@ -75,6 +85,7 @@ const initial: WorkspaceState = {
   selectedShape: null,
   carriedShape: null,
   comparison: null,
+  locks: [],
   error: null,
 };
 
@@ -94,6 +105,8 @@ type Action =
   | { type: "comparing"; comparison: Comparison }
   | { type: "flip" }
   | { type: "stopComparing" }
+  | { type: "lock"; lock: LockSpec }
+  | { type: "unlock"; lock: LockSpec }
   | { type: "failed"; message: string }
   | { type: "dismissError" };
 
@@ -194,6 +207,16 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
     case "stopComparing":
       return { ...state, comparison: null };
 
+    case "lock":
+      // Idempotent. Locking the same object twice is a slip, not an intent to
+      // hold two identical guarantees.
+      return same(state.locks, action.lock)
+        ? state
+        : { ...state, locks: [...state.locks, action.lock] };
+
+    case "unlock":
+      return { ...state, locks: state.locks.filter((l) => !matches(l, action.lock)) };
+
     case "failed":
       // A failure returns the user to where they can act, never to a dead end.
       // After a failed apply the change set is still theirs to fix.
@@ -208,8 +231,33 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
   }
 }
 
+function matches(a: LockSpec, b: LockSpec): boolean {
+  return a.scope === b.scope && (a.target ?? "") === (b.target ?? "");
+}
+
+function same(locks: LockSpec[], lock: LockSpec): boolean {
+  return locks.some((l) => matches(l, lock));
+}
+
 export function useWorkspace() {
   const [state, dispatch] = useReducer(reducer, initial);
+
+  /**
+   * The locks, readable from any callback without a dependency array.
+   *
+   * This is deliberate and it is not a shortcut. Every proposing callback needs
+   * the *current* locks, and reading them from state means every one of those
+   * callbacks must remember to list `state.locks` as a dependency. Two of three
+   * did not, so `useCallback` handed back a closure holding the locks as they
+   * were when it was created -- empty. The user protected an object, the
+   * interface showed it protected, and the lock never reached the engine.
+   *
+   * A safety guarantee must not depend on getting a dependency array right. A
+   * ref cannot go stale, so the failure is unavailable rather than merely
+   * fixed.
+   */
+  const locksRef = useRef(state.locks);
+  locksRef.current = state.locks;
 
   const fail = useCallback((error: unknown) => {
     const message =
@@ -238,7 +286,13 @@ export function useWorkspace() {
       if (!state.document) return;
       dispatch({ type: "proposing" });
       try {
-        dispatch({ type: "proposed", changeset: await api.propose(state.document.id, body) });
+        dispatch({
+          type: "proposed",
+          changeset: await api.propose(state.document.id, {
+            ...body,
+            locks: [...locksRef.current, ...(body.locks ?? [])],
+          }),
+        });
       } catch (error) {
         fail(error);
       }
@@ -299,7 +353,7 @@ export function useWorkspace() {
       try {
         dispatch({
           type: "proposed",
-          changeset: await api.tidy(state.document.id, template),
+          changeset: await api.tidy(state.document.id, template, locksRef.current),
         });
       } catch (error) {
         fail(error);
@@ -323,7 +377,7 @@ export function useWorkspace() {
       try {
         dispatch({
           type: "proposed",
-          changeset: await api.refresh(state.document.id, sources),
+          changeset: await api.refresh(state.document.id, sources, locksRef.current),
         });
       } catch (error) {
         fail(error);
@@ -375,6 +429,9 @@ export function useWorkspace() {
   const flip = useCallback(() => dispatch({ type: "flip" }), []);
   const stopComparing = useCallback(() => dispatch({ type: "stopComparing" }), []);
 
+  const lock = useCallback((next: LockSpec) => dispatch({ type: "lock", lock: next }), []);
+  const unlock = useCallback((next: LockSpec) => dispatch({ type: "unlock", lock: next }), []);
+
   const select = useCallback((slide: number, shape?: string | null, carryEye = false) => {
     dispatch({ type: "select", slide, shape, carry: carryEye });
   }, []);
@@ -405,6 +462,8 @@ export function useWorkspace() {
     apply,
     revert,
     select,
+    lock,
+    unlock,
     compare,
     flip,
     stopComparing,
@@ -461,6 +520,27 @@ function useDerived(state: WorkspaceState) {
     );
   }, [state.changeset, state.comparison]);
 
+  /**
+   * Shapes the user has protected, resolved for the slide on screen.
+   *
+   * A `slide` lock protects everything on it, so it expands here rather than
+   * being drawn as a single marker somewhere — the reader needs to see that
+   * *these objects* are the ones that cannot move.
+   */
+  const protectedShapes = useMemo(() => {
+    const shapes = new Set<string>();
+    const slideLocked = state.locks.some(
+      (l) => l.scope === "slide" && String(l.target) === String(state.selectedSlide),
+    );
+    for (const shape of slide?.shapes ?? []) {
+      if (slideLocked) shapes.add(shape.id);
+    }
+    for (const lock of state.locks) {
+      if (lock.scope === "shape" && lock.target) shapes.add(lock.target);
+    }
+    return shapes;
+  }, [state.locks, state.selectedSlide, slide]);
+
   const pending = state.changeset?.proposed_count ?? 0;
   const approved = state.changeset?.approved_count ?? 0;
 
@@ -468,6 +548,7 @@ function useDerived(state: WorkspaceState) {
     slide,
     changedSlides,
     changedShapes,
+    protectedShapes,
     pending,
     approved,
     canApply: approved > 0 && state.phase !== "applying",
