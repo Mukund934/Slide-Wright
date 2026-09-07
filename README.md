@@ -213,12 +213,14 @@ non-conforming — the commonest font in a deck is never mistaken for the brand.
 
 | Result | Evidence |
 |---|---|
-| Round-trip fidelity on 6 corpus decks | **100.00%** parts byte-identical, every deck |
-| A one-object edit on 11 real third-party decks | **exactly 1 part changed**, 98.5–99.6% identical |
+| Round-trip fidelity on 3 corpus decks | **100.00%** parts byte-identical, every deck |
+| A one-object edit on 14 real third-party decks | **exactly 1 part changed** — 14 of 14 — at 96.7–99.7% identical |
 | A table-cell edit, measured inside the edited slide | **2 character substitutions**; 99.95% of the slide preserved |
 | Native tables, charts, embedded workbooks, media | preserved and asserted on every edit |
 
-The hardest corpus deck carries native charts with embedded Excel workbooks, grouped shapes, native tables, custom geometry, hyperlinks and speaker notes. The largest real deck tested is 289 parts across 64 slides with multiple slide masters.
+The hardest corpus deck carries native charts with embedded Excel workbooks, grouped shapes, native tables, custom geometry, hyperlinks and speaker notes. The largest real deck tested is 340 parts across 52 slides and 55 MB.
+
+The lower end of that fidelity range is arithmetic rather than a worse edit. A one-object change touches exactly one part in every case; on a 45-part deck that is 97.8% and on a 350-part deck it is 99.7%. The count is the claim — the percentage is the count divided by how much else the deck happened to contain.
 
 ## How the guarantee is enforced
 
@@ -243,7 +245,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 624 tests
+python -m pytest tests -q          # 781 tests
 ```
 
 Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
@@ -428,7 +430,7 @@ table by hand.
 - **SmartArt cannot be edited.** It is read, counted and preserved — 16 diagram-bearing fixtures of 26, 0 damaged — but any change *targeting* a diagram is refused before anything is written. A diagram is four correlated parts plus a cached rendering; editing one out of step with the others corrupts the file with no error. Refusing is the honest answer until that can be done deterministically. See ADR-0007.
 - **Per-deck model cost is measured on the prompt side only.** `scripts/cost_report.py` computes the exact prompt every deck here produces: the most expensive real deck (41 slides, 18 MB) is **7,204 input tokens, about $0.008 a plan call** at published Gemini Flash rates, and the median across 29 decks is $0.0002. That corrects a "$5-15 per deck" estimate this repo had been carrying unverified, by three orders of magnitude. What it does *not* measure is what a model actually returns — that needs a key and somebody's quota, and the usage ledger records the real counts when a run happens. Token counts are characters over 3.6, which is a stated divisor rather than a measurement; the character counts are exact.
 - **Licensed fonts not installed locally are unproven.**
-- **The round-trip engine ingests only 2 of 21 fixtures** measured. It is the secondary path; the in-place applier handles every deck in the corpus.
+- **The round-trip engine completes a full cycle on 5 of 26 fixtures.** Re-measured 8 Sep 2026, and the limitation is narrower than it sounds: all 26 *ingest*, and the 5 that also export come back **100.00% byte-identical with nothing removed**. The other 21 produce no output file at the export step. It is the secondary path — the in-place applier handles every deck in the corpus, and it is what every guarantee in this README is measured against.
 - **The workspace canvas is a structural view, not a render.** Objects are drawn at the exact position and size the file specifies, which is what makes "nothing else moved" checkable. Fills, effects, picture content, text colour and PowerPoint's line breaking are not reproduced, so it cannot tell you whether a slide *looks* good — only where things are.
 
 ## What this project has learned the hard way
