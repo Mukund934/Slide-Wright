@@ -245,9 +245,9 @@ describe("comparing two versions", () => {
   const after = document().deck;
   const deltas = [
     { slide: 3, shape_id: "5", kind: "formatting", description: "font changed",
-      is_content: false, changes_figures: false },
+      summary: "font changed", is_content: false, changes_figures: false },
     { slide: 9, shape_id: "7", kind: "text", description: "9.4 -> 11.8",
-      is_content: true, changes_figures: true },
+      summary: "9.4 -> 11.8", is_content: true, changes_figures: true },
   ];
   const comparison = { from: 0, to: 1, before, after, deltas, showing: "after" as const, blend: 1 };
 

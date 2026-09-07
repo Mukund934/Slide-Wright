@@ -19,6 +19,8 @@
  * opinion on the only claim the product makes.
  */
 
+import { useState } from "react";
+
 import { motion } from "motion/react";
 
 import type { Comparison } from "../state/workspace";
@@ -231,10 +233,104 @@ function Group({
         </h3>
         <p className="mt-0.5 text-2xs leading-relaxed text-ink-faint">{note}</p>
       </div>
-      {deltas.map((delta, index) => (
-        <Row key={`${delta.slide}-${delta.shape_id}-${index}`} delta={delta} onGoTo={onGoTo} />
-      ))}
+      {collapse(deltas).map((run, index) =>
+        run.deltas.length === 1 ? (
+          <Row
+            key={`${run.key}-${index}`}
+            delta={run.first}
+            onGoTo={onGoTo}
+          />
+        ) : (
+          <RepeatedRow key={`${run.key}-${index}`} run={run} onGoTo={onGoTo} />
+        ),
+      )}
     </section>
+  );
+}
+
+interface Repeated {
+  key: string;
+  first: Delta;
+  deltas: Delta[];
+}
+
+/**
+ * The same change in many places, shown once.
+ *
+ * A conformance pass on a real deck produces 272 differences and 266 of them
+ * are one change: `font 'Century Gothic' -> '+mn-lt'`. This panel is the
+ * evidence for the sentence above it — *no figure changed · 0 in what it says ·
+ * 272 in how it looks* — and evidence nobody scrolls to the end of is not
+ * evidence. `report.py` reached the same conclusion for the CLI first.
+ *
+ * Grouped on the engine's `summary`, which is the description with the location
+ * taken out. Doing that here by trimming the sentence would be string surgery
+ * on prose, and it would break the first time a shape was called "run 1".
+ */
+function collapse(deltas: Delta[]): Repeated[] {
+  const runs: Repeated[] = [];
+  const index = new Map<string, Repeated>();
+  for (const delta of deltas) {
+    const key = `${delta.kind} ${delta.summary || delta.description}`;
+    let run = index.get(key);
+    if (!run) {
+      run = { key, first: delta, deltas: [] };
+      index.set(key, run);
+      runs.push(run);
+    }
+    run.deltas.push(delta);
+  }
+  return runs;
+}
+
+function RepeatedRow({
+  run,
+  onGoTo,
+}: {
+  run: Repeated;
+  onGoTo: (delta: Delta) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const slides = [...new Set(run.deltas.map((d) => d.slide))].sort((a, b) => a - b);
+  const where =
+    slides.length === 1
+      ? `slide ${slides[0]}`
+      : `slides ${slides[0]}–${slides[slides.length - 1]} (${slides.length})`;
+
+  return (
+    <motion.li variants={enter} className="list-none border-b border-line last:border-b-0">
+      <div className="flex w-full items-start gap-2 px-3 py-2">
+        <span className="text-evidence w-5 shrink-0 pt-0.5 text-ink-muted">
+          {run.deltas.length}&times;
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs leading-snug text-ink">
+            {run.first.summary || run.first.description}
+          </span>
+          <span className="mt-1 flex flex-wrap items-center gap-1">
+            <Pill verdict={run.first.is_content ? "changed" : "neutral"}>
+              {run.first.kind}
+            </Pill>
+            <Pill>{where}</Pill>
+            <button
+              type="button"
+              onClick={() => setOpen((was) => !was)}
+              aria-expanded={open}
+              className="text-2xs text-ink-faint underline decoration-dotted underline-offset-2 hover:text-ink"
+            >
+              {open ? "hide" : `show all ${run.deltas.length}`}
+            </button>
+          </span>
+        </span>
+      </div>
+      {open && (
+        <ul className="border-t border-line pl-3">
+          {run.deltas.map((delta, index) => (
+            <Row key={`${delta.slide}-${delta.shape_id}-${index}`} delta={delta} onGoTo={onGoTo} />
+          ))}
+        </ul>
+      )}
+    </motion.li>
   );
 }
 

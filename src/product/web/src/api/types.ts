@@ -307,6 +307,12 @@ export interface Delta {
   shape_id: string;
   kind: string;
   description: string;
+  /**
+   * The change with the location removed: `font 'Century Gothic' -> '+mn-lt'`
+   * rather than `TextBox 4 (id=5) run 62 font 'Century Gothic' -> '+mn-lt'`.
+   * The grouping key, computed by the engine that wrote the sentence.
+   */
+  summary: string;
   /** True when it changes what the deck *says*, not how it looks. */
   is_content: boolean;
   /** True when a number moved — the sharper half of `is_content`. */

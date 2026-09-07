@@ -184,9 +184,9 @@ describe("deciding one at a time", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(onApprove).toHaveBeenCalledWith("c7");
+    expect(onApprove).toHaveBeenCalledWith(["c7"]);
     await userEvent.click(screen.getByRole("button", { name: "Reject" }));
-    expect(onReject).toHaveBeenCalledWith("c7");
+    expect(onReject).toHaveBeenCalledWith(["c7"]);
   });
 
   it("offers no decision on a change that is already decided", () => {
@@ -240,5 +240,68 @@ describe("while an apply is running", () => {
     render(<ChangeSetPanel {...handlers} busy changeset={changeset([change()])} />);
     expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
+  });
+});
+
+
+describe("identical changes are collapsed", () => {
+  /**
+   * A tidy on a real deck proposes 272 corrections and 266 of them say the same
+   * sentence. One row each is not a review surface, it is a wall — and a
+   * reviewer facing a wall presses Approve all, which is the one decision this
+   * panel exists to make them stop and take.
+   *
+   * `report.py` learned this first, for the CLI: printing every line "is not
+   * transparency; it is where a reviewer stops reading, and the one line that
+   * mattered is somewhere in the middle of it."
+   */
+  const many = (count: number, over: Partial<Change> = {}) =>
+    Array.from({ length: count }, (_, i) =>
+      change({ id: `c${i}`, slide: (i % 3) + 1, description: "set typeface A -> B", ...over }),
+    );
+
+  it("shows one row with a count rather than a wall", async () => {
+    render(<ChangeSetPanel {...handlers} changeset={changeset(many(266))} />);
+    expect(screen.getByText("266×")).toBeInTheDocument();
+    expect(screen.getAllByText("set typeface A -> B")).toHaveLength(1);
+  });
+
+  it("says which slides it lands on", async () => {
+    render(<ChangeSetPanel {...handlers} changeset={changeset(many(266))} />);
+    expect(screen.getByText(/slides 1, 2, 3/)).toBeInTheDocument();
+  });
+
+  it("approves every change it stands for, and says how many first", async () => {
+    const onApprove = vi.fn();
+    render(
+      <ChangeSetPanel {...handlers} onApprove={onApprove} changeset={changeset(many(4))} />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Approve all 4" }));
+    expect(onApprove).toHaveBeenCalledWith(["c0", "c1", "c2", "c3"]);
+  });
+
+  it("still lets a reviewer open the list and check one", async () => {
+    render(<ChangeSetPanel {...handlers} changeset={changeset(many(4))} />);
+    await userEvent.click(screen.getByRole("button", { name: "Show all 4" }));
+    expect(screen.getAllByText("set typeface A -> B")).toHaveLength(5); // 1 summary + 4
+  });
+
+  it("never merges a model's uncited proposal into a rule's pass", async () => {
+    // Same sentence, different provenance. Collapsing these together would let
+    // one click approve something that was never grounded in anything.
+    const mixed = [
+      ...many(2, { origin: "rule", needs_review: false }),
+      change({ id: "m1", description: "set typeface A -> B", origin: "model",
+               is_grounded: false, needs_review: true }),
+    ];
+    render(<ChangeSetPanel {...handlers} changeset={changeset(mixed)} />);
+    expect(screen.getByText("2×")).toBeInTheDocument();
+    expect(screen.queryByText("3×")).not.toBeInTheDocument();
+  });
+
+  it("leaves a change that stands alone exactly as it was", async () => {
+    render(<ChangeSetPanel {...handlers} changeset={changeset([change({ id: "c1" })])} />);
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.queryByText(/Approve all/)).not.toBeInTheDocument();
   });
 });

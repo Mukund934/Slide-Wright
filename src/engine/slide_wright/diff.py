@@ -48,6 +48,18 @@ class ShapeDelta:
     before: object = None
     after: object = None
 
+    #: The change with the location removed: "font 'Century Gothic' -> '+mn-lt'"
+    #: rather than "TextBox 4 (id=5) run 62 font 'Century Gothic' -> '+mn-lt'".
+    #:
+    #: A conformance pass on a real deck produces 272 of these and 266 of them
+    #: are the same change in different places. A reader given one line each
+    #: stops reading, which is the failure `report.py` describes for the CLI and
+    #: which the web surfaces inherited. Grouping needs a key that is the change
+    #: itself, and deriving one by trimming the description in a client would be
+    #: string surgery on a sentence -- so the engine, which composed the
+    #: sentence, says which half is which.
+    summary: str = ""
+
     @property
     def is_content(self) -> bool:
         """Content changes alter what the deck says. Everything else is presentation."""
@@ -163,14 +175,14 @@ def _diff_slide(number: int, before, after, result: DeckDiff) -> None:
         shape = old[shape_id]
         result.deltas.append(ShapeDelta(
             slide=number, shape_id=shape_id, kind="removed",
-            description=f"{_name(shape)} removed",
+            description=f"{_name(shape)} removed", summary="removed",
             before=shape.text or None,
         ))
     for shape_id in sorted(set(new) - set(old)):
         shape = new[shape_id]
         result.deltas.append(ShapeDelta(
             slide=number, shape_id=shape_id, kind="added",
-            description=f"{_name(shape)} added",
+            description=f"{_name(shape)} added", summary="added",
             after=shape.text or None,
         ))
     for shape_id in sorted(set(old) & set(new)):
@@ -178,19 +190,22 @@ def _diff_slide(number: int, before, after, result: DeckDiff) -> None:
 
 
 def _diff_shape(number: int, old: ShapeInfo, new: ShapeInfo, result: DeckDiff) -> None:
-    def add(kind: str, description: str, b=None, a=None) -> None:
+    def add(kind: str, summary: str, b=None, a=None, *, where: str = "") -> None:
+        """`summary` is the change; `where` is the part of the location that is
+        finer than the shape, and belongs only in the description."""
+        located = f"{_name(old)}{where} {summary}"
         result.deltas.append(ShapeDelta(
             slide=number, shape_id=old.id, kind=kind,
-            description=description, before=b, after=a,
+            description=located, summary=summary, before=b, after=a,
         ))
 
     if old.text != new.text:
-        add("text", f"{_name(old)} text {_describe_text_change(old.text, new.text)}",
+        add("text", f"text {_describe_text_change(old.text, new.text)}",
             old.text, new.text)
 
     if (old.table_rows, old.table_cols) != (new.table_rows, new.table_cols):
         add("table",
-            f"{_name(old)} table {old.table_rows}x{old.table_cols} -> "
+            f"table {old.table_rows}x{old.table_cols} -> "
             f"{new.table_rows}x{new.table_cols}",
             (old.table_rows, old.table_cols), (new.table_rows, new.table_cols))
 
@@ -203,21 +218,21 @@ def _diff_geometry(old: ShapeInfo, new: ShapeInfo, add) -> None:
         dx, dy = new.x - old.x, new.y - old.y
         if max(abs(dx), abs(dy)) >= VISIBLE_MOVE_EMU:
             add("geometry",
-                f"{_name(old)} moved {_inches(dx)} right, {_inches(dy)} down",
+                f"moved {_inches(dx)} right, {_inches(dy)} down",
                 (old.x, old.y), (new.x, new.y))
         else:
             add("geometry",
-                f"{_name(old)} moved by less than 0.01in (probably rounding)",
+                "moved by less than 0.01in (probably rounding)",
                 (old.x, old.y), (new.x, new.y))
 
     if None not in (old.cx, old.cy, new.cx, new.cy) and (old.cx, old.cy) != (new.cx, new.cy):
         add("size",
-            f"{_name(old)} resized {_size(old.cx, old.cy)} -> {_size(new.cx, new.cy)}",
+            f"resized {_size(old.cx, old.cy)} -> {_size(new.cx, new.cy)}",
             (old.cx, old.cy), (new.cx, new.cy))
 
     if old.rotation_deg != new.rotation_deg:
         add("geometry",
-            f"{_name(old)} rotation {old.rotation_deg or 0:g}° -> {new.rotation_deg or 0:g}°",
+            f"rotation {old.rotation_deg or 0:g}° -> {new.rotation_deg or 0:g}°",
             old.rotation_deg, new.rotation_deg)
 
 
@@ -236,8 +251,11 @@ def _diff_formatting(old: ShapeInfo, new: ShapeInfo, add) -> None:
                             ("color", "colour")):
             av, bv = getattr(a, attr), getattr(b, attr)
             if av != bv:
-                add("formatting",
-                    f"{_name(old)} run {i + 1} {label} {av!r} -> {bv!r}", av, bv)
+                # The run index is location, so it goes in `where`. Without
+                # that, 266 identical font changes are 266 distinct summaries
+                # and grouping them is impossible.
+                add("formatting", f"{label} {av!r} -> {bv!r}", av, bv,
+                    where=f" run {i + 1}")
 
 
 def _describe_text_change(before: str, after: str, context: int = 14) -> str:

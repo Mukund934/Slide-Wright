@@ -432,6 +432,10 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
                     "shape_id": d.shape_id,
                     "kind": d.kind,
                     "description": d.description,
+                    # The same change with the location taken out, so a client
+                    # can collapse 266 identical font changes into one row
+                    # without doing string surgery on a sentence.
+                    "summary": d.summary,
                     # The axis the whole wedge turns on: a content change alters
                     # what the deck says, everything else alters how it looks.
                     "is_content": d.is_content,

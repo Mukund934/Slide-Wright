@@ -24,6 +24,7 @@ function delta(over: Partial<Delta> = {}): Delta {
   return {
     slide: 3, shape_id: "5", kind: "formatting",
     description: "Title 1 (id=3) run 1 font 'Century Gothic' -> '+mn-lt'",
+    summary: "font 'Century Gothic' -> '+mn-lt'",
     is_content: false, changes_figures: false, ...over,
   };
 }
@@ -165,8 +166,11 @@ describe("navigation", () => {
       <DiffPanel
         {...handlers}
         comparison={comparison([
-          delta({ slide: 9, description: "on nine" }),
-          delta({ slide: 2, description: "on two" }),
+          // Distinct summaries: two different changes, so they stay two rows.
+          // Same-summary deltas collapse on purpose, which is what the
+          // "same change in many places" tests cover.
+          delta({ slide: 9, description: "on nine", summary: "on nine" }),
+          delta({ slide: 2, description: "on two", summary: "on two" }),
         ])}
       />,
     );
@@ -208,5 +212,56 @@ describe("the blend", () => {
     render(<DiffPanel {...handlers} onBlend={onBlend} comparison={comparison([delta()])} />);
     fireEvent.change(screen.getByRole("slider"), { target: { value: "0.3" } });
     expect(onBlend).toHaveBeenCalledWith(0.3);
+  });
+});
+
+
+describe("the same change in many places", () => {
+  /**
+   * A conformance pass on a real deck produces 272 differences and 266 of them
+   * are one change. This panel is the evidence for the sentence above it — *no
+   * figure changed · 0 in what it says · 272 in how it looks* — and evidence
+   * nobody scrolls to the end of is not evidence.
+   */
+  const repeated = (count: number) =>
+    Array.from({ length: count }, (_, i) =>
+      delta({ slide: (i % 4) + 1, shape_id: String(i), summary: "font 'A' -> 'B'" }),
+    );
+
+  it("is one row with a count, not a page of rows", async () => {
+    render(<DiffPanel {...handlers} comparison={comparison(repeated(266))} />);
+    expect(screen.getByText("266×")).toBeInTheDocument();
+    expect(screen.getAllByText("font 'A' -> 'B'")).toHaveLength(1);
+  });
+
+  it("says which slides it happened on", async () => {
+    render(<DiffPanel {...handlers} comparison={comparison(repeated(266))} />);
+    expect(screen.getByText(/slides 1–4 \(4\)/)).toBeInTheDocument();
+  });
+
+  it("opens to the individual differences on request", async () => {
+    render(<DiffPanel {...handlers} comparison={comparison(repeated(3))} />);
+    await userEvent.click(screen.getByRole("button", { name: "show all 3" }));
+    expect(
+      screen.getAllByText(/Title 1 \(id=3\) run 1 font/),
+    ).toHaveLength(3);
+  });
+
+  it("leaves a difference that happened once exactly as it was", () => {
+    render(<DiffPanel {...handlers} comparison={comparison([delta()])} />);
+    expect(screen.queryByText(/show all/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Title 1 (id=3) run 1 font 'Century Gothic' -> '+mn-lt'"),
+    ).toBeInTheDocument();
+  });
+
+  it("never merges a content change into a formatting one", () => {
+    // Same summary is not enough. The axis the whole product turns on is
+    // whether a change alters what the deck says.
+    render(<DiffPanel {...handlers} comparison={comparison([
+      delta({ kind: "formatting", summary: "same words", is_content: false }),
+      delta({ kind: "text", summary: "same words", is_content: true }),
+    ])} />);
+    expect(screen.queryByText("2×")).not.toBeInTheDocument();
   });
 });
