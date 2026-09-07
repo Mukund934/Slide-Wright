@@ -17,18 +17,18 @@ type Tone = "default" | "primary" | "quiet" | "danger";
 
 const TONES: Record<Tone, string> = {
   default:
-    "bg-[--color-raised] text-[--color-ink] border-[--color-line-strong] " +
+    "bg-raised text-ink border-line-strong " +
     "hover:bg-[color-mix(in_oklab,var(--color-raised),white_6%)]",
   // "Primary" is weight, not colour: the important action is the solid one.
   primary:
-    "bg-[--color-ink] text-[--color-ground] border-transparent font-medium " +
+    "bg-ink text-ground border-transparent font-medium " +
     "hover:bg-[color-mix(in_oklab,var(--color-ink),var(--color-ground)_12%)]",
   quiet:
-    "bg-transparent text-[--color-ink-muted] border-transparent " +
-    "hover:bg-[--color-raised] hover:text-[--color-ink]",
+    "bg-transparent text-ink-muted border-transparent " +
+    "hover:bg-raised hover:text-ink",
   danger:
-    "bg-transparent text-[--color-blocked] border-[color-mix(in_oklab,var(--color-blocked),transparent_65%)] " +
-    "hover:bg-[--color-blocked-wash]",
+    "bg-transparent text-blocked border-[color-mix(in_oklab,var(--color-blocked),transparent_65%)] " +
+    "hover:bg-blocked-wash",
 };
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -53,8 +53,8 @@ export function Button({
       disabled={disabled || busy}
       aria-busy={busy || undefined}
       className={[
-        "inline-flex items-center justify-center gap-1.5 rounded-[--radius-md] border",
-        "px-2.5 py-1.5 text-xs transition-colors duration-[--duration-fast]",
+        "inline-flex items-center justify-center gap-1.5 rounded-md border",
+        "px-2.5 py-1.5 text-xs transition-colors duration-[120ms]",
         "active:translate-y-px disabled:pointer-events-none disabled:opacity-40",
         TONES[tone],
         className,
@@ -86,11 +86,11 @@ function Spinner() {
 export type Verdict = "verified" | "blocked" | "review" | "changed" | "neutral";
 
 const VERDICTS: Record<Verdict, string> = {
-  verified: "bg-[--color-verified-wash] text-[--color-verified]",
-  blocked: "bg-[--color-blocked-wash] text-[--color-blocked]",
-  review: "bg-[--color-review-wash] text-[--color-review]",
-  changed: "bg-[--color-changed-wash] text-[--color-changed]",
-  neutral: "bg-[--color-raised] text-[--color-ink-faint]",
+  verified: "bg-verified-wash text-verified",
+  blocked: "bg-blocked-wash text-blocked",
+  review: "bg-review-wash text-review",
+  changed: "bg-changed-wash text-changed",
+  neutral: "bg-raised text-ink-faint",
 };
 
 export function Pill({
@@ -124,8 +124,8 @@ export function PanelHeading({
   trailing?: ReactNode;
 }) {
   return (
-    <div className="flex h-9 shrink-0 items-center justify-between border-b border-[--color-line] px-3">
-      <h2 className="text-2xs font-medium uppercase tracking-[0.08em] text-[--color-ink-faint]">
+    <div className="flex h-9 shrink-0 items-center justify-between border-b border-line px-3">
+      <h2 className="text-2xs font-medium uppercase tracking-[0.08em] text-ink-faint">
         {children}
       </h2>
       {trailing}
@@ -150,8 +150,8 @@ export function Empty({
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-      <p className="text-sm text-[--color-ink-muted]">{title}</p>
-      {detail && <p className="max-w-xs text-xs leading-relaxed text-[--color-ink-faint]">{detail}</p>}
+      <p className="text-sm text-ink-muted">{title}</p>
+      {detail && <p className="max-w-xs text-xs leading-relaxed text-ink-faint">{detail}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>
   );
@@ -175,11 +175,11 @@ export function Stat({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-1">
-      <span className="text-xs text-[--color-ink-faint]">{label}</span>
+      <span className="text-xs text-ink-faint">{label}</span>
       <span
         className={[
           "text-evidence",
-          intact ? "text-[--color-ink-muted]" : "text-[--color-blocked]",
+          intact ? "text-ink-muted" : "text-blocked",
         ].join(" ")}
       >
         {value}

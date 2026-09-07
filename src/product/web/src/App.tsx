@@ -54,7 +54,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-full flex-col bg-[--color-ground]">
+    <div className="flex h-full flex-col bg-ground">
       <TopBar
         name={workspace.document.name}
         workspacePath={workspace.document.workspace}
@@ -62,7 +62,7 @@ export default function App() {
       />
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-56 shrink-0 flex-col border-r border-[--color-line] bg-[--color-panel]">
+        <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-panel">
           <Filmstrip
             slides={workspace.document.deck.slides}
             selected={workspace.selectedSlide}
@@ -89,7 +89,7 @@ export default function App() {
           />
         </main>
 
-        <aside className="flex w-80 shrink-0 flex-col border-l border-[--color-line] bg-[--color-panel]">
+        <aside className="flex w-80 shrink-0 flex-col border-l border-line bg-panel">
           <Tabs tab={tab} onChange={setTab} />
 
           <div className="flex min-h-0 flex-1 flex-col">
@@ -124,7 +124,7 @@ export default function App() {
           />
 
           {workspace.canApply && (
-            <div className="shrink-0 border-t border-[--color-line] p-2">
+            <div className="shrink-0 border-t border-line p-2">
               <Button
                 tone="primary"
                 className="w-full"
@@ -154,16 +154,16 @@ function TopBar({
   health: Health | null;
 }) {
   return (
-    <header className="flex h-10 shrink-0 items-center justify-between border-b border-[--color-line] bg-[--color-panel] px-3">
+    <header className="flex h-10 shrink-0 items-center justify-between border-b border-line bg-panel px-3">
       <div className="flex min-w-0 items-baseline gap-2">
-        <span className="truncate text-xs font-medium text-[--color-ink]">{name}</span>
-        <span className="text-evidence truncate text-[--color-ink-faint]" title={workspacePath}>
+        <span className="truncate text-xs font-medium text-ink">{name}</span>
+        <span className="text-evidence truncate text-ink-faint" title={workspacePath}>
           {workspacePath}
         </span>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {health && !health.model_configured && <Pill>offline · deterministic only</Pill>}
-        <span className="text-evidence text-[--color-ink-faint]">
+        <span className="text-evidence text-ink-faint">
           engine {health?.engine ?? "…"}
         </span>
       </div>
@@ -180,10 +180,10 @@ function TopBar({
 function Untouched({ total, changed }: { total: number; changed: number }) {
   const untouched = total - changed;
   return (
-    <div className="shrink-0 border-t border-[--color-line] px-3 py-2">
-      <p className="text-2xs text-[--color-ink-faint]">
-        <span className="text-evidence text-[--color-ink-muted]">{untouched}</span> of{" "}
-        <span className="text-evidence text-[--color-ink-muted]">{total}</span> slides
+    <div className="shrink-0 border-t border-line px-3 py-2">
+      <p className="text-2xs text-ink-faint">
+        <span className="text-evidence text-ink-muted">{untouched}</span> of{" "}
+        <span className="text-evidence text-ink-muted">{total}</span> slides
         untouched
       </p>
     </div>
@@ -194,7 +194,7 @@ function Tabs({ tab, onChange }: { tab: RightTab; onChange: (t: RightTab) => voi
   return (
     <div
       role="tablist"
-      className="flex h-9 shrink-0 items-stretch border-b border-[--color-line]"
+      className="flex h-9 shrink-0 items-stretch border-b border-line"
     >
       {(["changes", "history"] as const).map((value) => (
         <button
@@ -204,10 +204,10 @@ function Tabs({ tab, onChange }: { tab: RightTab; onChange: (t: RightTab) => voi
           onClick={() => onChange(value)}
           className={[
             "relative flex-1 text-2xs font-medium uppercase tracking-[0.08em]",
-            "transition-colors duration-[--duration-fast]",
+            "transition-colors duration-[120ms]",
             tab === value
-              ? "text-[--color-ink]"
-              : "text-[--color-ink-faint] hover:text-[--color-ink-muted]",
+              ? "text-ink"
+              : "text-ink-faint hover:text-ink-muted",
           ].join(" ")}
         >
           {value}
@@ -217,7 +217,7 @@ function Tabs({ tab, onChange }: { tab: RightTab; onChange: (t: RightTab) => voi
             // same control in two positions.
             <motion.span
               layoutId="tab-underline"
-              className="absolute inset-x-3 bottom-0 h-px bg-[--color-ink]"
+              className="absolute inset-x-3 bottom-0 h-px bg-ink"
               transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
             />
           )}
@@ -297,7 +297,7 @@ function Stage({ workspace }: { workspace: ReturnType<typeof useWorkspace> }) {
         <Button tone="quiet" onClick={() => setZoom((z) => Math.max(0.5, z - 0.1))}>
           −
         </Button>
-        <span className="text-evidence w-9 text-center text-[--color-ink-faint]">
+        <span className="text-evidence w-9 text-center text-ink-faint">
           {Math.round(zoom * 100)}%
         </span>
         <Button tone="quiet" onClick={() => setZoom((z) => Math.min(2, z + 0.1))}>
@@ -318,8 +318,8 @@ function Stage({ workspace }: { workspace: ReturnType<typeof useWorkspace> }) {
 function StructuralNote() {
   return (
     <span
-      className="text-evidence mr-2 cursor-help text-[--color-ink-faint]"
-      title="Objects are drawn at the exact position and size the file specifies. Fills, effects, picture content and PowerPoint's line breaking are not reproduced — this is a structural view, not a render."
+      className="text-evidence mr-2 cursor-help text-ink-faint"
+      title="Objects are drawn at the exact position and size the file specifies. Text colour, fills, effects, picture content and PowerPoint's line breaking are not reproduced — this is a structural view, not a render."
     >
       structural view
     </span>
@@ -344,9 +344,9 @@ function ErrorBar({ message, onDismiss }: { message: string | null; onDismiss: (
           animate="shown"
           exit="gone"
           role="alert"
-          className="flex shrink-0 items-start gap-3 border-t border-[--color-blocked] bg-[--color-blocked-wash] px-3 py-2"
+          className="flex shrink-0 items-start gap-3 border-t border-blocked bg-blocked-wash px-3 py-2"
         >
-          <p className="flex-1 text-xs leading-relaxed text-[--color-blocked]">{message}</p>
+          <p className="flex-1 text-xs leading-relaxed text-blocked">{message}</p>
           <Button tone="quiet" onClick={onDismiss}>
             Dismiss
           </Button>

@@ -58,19 +58,19 @@ export function CommandBar({
   };
 
   return (
-    <div className="shrink-0 border-t border-[--color-line] bg-[--color-panel] px-3 py-2">
+    <div className="shrink-0 border-t border-line bg-panel px-3 py-2">
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-        <span className="text-2xs text-[--color-ink-faint]">Scope</span>
+        <span className="text-2xs text-ink-faint">Scope</span>
         <button
           type="button"
           onClick={onClearSelection}
-          className="rounded-full transition-opacity duration-[--duration-fast] hover:opacity-80"
+          className="rounded-full transition-opacity duration-[120ms] hover:opacity-80"
           title="Clear the selection and address the whole deck"
         >
           <Pill verdict="changed">{scopeLabel}</Pill>
         </button>
 
-        <span className="ml-2 text-2xs text-[--color-ink-faint]">Protect</span>
+        <span className="ml-2 text-2xs text-ink-faint">Protect</span>
         {QUICK_LOCKS.map((lock) => {
           const on = locks.includes(lock.scope);
           return (
@@ -85,10 +85,10 @@ export function CommandBar({
                 )
               }
               className={[
-                "rounded-full px-2 py-0.5 text-2xs transition-colors duration-[--duration-fast]",
+                "rounded-full px-2 py-0.5 text-2xs transition-colors duration-[120ms]",
                 on
-                  ? "bg-[--color-ink] font-medium text-[--color-ground]"
-                  : "bg-[--color-raised] text-[--color-ink-faint] hover:text-[--color-ink]",
+                  ? "bg-ink font-medium text-ground"
+                  : "bg-raised text-ink-faint hover:text-ink",
               ].join(" ")}
             >
               {lock.label}
@@ -120,7 +120,7 @@ export function CommandBar({
               : undefined
           }
           aria-label="Describe the change you want"
-          className="min-h-8 flex-1 resize-none rounded-[--radius-md] border border-[--color-line-strong] bg-[--color-raised] px-2.5 py-1.5 text-xs text-[--color-ink] placeholder:text-[--color-ink-faint] focus:border-[--color-changed-dim] focus:outline-none disabled:opacity-50"
+          className="min-h-8 flex-1 resize-none rounded-md border border-line-strong bg-raised px-2.5 py-1.5 text-xs text-ink placeholder:text-ink-faint focus:border-changed-dim focus:outline-none disabled:opacity-50"
         />
         <Button
           tone="primary"
@@ -139,7 +139,7 @@ export function CommandBar({
           initial="hidden"
           animate="shown"
           exit="gone"
-          className="mt-1.5 text-2xs leading-relaxed text-[--color-ink-faint]"
+          className="mt-1.5 text-2xs leading-relaxed text-ink-faint"
         >
           {modelConfigured ? (
             <>

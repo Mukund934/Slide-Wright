@@ -30,7 +30,7 @@ export function History({
     <>
       <PanelHeading
         trailing={
-          <span className="text-evidence text-[--color-ink-faint]">{versions.length}</span>
+          <span className="text-evidence text-ink-faint">{versions.length}</span>
         }
       >
         History
@@ -46,37 +46,37 @@ export function History({
             key={version.number}
             variants={enter}
             className={[
-              "group flex items-start gap-2 border-b border-[--color-line] px-3 py-2 last:border-b-0",
-              version.is_current ? "bg-[--color-raised]" : "",
+              "group flex items-start gap-2 border-b border-line px-3 py-2 last:border-b-0",
+              version.is_current ? "bg-raised" : "",
             ].join(" ")}
           >
             <span
               aria-hidden
               className={[
                 "mt-1 size-1.5 shrink-0 rounded-full",
-                version.is_current ? "bg-[--color-ink]" : "bg-[--color-line-strong]",
+                version.is_current ? "bg-ink" : "bg-line-strong",
               ].join(" ")}
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
-                <span className="text-evidence text-[--color-ink-muted]">
+                <span className="text-evidence text-ink-muted">
                   v{String(version.number).padStart(3, "0")}
                 </span>
                 {version.is_original && (
-                  <span className="text-2xs text-[--color-ink-faint]">
+                  <span className="text-2xs text-ink-faint">
                     the file you supplied
                   </span>
                 )}
                 {version.is_current && (
-                  <span className="text-2xs text-[--color-ink-faint]">current</span>
+                  <span className="text-2xs text-ink-faint">current</span>
                 )}
               </div>
               {version.note && (
-                <p className="mt-0.5 truncate text-xs text-[--color-ink]" title={version.note}>
+                <p className="mt-0.5 truncate text-xs text-ink" title={version.note}>
                   {version.note}
                 </p>
               )}
-              <p className="text-evidence mt-0.5 text-[--color-ink-faint]">
+              <p className="text-evidence mt-0.5 text-ink-faint">
                 {version.created_at}
                 {version.changes.length > 0 && ` · ${version.changes.length} change`}
                 {version.changes.length > 1 && "s"}
@@ -87,7 +87,7 @@ export function History({
                 tone="quiet"
                 busy={busy}
                 onClick={() => onRevert(version.number)}
-                className="opacity-0 transition-opacity duration-[--duration-fast] focus-visible:opacity-100 group-hover:opacity-100"
+                className="opacity-0 transition-opacity duration-[120ms] focus-visible:opacity-100 group-hover:opacity-100"
               >
                 Go back
               </Button>

@@ -43,8 +43,8 @@ export function OpenDeck({
         animate="shown"
         className="w-full max-w-lg"
       >
-        <h1 className="text-base font-medium text-[--color-ink]">Slide-Wright</h1>
-        <p className="mt-1 text-xs leading-relaxed text-[--color-ink-muted]">
+        <h1 className="text-base font-medium text-ink">Slide-Wright</h1>
+        <p className="mt-1 text-xs leading-relaxed text-ink-muted">
           Change what you asked. Preserve everything else. Prove it.
         </p>
 
@@ -67,15 +67,15 @@ export function OpenDeck({
             setPath(withPath.path ?? dropped.name);
           }}
           className={[
-            "mt-5 rounded-[--radius-lg] border border-dashed p-6 transition-colors duration-[--duration-normal]",
+            "mt-5 rounded-lg border border-dashed p-6 transition-colors duration-[220ms]",
             over
-              ? "border-[--color-changed] bg-[--color-changed-wash]"
-              : "border-[--color-line-strong] bg-[--color-panel]",
+              ? "border-changed bg-changed-wash"
+              : "border-line-strong bg-panel",
           ].join(" ")}
         >
           <label
             htmlFor="deck-path"
-            className="block text-2xs uppercase tracking-[0.08em] text-[--color-ink-faint]"
+            className="block text-2xs uppercase tracking-[0.08em] text-ink-faint"
           >
             Path to a .pptx on this machine
           </label>
@@ -88,13 +88,13 @@ export function OpenDeck({
               placeholder="C:\Users\you\Documents\Pitchbook_v9.pptx"
               spellCheck={false}
               autoFocus
-              className="text-evidence min-w-0 flex-1 rounded-[--radius-md] border border-[--color-line-strong] bg-[--color-raised] px-2.5 py-2 text-[--color-ink] placeholder:text-[--color-ink-faint] focus:border-[--color-changed-dim] focus:outline-none"
+              className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2.5 py-2 text-ink placeholder:text-ink-faint focus:border-changed-dim focus:outline-none"
             />
             <Button tone="primary" onClick={submit} busy={busy} disabled={!path.trim()}>
               Open
             </Button>
           </div>
-          <p className="mt-2 text-2xs leading-relaxed text-[--color-ink-faint]">
+          <p className="mt-2 text-2xs leading-relaxed text-ink-faint">
             or drop a file here
           </p>
         </div>
@@ -105,13 +105,13 @@ export function OpenDeck({
             initial="hidden"
             animate="shown"
             role="alert"
-            className="mt-3 rounded-[--radius-md] bg-[--color-blocked-wash] px-3 py-2 text-xs leading-relaxed text-[--color-blocked]"
+            className="mt-3 rounded-md bg-blocked-wash px-3 py-2 text-xs leading-relaxed text-blocked"
           >
             {error}
           </motion.p>
         )}
 
-        <div className="mt-6 space-y-1.5 text-2xs leading-relaxed text-[--color-ink-faint]">
+        <div className="mt-6 space-y-1.5 text-2xs leading-relaxed text-ink-faint">
           <p>
             Your deck is opened where it sits. Slide-Wright keeps its versions in a
             folder beside it. Nothing is uploaded, and there is no telemetry.
