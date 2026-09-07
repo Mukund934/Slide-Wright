@@ -1,0 +1,368 @@
+/**
+ * What is wrong with this deck.
+ *
+ * This is the first thing someone does with an inherited deck, and it is where
+ * the product either earns trust or spends it. Two disciplines follow from that,
+ * and both are the note's §12 and §13:
+ *
+ *   · **A finding must not look more authoritative than it is.** There is no
+ *     score. A single number would compress "no slide title makes a claim" and
+ *     "1,122 runs hardcode a typeface" into one figure that means neither, and
+ *     an AI score is exactly the kind of false authority the engine is
+ *     deterministic in order to avoid.
+ *   · **Fixable and advisory must not look alike.** The engine attaches a
+ *     remedy to a finding it can actually correct, and only those carry the
+ *     action. Everything else says what it is: something a person has to decide.
+ *
+ * The gate is shown alongside, not merged in. It answers a different question —
+ * "may this be delivered", about an edit that already happened — and flattening
+ * the two would lose the distinction before the reader sees it.
+ */
+
+import { motion } from "motion/react";
+import { useEffect, useState } from "react";
+
+import { ApiError, api } from "../api/client";
+import type { Area, Audit, Observation, TidyPlan } from "../api/types";
+import { Button, Empty, PanelHeading, Pill } from "../design/primitives";
+import { enter, stagger } from "../motion/tokens";
+
+/**
+ * The engine's own areas, in the order a reader should meet them.
+ *
+ * Findings are grouped by whether they are fixable first — that distinction
+ * matters more than the subject — and ordered by area within each group, so a
+ * list of nine does not read as nine unrelated complaints.
+ */
+const AREA_ORDER: Area[] = [
+  "narrative",
+  "consistency",
+  "layout",
+  "evidence",
+  "structure",
+  "accessibility",
+];
+
+const AREA_LABEL: Record<Area, string> = {
+  narrative: "Narrative",
+  consistency: "Consistency",
+  layout: "Layout",
+  evidence: "Evidence",
+  structure: "Structure",
+  accessibility: "Accessibility",
+};
+
+export function AuditPanel({
+  documentId,
+  busy,
+  onGoToSlide,
+  onTidy,
+}: {
+  documentId: string;
+  busy: boolean;
+  onGoToSlide: (slide: number) => void;
+  onTidy: () => void;
+}) {
+  const [audit, setAudit] = useState<Audit | null>(null);
+  const [plan, setPlan] = useState<TidyPlan | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Re-read whenever the document changes underneath — after an apply or a
+  // revert the deck is a different one, and a stale audit would describe a
+  // version that is no longer current.
+  useEffect(() => {
+    let live = true;
+    setAudit(null);
+    setError(null);
+    Promise.all([api.audit(documentId), api.tidyPlan(documentId)])
+      .then(([nextAudit, nextPlan]) => {
+        if (!live) return;
+        setAudit(nextAudit);
+        setPlan(nextPlan);
+      })
+      .catch((cause: unknown) => {
+        if (live) setError(cause instanceof ApiError ? cause.message : "The audit failed.");
+      });
+    return () => {
+      live = false;
+    };
+  }, [documentId, busy]);
+
+  if (error) {
+    return (
+      <>
+        <PanelHeading>Audit</PanelHeading>
+        <Empty title="The audit could not run" detail={error} />
+      </>
+    );
+  }
+
+  if (!audit) {
+    return (
+      <>
+        <PanelHeading>Audit</PanelHeading>
+        <Empty title="Reading the deck…" />
+      </>
+    );
+  }
+
+  const fixable = byArea(audit.observations.filter((o) => o.is_automatable));
+  const advisory = byArea(audit.observations.filter((o) => !o.is_automatable));
+
+  return (
+    <>
+      <PanelHeading
+        trailing={
+          <span className="text-evidence text-ink-faint">
+            {audit.observations.length} finding
+            {audit.observations.length === 1 ? "" : "s"}
+          </span>
+        }
+      >
+        Audit
+      </PanelHeading>
+
+      <Summary audit={audit} />
+
+      <motion.div
+        className="min-h-0 flex-1 overflow-y-auto"
+        initial="hidden"
+        animate="shown"
+        transition={stagger(audit.observations.length)}
+      >
+        {audit.observations.length === 0 && (
+          <Empty
+            title="Nothing structural to report"
+            detail="Every check the engine can compute came back clean. That is a statement about structure, not about whether the argument works."
+          />
+        )}
+
+        {fixable.length > 0 && (
+          <Section
+            title="Slide-Wright can correct these"
+            note="Deterministic, and content is locked while they are applied."
+          >
+            {fixable.map((observation, index) => (
+              <Row
+                key={`${observation.area}-${index}`}
+                observation={observation}
+                onGoToSlide={onGoToSlide}
+              />
+            ))}
+            {plan && <TidyAction plan={plan} busy={busy} onTidy={onTidy} />}
+          </Section>
+        )}
+
+        {advisory.length > 0 && (
+          <Section
+            title="For you to decide"
+            note="Judgements about the deck's argument. Slide-Wright will not touch them."
+          >
+            {advisory.map((observation, index) => (
+              <Row
+                key={`${observation.area}-${index}`}
+                observation={observation}
+                onGoToSlide={onGoToSlide}
+              />
+            ))}
+          </Section>
+        )}
+
+        {audit.gate.findings.length > 0 && <GateSection audit={audit} onGoToSlide={onGoToSlide} />}
+      </motion.div>
+    </>
+  );
+}
+
+function byArea(observations: Observation[]): Observation[] {
+  const rank = (o: Observation) => {
+    const index = AREA_ORDER.indexOf(o.area);
+    // An area added to the engine later sorts last rather than first, so a new
+    // rule never silently takes the top of the list.
+    return index === -1 ? AREA_ORDER.length : index;
+  };
+  return [...observations].sort((a, b) => rank(a) - rank(b));
+}
+
+/**
+ * Facts about the deck, and deliberately not a grade.
+ *
+ * Words per slide is a measurement, not a verdict — a dense appendix is fine and
+ * a dense pitch is not, and this cannot tell them apart. Stating the number and
+ * declining to judge it is the honest version.
+ */
+function Summary({ audit }: { audit: Audit }) {
+  return (
+    <div className="shrink-0 border-b border-line px-3 py-2">
+      <p className="text-2xs text-ink-faint">
+        <span className="text-evidence text-ink-muted">{audit.slide_count}</span> slides ·{" "}
+        <span className="text-evidence text-ink-muted">{audit.word_count}</span> words ·{" "}
+        <span className="text-evidence text-ink-muted">
+          {Math.round(audit.words_per_slide)}
+        </span>{" "}
+        per slide
+      </p>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-1.5">
+        <h3 className="text-2xs font-medium uppercase tracking-[0.08em] text-ink-muted">
+          {title}
+        </h3>
+        <p className="mt-0.5 text-2xs leading-relaxed text-ink-faint">{note}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Row({
+  observation,
+  onGoToSlide,
+}: {
+  observation: Observation;
+  onGoToSlide: (slide: number) => void;
+}) {
+  const first = observation.slides[0];
+
+  return (
+    <motion.article
+      variants={enter}
+      className="border-b border-line px-3 py-2 last:border-b-0"
+    >
+      <div className="mb-1 flex items-baseline gap-2">
+        <Pill verdict={observation.severity === "error" ? "blocked" : "neutral"}>
+          {AREA_LABEL[observation.area] ?? observation.area}
+        </Pill>
+        {first === undefined ? (
+          <span className="text-evidence text-ink-faint">{observation.where}</span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onGoToSlide(first)}
+            aria-label={`Go to slide ${first}: ${observation.message}`}
+            className="text-evidence text-ink-faint underline decoration-dotted underline-offset-2 transition-colors duration-[120ms] hover:text-ink"
+          >
+            {observation.where}
+          </button>
+        )}
+      </div>
+      <p className="text-xs leading-snug text-ink">{observation.message}</p>
+      {observation.suggestion && (
+        <p className="mt-1 text-2xs leading-relaxed text-ink-faint">{observation.suggestion}</p>
+      )}
+    </motion.article>
+  );
+}
+
+/**
+ * The action, stated in the numbers it will actually act on.
+ *
+ * `worst_shift_in` against `tolerance_in` is the part worth showing. Alignment
+ * only ever moves a shape onto a line its neighbours already sit on, so the
+ * largest correction is bounded by construction — and a bound the reader can
+ * see is the difference between "trust us" and "check it".
+ */
+function TidyAction({
+  plan,
+  busy,
+  onTidy,
+}: {
+  plan: TidyPlan;
+  busy: boolean;
+  onTidy: () => void;
+}) {
+  const total = plan.typefaces + plan.nudges;
+  if (total === 0) return null;
+
+  return (
+    <div className="border-b border-line bg-raised px-3 py-2.5">
+      <ul className="mb-2 space-y-0.5 text-2xs text-ink-muted">
+        {plan.typefaces > 0 && (
+          <li>
+            <span className="text-evidence text-ink">{plan.typefaces}</span> run
+            {plan.typefaces === 1 ? "" : "s"} re-linked to {plan.conforms_to}
+          </li>
+        )}
+        {plan.nudges > 0 && (
+          <li>
+            <span className="text-evidence text-ink">{plan.nudges}</span> shape
+            {plan.nudges === 1 ? "" : "s"} snapped onto a line their neighbours share —
+            largest movement{" "}
+            <span className="text-evidence">{plan.worst_shift_in.toFixed(3)}in</span> of a{" "}
+            <span className="text-evidence">{plan.tolerance_in.toFixed(2)}in</span> bound
+          </li>
+        )}
+      </ul>
+      <Button tone="primary" onClick={onTidy} busy={busy}>
+        Propose {total} correction{total === 1 ? "" : "s"}
+      </Button>
+      <p className="mt-1.5 text-2xs leading-relaxed text-ink-faint">
+        Proposes only. You review each one before anything is written, and content is
+        locked throughout.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The delivery gate, kept separate.
+ *
+ * It answers "may this be delivered" — about an edit that already happened —
+ * where everything above answers "what should change". Merging them would put a
+ * blocking error next to a note about slide titles as though they were the same
+ * kind of thing.
+ */
+function GateSection({
+  audit,
+  onGoToSlide,
+}: {
+  audit: Audit;
+  onGoToSlide: (slide: number) => void;
+}) {
+  return (
+    <Section
+      title="Delivery gate"
+      note="Whether an edited copy of this deck could be handed over."
+    >
+      {audit.gate.findings.map((finding, index) => (
+        <motion.article
+          key={`${finding.code}-${index}`}
+          variants={enter}
+          className="border-b border-line px-3 py-2 last:border-b-0"
+        >
+          <div className="mb-1 flex items-baseline gap-2">
+            <Pill verdict={finding.severity === "error" ? "blocked" : "neutral"}>
+              {finding.severity}
+            </Pill>
+            <button
+              type="button"
+              onClick={() => onGoToSlide(finding.slide)}
+              aria-label={`Go to slide ${finding.slide}: ${finding.message}`}
+              className="text-evidence text-ink-faint underline decoration-dotted underline-offset-2 transition-colors duration-[120ms] hover:text-ink"
+            >
+              slide {finding.slide}
+              {finding.shape_name && ` · ${finding.shape_name}`}
+            </button>
+          </div>
+          <p className="text-xs leading-snug text-ink">{finding.message}</p>
+          {finding.repair && (
+            <p className="mt-1 text-2xs leading-relaxed text-ink-faint">fix: {finding.repair}</p>
+          )}
+        </motion.article>
+      ))}
+    </Section>
+  );
+}
