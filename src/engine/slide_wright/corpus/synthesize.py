@@ -204,3 +204,106 @@ def build_minimal(out_path: str | Path) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(out_path))
     return out_path
+
+
+# ── the untidy deck ──────────────────────────────────────────────────────────
+#
+# Near-misses, in EMU. 0.02in is the alignment tolerance, so these must land
+# inside it and above the 1/3600in noise floor: a difference smaller than that
+# is rounding, and snapping it would churn the file for no visible gain.
+NUDGE = Emu(9144)      # 0.01in — half the tolerance
+TINY_NUDGE = Emu(4572)  # 0.005in — a quarter of it
+
+
+def build_untidy(out_path: str | Path) -> Path:
+    """A deck assembled from several sources, carrying what that leaves behind.
+
+    The corpus had no deck that needed tidying, which meant every test of the
+    wedge — *change every pixel of formatting, change not one word or number,
+    and prove it* — either skipped or ran against a real third-party fixture
+    that not every machine has. A test that skips is a test that is not run.
+
+    Two defects, both the ordinary kind rather than a contrivance:
+
+      · **Hardcoded typefaces, spelled inconsistently.** Text pasted from
+        another deck brings its font as an explicit override, and different
+        people type the same font differently. Found on a real deck: 177 runs in
+        "Century Gothic" and 89 in "Century gothic".
+      · **Edges that nearly agree.** Boxes dragged into place and then nudged
+        with the arrow keys end up within a hair of a line they were meant to
+        share. Every offset here is inside the alignment tolerance, so a
+        correction is real and none of it is visible to the eye.
+
+    Every slide also carries words and numbers, because the guarantee under test
+    is that tidying leaves both untouched. A deck with nothing to preserve
+    cannot demonstrate preservation.
+    """
+    out_path = Path(out_path)
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
+
+    _untidy_pasted_slide(prs)
+    _untidy_nearly_aligned(prs)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    prs.save(str(out_path))
+    return out_path
+
+
+def _untidy_pasted_slide(prs: Presentation) -> None:
+    """Text carrying an explicit typeface, typed two ways."""
+    s = prs.slides.add_slide(prs.slide_layouts[5])
+    s.shapes.title.text = "Q3 performance"
+
+    for index, (typeface, text) in enumerate(
+        [
+            ("Century Gothic", "Revenue reached 42.7m, up 18% on the quarter"),
+            ("Century gothic", "Margin held at 22.1% against a 21.4% plan"),
+            ("Century Gothic", "Headcount closed at 312, against 300 budgeted"),
+        ]
+    ):
+        box = s.shapes.add_textbox(
+            Inches(1), Inches(2 + index * 0.9), Inches(11), Inches(0.7)
+        )
+        run = box.text_frame.paragraphs[0].add_run()
+        run.text = text
+        run.font.name = typeface   # explicit override — the thing conformance corrects
+        run.font.size = Pt(16)
+        run.font.color.rgb = MUTED
+
+    _source_note(s, "Source: management accounts, Q3 2026")
+
+
+def _untidy_nearly_aligned(prs: Presentation) -> None:
+    """Boxes that share an edge, except for the ones that nearly do.
+
+    Three left edges agree exactly and two miss by less than the tolerance, so
+    the majority establishes the line and the strays snap onto it. That shape
+    matters: the aligner only ever moves something *onto* a line others already
+    sit on, so a deck where every edge is unique has nothing to correct.
+    """
+    s = prs.slides.add_slide(prs.slide_layouts[5])
+    s.shapes.title.text = "Workstreams"
+
+    left = Inches(1.5)
+    offsets = [0, 0, 0, NUDGE, TINY_NUDGE]
+    labels = [
+        "Discovery — 4 weeks, 2 FTE",
+        "Build — 11 weeks, 5 FTE",
+        "Pilot — 6 weeks, 3 FTE",
+        "Rollout — 9 weeks, 4 FTE",
+        "Review — 2 weeks, 1 FTE",
+    ]
+    for index, (offset, label) in enumerate(zip(offsets, labels)):
+        box = s.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Emu(left + offset), Inches(1.8 + index * 0.95),
+            Inches(9), Inches(0.75),
+        )
+        box.fill.solid()
+        box.fill.fore_color.rgb = BRAND
+        frame = box.text_frame
+        frame.text = label
+        frame.paragraphs[0].font.size = Pt(14)
+
+    _source_note(s, "Source: delivery plan, revision 7")
