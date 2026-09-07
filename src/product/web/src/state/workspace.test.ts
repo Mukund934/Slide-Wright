@@ -249,7 +249,7 @@ describe("comparing two versions", () => {
     { slide: 9, shape_id: "7", kind: "text", description: "9.4 -> 11.8",
       is_content: true, changes_figures: true },
   ];
-  const comparison = { from: 0, to: 1, before, after, deltas, showing: "after" as const };
+  const comparison = { from: 0, to: 1, before, after, deltas, showing: "after" as const, blend: 1 };
 
   it("lands on the first slide that actually differs", () => {
     // Opening a comparison on a slide where nothing changed makes the feature
@@ -418,5 +418,40 @@ describe("protection stands across proposals", () => {
 
     state = reducer(state, { type: "reverted", document: document() });
     expect(state.locks, "a revert must not clear them").toEqual([{ scope: "numbers" }]);
+  });
+});
+
+describe("blending between versions", () => {
+  const deck = { slide_width: 1, slide_height: 1, theme_fonts: {}, slides: [] };
+  const base = {
+    from: 0, to: 1, before: deck, after: deck, deltas: [],
+    showing: "after" as const, blend: 1,
+  };
+
+  it("clamps to the range, whatever a control sends", () => {
+    const low = reducer({ ...initial, comparison: base }, { type: "blend", value: -3 });
+    const high = reducer({ ...initial, comparison: base }, { type: "blend", value: 9 });
+    expect(low.comparison?.blend).toBe(0);
+    expect(high.comparison?.blend).toBe(1);
+  });
+
+  it("keeps the label and the canvas agreeing", () => {
+    // "showing v001" over a canvas that is mostly v000 is a caption that lies.
+    const mostlyBefore = reducer({ ...initial, comparison: base }, { type: "blend", value: 0.2 });
+    expect(mostlyBefore.comparison?.showing).toBe("before");
+
+    const mostlyAfter = reducer({ ...initial, comparison: base }, { type: "blend", value: 0.8 });
+    expect(mostlyAfter.comparison?.showing).toBe("after");
+  });
+
+  it("flipping resets the blend to that end, so the two controls never disagree", () => {
+    const half = reducer({ ...initial, comparison: base }, { type: "blend", value: 0.5 });
+    const flipped = reducer(half, { type: "flip" });
+    expect(flipped.comparison?.showing).toBe("before");
+    expect(flipped.comparison?.blend).toBe(0);
+  });
+
+  it("blending with nothing to compare is a no-op, not a crash", () => {
+    expect(reducer(initial, { type: "blend", value: 0.5 })).toBe(initial);
   });
 });

@@ -47,6 +47,17 @@ export interface Comparison {
   deltas: Delta[];
   /** Which side the canvas is showing. Flipping is how a difference is found. */
   showing: "before" | "after";
+  /**
+   * How much of the *after* is drawn over the *before*, 0 to 1.
+   *
+   * A user-driven blend, which is a different thing from an automatic
+   * crossfade. A transition the interface runs hides the difference, because
+   * the eye follows the fade; a slider the reader drags is how they find one —
+   * they control the rate, can hold at any mixture, and can rock back and forth
+   * over the spot they are unsure about. It is the oldest trick in comparison
+   * and it still works.
+   */
+  blend: number;
 }
 
 export interface WorkspaceState {
@@ -104,6 +115,7 @@ type Action =
   | { type: "arrived" }
   | { type: "comparing"; comparison: Comparison }
   | { type: "flip" }
+  | { type: "blend"; value: number }
   | { type: "stopComparing" }
   | { type: "lock"; lock: LockSpec }
   | { type: "unlock"; lock: LockSpec }
@@ -194,15 +206,31 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
         selectedShape: null,
       };
 
-    case "flip":
+    case "flip": {
       if (!state.comparison) return state;
+      const showing = state.comparison.showing === "after" ? "before" : "after";
+      // Flipping resets the blend to that end, so the two controls never
+      // disagree about what is on screen.
+      return {
+        ...state,
+        comparison: { ...state.comparison, showing, blend: showing === "after" ? 1 : 0 },
+      };
+    }
+
+    case "blend": {
+      if (!state.comparison) return state;
+      const value = Math.min(1, Math.max(0, action.value));
       return {
         ...state,
         comparison: {
           ...state.comparison,
-          showing: state.comparison.showing === "after" ? "before" : "after",
+          blend: value,
+          // The label follows the blend so "showing v001" never contradicts a
+          // canvas that is mostly v000.
+          showing: value >= 0.5 ? "after" : "before",
         },
       };
+    }
 
     case "stopComparing":
       return { ...state, comparison: null };
@@ -417,7 +445,9 @@ export function useWorkspace() {
         ]);
         dispatch({
           type: "comparing",
-          comparison: { from, to, before, after, deltas: diff.deltas, showing: "after" },
+          comparison: {
+            from, to, before, after, deltas: diff.deltas, showing: "after", blend: 1,
+          },
         });
       } catch (error) {
         fail(error);
@@ -427,6 +457,7 @@ export function useWorkspace() {
   );
 
   const flip = useCallback(() => dispatch({ type: "flip" }), []);
+  const blend = useCallback((value: number) => dispatch({ type: "blend", value }), []);
   const stopComparing = useCallback(() => dispatch({ type: "stopComparing" }), []);
 
   const lock = useCallback((next: LockSpec) => dispatch({ type: "lock", lock: next }), []);
@@ -466,6 +497,7 @@ export function useWorkspace() {
     unlock,
     compare,
     flip,
+    blend,
     stopComparing,
     goToChange,
     arrived,

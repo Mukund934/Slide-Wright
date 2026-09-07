@@ -120,6 +120,7 @@ export default function App() {
                 comparison={workspace.comparison}
                 onGoTo={(delta) => workspace.select(delta.slide, delta.shape_id, true)}
                 onFlip={workspace.flip}
+                onBlend={workspace.blend}
                 onClose={workspace.stopComparing}
               />
             ) : tab === "audit" ? (
@@ -328,8 +329,19 @@ function Tabs({ tab, onChange }: { tab: RightTab; onChange: (t: RightTab) => voi
   );
 }
 
+const EMPTY: Set<string> = new Set();
+
 function Stage({ workspace }: { workspace: ReturnType<typeof useWorkspace> }) {
   const { slide, document: doc } = workspace;
+
+  // The version underneath, drawn only while comparing. `slide` is already the
+  // chosen side, so this is the *other* one.
+  const before =
+    workspace.comparison && workspace.comparison.showing === "after"
+      ? workspace.comparison.before.slides.find((s) => s.number === workspace.selectedSlide)
+      : workspace.comparison
+        ? workspace.comparison.after.slides.find((s) => s.number === workspace.selectedSlide)
+        : null;
   const [zoom, setZoom] = useState(1);
 
   // Fit the slide to the stage on mount and on resize. Doing it with a CSS
@@ -388,17 +400,53 @@ function Stage({ workspace }: { workspace: ReturnType<typeof useWorkspace> }) {
           // Fast enough that moving through a filmstrip never feels gated on an
           // animation, present enough that the swap is not a jump cut.
           transition={{ duration: 0.12 }}
+          className="relative"
         >
-          <SlideCanvas
-            slide={slide}
-            slideWidth={doc.deck.slide_width}
-            slideHeight={doc.deck.slide_height}
-            changedShapes={workspace.changedShapes}
-            protectedShapes={workspace.protectedShapes}
-            carriedShape={workspace.carriedShape}
-            selectedShape={workspace.selectedShape}
-            onSelectShape={(id) => workspace.select(workspace.selectedSlide, id)}
-          />
+          {/* While comparing, both versions are drawn and the reader blends
+              between them. The *before* sits underneath at full strength and
+              the *after* is laid over it, so at any mixture the eye sees one
+              image with the difference beating between the two — which is how
+              a shift gets noticed at all. Stacked rather than swapped, because
+              a swap gives the eye nothing to hold still against. */}
+          {before && (
+            <div aria-hidden className="absolute inset-0">
+              <SlideCanvas
+                slide={before}
+                slideWidth={doc.deck.slide_width}
+                slideHeight={doc.deck.slide_height}
+                changedShapes={EMPTY}
+              />
+            </div>
+          )}
+          {/* The top layer is whichever side `showing` names, so its opacity is
+              the blend *from that side's point of view*. Passing `blend`
+              straight through ran the slider backwards below 50%: at 0.2 the
+              top layer became the before, and drawing it at 0.2 showed 80% of
+              the after — the opposite of what the reader asked for. */}
+          <div
+            style={
+              before
+                ? {
+                    opacity:
+                      workspace.comparison?.showing === "after"
+                        ? (workspace.comparison?.blend ?? 1)
+                        : 1 - (workspace.comparison?.blend ?? 0),
+                  }
+                : undefined
+            }
+            data-blend-layer={before ? workspace.comparison?.showing : undefined}
+          >
+            <SlideCanvas
+              slide={slide}
+              slideWidth={doc.deck.slide_width}
+              slideHeight={doc.deck.slide_height}
+              changedShapes={workspace.changedShapes}
+              protectedShapes={workspace.protectedShapes}
+              carriedShape={workspace.carriedShape}
+              selectedShape={workspace.selectedShape}
+              onSelectShape={(id) => workspace.select(workspace.selectedSlide, id)}
+            />
+          </div>
         </motion.div>
       )}
 
@@ -409,7 +457,12 @@ function Stage({ workspace }: { workspace: ReturnType<typeof useWorkspace> }) {
           // flipped needs to know what they are looking at without moving
           // their eyes back across the window.
           <span className="text-evidence mr-2 rounded-sm bg-changed-wash px-1.5 py-0.5 text-changed">
-            showing v
+            {Math.round(
+              (workspace.comparison.showing === "after"
+                ? workspace.comparison.blend
+                : 1 - workspace.comparison.blend) * 100,
+            )}
+            % v
             {String(
               workspace.comparison.showing === "before"
                 ? workspace.comparison.from

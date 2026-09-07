@@ -8,7 +8,7 @@
  * change and a rewritten number as the same kind of thing, the wedge is gone.
  */
 
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -31,11 +31,11 @@ function delta(over: Partial<Delta> = {}): Delta {
 function comparison(deltas: Delta[], over: Partial<Comparison> = {}): Comparison {
   return {
     from: 0, to: 1, before: EMPTY_DECK, after: EMPTY_DECK, deltas,
-    showing: "after", ...over,
+    showing: "after", blend: 1, ...over,
   };
 }
 
-const handlers = { onGoTo: vi.fn(), onFlip: vi.fn(), onClose: vi.fn() };
+const handlers = { onGoTo: vi.fn(), onFlip: vi.fn(), onBlend: vi.fn(), onClose: vi.fn() };
 
 describe("the two questions are kept apart", () => {
   const mixed = comparison([
@@ -182,5 +182,31 @@ describe("leaving", () => {
     render(<DiffPanel {...handlers} onClose={onClose} comparison={comparison([delta()])} />);
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the blend", () => {
+  it("is a control the reader drags, not a transition the interface plays", () => {
+    // An automatic crossfade hides a difference: the eye follows the fade
+    // instead of the change. A slider lets them rock over the one spot they
+    // are unsure about, at whatever rate finds it.
+    render(<DiffPanel {...handlers} comparison={comparison([delta()])} />);
+    const slider = screen.getByRole("slider");
+    expect(slider).toHaveValue("1");
+    expect(slider).toHaveAccessibleName(/v000 and v001/);
+  });
+
+  it("reports the mixture in words for a screen reader", () => {
+    render(
+      <DiffPanel {...handlers} comparison={comparison([delta()], { blend: 0.4 })} />,
+    );
+    expect(screen.getByRole("slider")).toHaveAttribute("aria-valuetext", "40% v001");
+  });
+
+  it("hands each new value upward", async () => {
+    const onBlend = vi.fn();
+    render(<DiffPanel {...handlers} onBlend={onBlend} comparison={comparison([delta()])} />);
+    fireEvent.change(screen.getByRole("slider"), { target: { value: "0.3" } });
+    expect(onBlend).toHaveBeenCalledWith(0.3);
   });
 });

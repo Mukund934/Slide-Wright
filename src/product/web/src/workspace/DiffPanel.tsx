@@ -33,11 +33,13 @@ export function DiffPanel({
   comparison,
   onGoTo,
   onFlip,
+  onBlend,
   onClose,
 }: {
   comparison: Comparison;
   onGoTo: (delta: Delta) => void;
   onFlip: () => void;
+  onBlend: (value: number) => void;
   onClose: () => void;
 }) {
   const content = sorted(comparison.deltas.filter((d) => d.is_content));
@@ -87,6 +89,8 @@ export function DiffPanel({
         </p>
         <Flip comparison={comparison} onFlip={onFlip} />
       </div>
+
+      <Blend comparison={comparison} onBlend={onBlend} />
 
       {comparison.deltas.length === 0 ? (
         <Empty
@@ -157,6 +161,50 @@ function Flip({ comparison, onFlip }: { comparison: Comparison; onFlip: () => vo
           {side === "before" ? `v${pad(comparison.from)}` : `v${pad(comparison.to)}`}
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The blend between the two versions.
+ *
+ * A slider the reader drags, not a transition the interface plays. The
+ * distinction is the whole value: an automatic crossfade *hides* a difference,
+ * because the eye follows the fade instead of the change. A control the reader
+ * holds lets them rock back and forth over the one spot they are unsure about,
+ * at whatever rate finds it. Blink comparison predates the computer and it
+ * still works.
+ *
+ * Hidden with the canvas, for the same reason the flip is: a slider with
+ * nothing to look at does nothing.
+ */
+function Blend({
+  comparison,
+  onBlend,
+}: {
+  comparison: Comparison;
+  onBlend: (value: number) => void;
+}) {
+  return (
+    <div className="hidden shrink-0 items-center gap-2 border-b border-line px-3 py-1.5 md:flex">
+      <label htmlFor="blend" className="shrink-0 text-2xs text-ink-faint">
+        Blend
+      </label>
+      <input
+        id="blend"
+        type="range"
+        min={0}
+        max={1}
+        step={0.02}
+        value={comparison.blend}
+        onChange={(event) => onBlend(Number(event.target.value))}
+        aria-label={`Blend between v${pad(comparison.from)} and v${pad(comparison.to)}`}
+        aria-valuetext={`${Math.round(comparison.blend * 100)}% v${pad(comparison.to)}`}
+        className="h-1 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-line-strong accent-[var(--color-ink)]"
+      />
+      <span className="text-evidence w-16 shrink-0 text-right text-ink-faint">
+        {Math.round(comparison.blend * 100)}% v{pad(comparison.to)}
+      </span>
     </div>
   );
 }
