@@ -22,6 +22,7 @@ const initial: WorkspaceState = {
   selectedSlide: 1,
   selectedShape: null,
   carriedShape: null,
+  comparison: null,
   error: null,
 };
 
@@ -235,5 +236,73 @@ describe("selection", () => {
       { type: "select", slide: 4, shape: null },
     );
     expect(state.selectedShape).toBeNull();
+  });
+});
+
+describe("comparing two versions", () => {
+  const before = document().deck;
+  const after = document().deck;
+  const deltas = [
+    { slide: 3, shape_id: "5", kind: "formatting", description: "font changed", is_content: false },
+    { slide: 9, shape_id: "7", kind: "text", description: "9.4 -> 11.8", is_content: true },
+  ];
+  const comparison = { from: 0, to: 1, before, after, deltas, showing: "after" as const };
+
+  it("lands on the first slide that actually differs", () => {
+    // Opening a comparison on a slide where nothing changed makes the feature
+    // look broken the first time anyone uses it.
+    const state = reducer(
+      { ...initial, document: document(), selectedSlide: 1 },
+      { type: "comparing", comparison },
+    );
+    expect(state.selectedSlide).toBe(3);
+  });
+
+  it("stays put when the two versions read the same", () => {
+    const state = reducer(
+      { ...initial, document: document(), selectedSlide: 5 },
+      { type: "comparing", comparison: { ...comparison, deltas: [] } },
+    );
+    expect(state.selectedSlide).toBe(5);
+  });
+
+  it("flips between the two sides", () => {
+    const showing = reducer(
+      { ...initial, comparison },
+      { type: "flip" },
+    ).comparison?.showing;
+    expect(showing).toBe("before");
+  });
+
+  it("flipping with nothing to compare is a no-op, not a crash", () => {
+    expect(reducer(initial, { type: "flip" })).toBe(initial);
+  });
+
+  it("is discarded when an apply moves the document underneath it", () => {
+    // A comparison describes two specific versions. After an apply the document
+    // has moved, so the one on screen no longer describes it.
+    const state = reducer(
+      { ...initial, phase: "applying", document: document(), comparison },
+      { type: "settled", verification: verification(), document: document() },
+    );
+    expect(state.comparison).toBeNull();
+  });
+
+  it("is discarded on a revert too", () => {
+    const state = reducer(
+      { ...initial, document: document(), comparison },
+      { type: "reverted", document: document() },
+    );
+    expect(state.comparison).toBeNull();
+  });
+
+  it("can be closed without touching anything else", () => {
+    const state = reducer(
+      { ...initial, document: document(), selectedSlide: 3, comparison },
+      { type: "stopComparing" },
+    );
+    expect(state.comparison).toBeNull();
+    expect(state.selectedSlide).toBe(3);
+    expect(state.document).not.toBeNull();
   });
 });

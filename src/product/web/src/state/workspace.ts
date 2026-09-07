@@ -15,6 +15,8 @@ import type {
   ApplyProgress,
   Change,
   ChangeSet,
+  Deck,
+  Delta,
   LockSpec,
   SetSpec,
   SlideDocument,
@@ -30,6 +32,23 @@ export type Phase =
   | "applying"
   | "settled";
 
+/**
+ * Two versions held side by side, and the differences between them.
+ *
+ * `before` and `after` are both read from the engine rather than one being
+ * derived from the other plus the diff. Deriving would make the canvas a second
+ * implementation of the comparison, and the two would eventually disagree.
+ */
+export interface Comparison {
+  from: number;
+  to: number;
+  before: Deck;
+  after: Deck;
+  deltas: Delta[];
+  /** Which side the canvas is showing. Flipping is how a difference is found. */
+  showing: "before" | "after";
+}
+
 export interface WorkspaceState {
   phase: Phase;
   document: SlideDocument | null;
@@ -41,6 +60,8 @@ export interface WorkspaceState {
   selectedShape: string | null;
   /** The shape the eye is being carried to. Cleared once it has arrived. */
   carriedShape: string | null;
+  /** Non-null while two versions are being compared. */
+  comparison: Comparison | null;
   error: string | null;
 }
 
@@ -53,6 +74,7 @@ const initial: WorkspaceState = {
   selectedSlide: 1,
   selectedShape: null,
   carriedShape: null,
+  comparison: null,
   error: null,
 };
 
@@ -69,6 +91,9 @@ type Action =
   | { type: "reverted"; document: SlideDocument }
   | { type: "select"; slide: number; shape?: string | null; carry?: boolean }
   | { type: "arrived" }
+  | { type: "comparing"; comparison: Comparison }
+  | { type: "flip" }
+  | { type: "stopComparing" }
   | { type: "failed"; message: string }
   | { type: "dismissError" };
 
@@ -114,6 +139,9 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
         verification: action.verification,
         document: action.document,
         changeset: action.document.changeset,
+        // A comparison describes two specific versions. After an apply the
+        // document has moved, so the one on screen no longer describes it.
+        comparison: null,
         // Carry the eye to the first slide that actually changed. If nothing
         // changed there is nothing to carry to, and the view stays put.
         selectedSlide: action.verification.changed_slides[0] ?? state.selectedSlide,
@@ -129,6 +157,7 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
         progress: [],
         selectedShape: null,
         carriedShape: null,
+        comparison: null,
       };
 
     case "select":
@@ -141,6 +170,29 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
 
     case "arrived":
       return { ...state, carriedShape: null };
+
+    case "comparing":
+      return {
+        ...state,
+        comparison: action.comparison,
+        // Land on the first slide that differs. Opening a comparison on a slide
+        // where nothing changed makes the feature look broken on its first use.
+        selectedSlide: action.comparison.deltas[0]?.slide ?? state.selectedSlide,
+        selectedShape: null,
+      };
+
+    case "flip":
+      if (!state.comparison) return state;
+      return {
+        ...state,
+        comparison: {
+          ...state.comparison,
+          showing: state.comparison.showing === "after" ? "before" : "after",
+        },
+      };
+
+    case "stopComparing":
+      return { ...state, comparison: null };
 
     case "failed":
       // A failure returns the user to where they can act, never to a dead end.
@@ -262,6 +314,37 @@ export function useWorkspace() {
     [state.document, fail],
   );
 
+  /**
+   * Compare two versions of the deck.
+   *
+   * Both decks and the deltas are fetched together, because a comparison that
+   * paints one side before the other has arrived shows a difference that is not
+   * there — the missing half looks like a deletion.
+   */
+  const compare = useCallback(
+    async (from: number, to: number) => {
+      if (!state.document) return;
+      const id = state.document.id;
+      try {
+        const [before, after, diff] = await Promise.all([
+          api.deck(id, from),
+          api.deck(id, to),
+          api.diff(id, from, to),
+        ]);
+        dispatch({
+          type: "comparing",
+          comparison: { from, to, before, after, deltas: diff.deltas, showing: "after" },
+        });
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [state.document, fail],
+  );
+
+  const flip = useCallback(() => dispatch({ type: "flip" }), []);
+  const stopComparing = useCallback(() => dispatch({ type: "stopComparing" }), []);
+
   const select = useCallback((slide: number, shape?: string | null, carryEye = false) => {
     dispatch({ type: "select", slide, shape, carry: carryEye });
   }, []);
@@ -291,6 +374,9 @@ export function useWorkspace() {
     apply,
     revert,
     select,
+    compare,
+    flip,
+    stopComparing,
     goToChange,
     arrived,
     dismissError,
@@ -298,10 +384,18 @@ export function useWorkspace() {
 }
 
 function useDerived(state: WorkspaceState) {
-  const slide = useMemo(
-    () => state.document?.deck.slides.find((s) => s.number === state.selectedSlide) ?? null,
-    [state.document, state.selectedSlide],
-  );
+  /**
+   * The slide on screen, from whichever deck is being shown.
+   *
+   * In a comparison this is the chosen side rather than the document's current
+   * version — the whole point of flipping is that the canvas actually changes.
+   */
+  const slide = useMemo(() => {
+    const deck = state.comparison
+      ? state.comparison[state.comparison.showing]
+      : state.document?.deck;
+    return deck?.slides.find((s) => s.number === state.selectedSlide) ?? null;
+  }, [state.document, state.comparison, state.selectedSlide]);
 
   /**
    * Slides the current change set would touch, or did.
@@ -312,14 +406,21 @@ function useDerived(state: WorkspaceState) {
    * rejected change was made.
    */
   const changedSlides = useMemo(() => {
+    // A comparison answers its own question and overrides both: the user asked
+    // what differs between these two versions, not what a pending change set
+    // would touch.
+    if (state.comparison) return new Set(state.comparison.deltas.map((d) => d.slide));
     if (state.verification) return new Set(state.verification.changed_slides);
     const live = state.changeset?.changes.filter(
       (c) => c.status === "approved" || c.status === "proposed",
     );
     return new Set((live ?? []).map((c) => c.slide));
-  }, [state.changeset, state.verification]);
+  }, [state.changeset, state.verification, state.comparison]);
 
   const changedShapes = useMemo(() => {
+    if (state.comparison) {
+      return new Set(state.comparison.deltas.map((d) => d.shape_id));
+    }
     const changes = state.changeset?.changes ?? [];
     return new Set(
       changes
@@ -327,7 +428,7 @@ function useDerived(state: WorkspaceState) {
         .map((c) => c.target.split("/")[0])
         .filter((id): id is string => Boolean(id)),
     );
-  }, [state.changeset]);
+  }, [state.changeset, state.comparison]);
 
   const pending = state.changeset?.proposed_count ?? 0;
   const approved = state.changeset?.approved_count ?? 0;

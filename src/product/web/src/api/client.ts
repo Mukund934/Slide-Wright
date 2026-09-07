@@ -11,6 +11,7 @@ import type {
   ApplyProgress,
   Audit,
   ChangeSet,
+  Deck,
   DiffResult,
   Health,
   LockSpec,
@@ -89,6 +90,12 @@ export const api = {
   open: (path: string) => post<SlideDocument>("/documents", { path }),
 
   read: (id: string) => request<SlideDocument>(`/documents/${id}`),
+
+  /** The structure of one version. Both sides of a comparison come from here. */
+  deck: (id: string, version?: number) =>
+    request<Deck>(
+      `/documents/${id}/deck${version === undefined ? "" : `?version=${version}`}`,
+    ),
 
   close: (id: string) => request<{ closed: boolean }>(`/documents/${id}`, { method: "DELETE" }),
 
