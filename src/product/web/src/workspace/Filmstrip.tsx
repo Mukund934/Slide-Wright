@@ -139,7 +139,10 @@ function Label({ slide, selected }: { slide: Slide; selected: boolean }) {
   const title = slide.title?.trim();
   if (title) {
     return (
-      <span className={["truncate text-xs", selected ? "text-ink" : "text-ink-muted"].join(" ")}>
+      <span
+        className={["truncate text-xs", selected ? "text-ink" : "text-ink-muted"].join(" ")}
+        title={title}
+      >
         {title}
       </span>
     );

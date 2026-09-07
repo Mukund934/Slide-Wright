@@ -121,3 +121,31 @@ describe("closed by default", () => {
     expect(vi.mocked(api.exportTarget)).not.toHaveBeenCalled();
   });
 });
+
+describe("dismissal", () => {
+  it("closes on Escape and gives focus back to the trigger", async () => {
+    // A popover only its own trigger can dismiss is a trap for anyone who
+    // opened it by accident, and the keyboard user has no other way out.
+    await open();
+    await screen.findByLabelText(/Write this version to/);
+
+    await userEvent.keyboard("{Escape}");
+
+    // waitFor, because the panel has an exit animation and lingers a frame.
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/Write this version to/)).toBeNull(),
+    );
+    expect(screen.getByRole("button", { name: "Export" })).toHaveFocus();
+  });
+
+  it("closes when something else is clicked", async () => {
+    await open();
+    await screen.findByLabelText(/Write this version to/);
+
+    await userEvent.click(document.body);
+
+    await waitFor(() =>
+      expect(screen.queryByLabelText(/Write this version to/)).toBeNull(),
+    );
+  });
+});
