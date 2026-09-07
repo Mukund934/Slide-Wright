@@ -243,7 +243,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 615 tests
+python -m pytest tests -q          # 624 tests
 ```
 
 Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
@@ -319,7 +319,8 @@ The workspace covers every capability the engine has:
 | **Tidy** | Conform typefaces and snap near-miss edges — to the deck's own theme, or to a template you supply |
 | **Sources** | Refresh figures from a workbook, each carrying the cell it came from |
 | **Changes** | Review every proposal with its provenance, approve or reject one at a time |
-| **Diff** | Compare any two versions: what the deck *says* against how it *looks* |
+| **Diff** | Compare any two versions — leading with the sharpest claim: *no figure changed* |
+| **Protect** | Lock a slide or a single object; the engine refuses a change that collides with it |
 | **History** | Every version, and going back to one |
 | **Export** | Refused outright if verification failed, and never over your original |
 
@@ -392,7 +393,7 @@ src/product/web/            the workspace client — React, TypeScript, Motion
   workspace/                filmstrip · canvas · audit · sources · changes
                             diff · result · history · export
 docs/                       architecture, 10 ADRs, guides
-tests/                      615 engine and API tests, plus 121 in the client
+tests/                      624 engine and API tests, plus 140 in the client
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
 ```
