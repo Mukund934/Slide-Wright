@@ -104,29 +104,55 @@ function Row({
         onClick={() => onSelect(slide.number)}
         className={[
           "group flex w-full items-center gap-2 px-3 py-1.5 text-left",
-          "transition-colors duration-[--duration-fast]",
-          selected ? "bg-[--color-raised]" : "hover:bg-[color-mix(in_oklab,var(--color-panel),white_3%)]",
+          "transition-colors duration-[120ms]",
+          selected ? "bg-raised" : "hover:bg-[color-mix(in_oklab,var(--color-panel),white_3%)]",
         ].join(" ")}
       >
         <Mark changed={changed} />
         <span
           className={[
             "w-6 shrink-0 text-evidence tabular-nums",
-            selected ? "text-[--color-ink]" : "text-[--color-ink-faint]",
+            selected ? "text-ink" : "text-ink-faint",
           ].join(" ")}
         >
           {slide.number}
         </span>
-        <span
-          className={[
-            "truncate text-xs",
-            selected ? "text-[--color-ink]" : "text-[--color-ink-muted]",
-          ].join(" ")}
-        >
-          {slide.title ?? <span className="italic opacity-60">untitled</span>}
-        </span>
+        <Label slide={slide} selected={selected} />
       </button>
     </li>
+  );
+}
+
+/**
+ * What to call a slide in a list.
+ *
+ * `title` is the engine's answer to a narrow question -- does this slide have a
+ * title *placeholder* with text in it -- and on real decks the answer is often
+ * no even when the slide plainly has a heading. Printing "untitled" beside a
+ * slide the user can see says "Space Science Update" is not honesty, it is a
+ * technicality read aloud.
+ *
+ * So the first text on the slide stands in, marked as a stand-in by being set
+ * in the fainter weight. What is never done is inventing a title.
+ */
+function Label({ slide, selected }: { slide: Slide; selected: boolean }) {
+  const title = slide.title?.trim();
+  if (title) {
+    return (
+      <span className={["truncate text-xs", selected ? "text-ink" : "text-ink-muted"].join(" ")}>
+        {title}
+      </span>
+    );
+  }
+
+  const standIn = slide.shapes.find((shape) => shape.text.trim())?.text.trim();
+  return (
+    <span
+      className={["truncate text-xs italic", selected ? "text-ink-muted" : "text-ink-faint"].join(" ")}
+      title={standIn ? "This slide has no title placeholder; showing its first text" : undefined}
+    >
+      {standIn ?? "no text"}
+    </span>
   );
 }
 
@@ -147,8 +173,8 @@ function Mark({ changed }: { changed: boolean }) {
       className={[
         "size-1.5 shrink-0 rounded-full border",
         changed
-          ? "border-[--color-changed] bg-[--color-changed]"
-          : "border-[--color-line-strong] bg-transparent",
+          ? "border-changed bg-changed"
+          : "border-line-strong bg-transparent",
       ].join(" ")}
     />
   );
