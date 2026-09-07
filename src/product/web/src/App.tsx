@@ -18,6 +18,7 @@ import type { Health, LockSpec } from "./api/types";
 import { Button, Pill } from "./design/primitives";
 import { enter } from "./motion/tokens";
 import { useWorkspace } from "./state/workspace";
+import { AuditPanel } from "./workspace/AuditPanel";
 import { ChangeSetPanel } from "./workspace/ChangeSetPanel";
 import { CommandBar } from "./workspace/CommandBar";
 import { Filmstrip } from "./workspace/Filmstrip";
@@ -26,12 +27,12 @@ import { OpenDeck } from "./workspace/OpenDeck";
 import { SlideCanvas } from "./workspace/SlideCanvas";
 import { VerificationPanel } from "./workspace/VerificationPanel";
 
-type RightTab = "changes" | "history";
+type RightTab = "audit" | "changes" | "history";
 
 export default function App() {
   const workspace = useWorkspace();
   const [health, setHealth] = useState<Health | null>(null);
-  const [tab, setTab] = useState<RightTab>("changes");
+  const [tab, setTab] = useState<RightTab>("audit");
 
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth(null));
@@ -89,7 +90,20 @@ export default function App() {
           <Tabs tab={tab} onChange={setTab} />
 
           <div className="flex min-h-0 flex-1 flex-col">
-            {tab === "changes" ? (
+            {tab === "audit" ? (
+              <AuditPanel
+                documentId={workspace.document.id}
+                busy={workspace.phase === "proposing" || workspace.phase === "applying"}
+                onGoToSlide={(n) => workspace.select(n, null)}
+                onTidy={() => {
+                  // Land the reviewer where the decision is. Proposing and then
+                  // leaving them on the audit would hide the thing they now
+                  // have to approve.
+                  void workspace.tidy();
+                  setTab("changes");
+                }}
+              />
+            ) : tab === "changes" ? (
               <ChangeSetPanel
                 changeset={workspace.changeset}
                 busy={workspace.phase === "applying"}
@@ -203,7 +217,7 @@ function Tabs({ tab, onChange }: { tab: RightTab; onChange: (t: RightTab) => voi
       role="tablist"
       className="flex h-9 shrink-0 items-stretch border-b border-line"
     >
-      {(["changes", "history"] as const).map((value) => (
+      {(["audit", "changes", "history"] as const).map((value) => (
         <button
           key={value}
           role="tab"

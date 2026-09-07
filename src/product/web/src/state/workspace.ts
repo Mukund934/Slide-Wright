@@ -232,6 +232,24 @@ export function useWorkspace() {
     [state.document, fail],
   );
 
+  /**
+   * Propose the corrections a tidy pass would make.
+   *
+   * Deliberately routed through the same `proposed` action as an ordinary
+   * request. A tidy that had its own state would be a second path to mutation,
+   * and the one thing this product cannot have is two answers to "did someone
+   * approve this".
+   */
+  const tidy = useCallback(async () => {
+    if (!state.document) return;
+    dispatch({ type: "proposing" });
+    try {
+      dispatch({ type: "proposed", changeset: await api.tidy(state.document.id) });
+    } catch (error) {
+      fail(error);
+    }
+  }, [state.document, fail]);
+
   const revert = useCallback(
     async (to: number) => {
       if (!state.document) return;
@@ -268,6 +286,7 @@ export function useWorkspace() {
     ...derived,
     open,
     propose,
+    tidy,
     review,
     apply,
     revert,
