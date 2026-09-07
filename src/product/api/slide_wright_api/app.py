@@ -380,7 +380,11 @@ def _plan_tidy(session: Session):
     """
     deck = session.deck()
     name = session.source.name
-    conformance = plan_conformance(deck, read_profile(session.current.path), name)
+    # The profile is read from the file the user opened, not from the workspace
+    # snapshot. The theme is identical either way, but every change carries the
+    # source's name as its citation -- and citing `v000-original.pptx` names an
+    # internal artifact the user never chose and would not recognise.
+    conformance = plan_conformance(deck, read_profile(session.source), name)
     alignment = plan_alignment(deck, DEFAULT_TOLERANCE_EMU, name)
     return conformance, alignment
 

@@ -250,8 +250,14 @@ function Provenance({ change }: { change: Change }) {
   const items = [];
 
   if (change.citation) {
+    // Labelled, not bare. A citation is a coordinate — "comps.csv!B2", or the
+    // template a rule conformed to — and a filename shown alone in the verified
+    // colour reads as though a data source backed the change when the reader
+    // has no idea what the string is. The CLI prints "source <citation>"; this
+    // dropped the word and inherited the ambiguity.
     items.push(
       <Pill key="cite" verdict="verified">
+        {change.origin === "rule" ? "conforms to" : "source"}{" "}
         <span className="text-evidence">{change.citation}</span>
       </Pill>,
     );
