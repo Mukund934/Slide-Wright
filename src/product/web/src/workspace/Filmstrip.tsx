@@ -92,33 +92,38 @@ function Row({
   onSelect: (n: number) => void;
 }) {
   return (
+    // The option *is* the control. A `<button>` inside it was both invalid --
+    // an option's children must be presentational -- and, more practically, a
+    // tab stop: the filmstrip held 27 of them on a 26-slide deck, so reaching
+    // the canvas by keyboard meant tabbing past every slide first. On the
+    // 52-slide fixture, 53 stops.
+    //
+    // The listbox already implements the right pattern above: one tab stop,
+    // `aria-activedescendant`, arrows and Home/End. This was the half that had
+    // not caught up with it.
     <li
       id={`slide-${slide.number}`}
       data-slide={slide.number}
       data-changed={changed || undefined}
       role="option"
       aria-selected={selected}
+      onClick={() => onSelect(slide.number)}
+      className={[
+        "group flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left",
+        "transition-colors duration-[120ms]",
+        selected ? "bg-raised" : "hover:bg-[color-mix(in_oklab,var(--color-panel),white_3%)]",
+      ].join(" ")}
     >
-      <button
-        type="button"
-        onClick={() => onSelect(slide.number)}
+      <Mark changed={changed} />
+      <span
         className={[
-          "group flex w-full items-center gap-2 px-3 py-1.5 text-left",
-          "transition-colors duration-[120ms]",
-          selected ? "bg-raised" : "hover:bg-[color-mix(in_oklab,var(--color-panel),white_3%)]",
+          "w-6 shrink-0 text-evidence tabular-nums",
+          selected ? "text-ink" : "text-ink-faint",
         ].join(" ")}
       >
-        <Mark changed={changed} />
-        <span
-          className={[
-            "w-6 shrink-0 text-evidence tabular-nums",
-            selected ? "text-ink" : "text-ink-faint",
-          ].join(" ")}
-        >
-          {slide.number}
-        </span>
-        <Label slide={slide} selected={selected} />
-      </button>
+        {slide.number}
+      </span>
+      <Label slide={slide} selected={selected} />
     </li>
   );
 }

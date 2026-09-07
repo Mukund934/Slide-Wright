@@ -35,7 +35,13 @@
   /* ── ink ────────────────────────────────────────────────────────────────── */
   --color-ink: oklch(96% 0.003 264);        /* primary text */
   --color-ink-muted: oklch(74% 0.006 264);  /* secondary */
-  --color-ink-faint: oklch(58% 0.007 264);  /* tertiary, labels, counts */
+  /* Tertiary: labels, counts, and every rationale line under a finding.
+     Measured at 58% it was 3.88:1 against the panel and 3.44:1 against a
+     raised row -- under WCAG AA for text, on the sentences the audit is most
+     persuasive through ("not wrong in itself, but a later template change will
+     not reach any of them"). 65% clears 4.5:1 against the darkest ground it is
+     ever set on, and the scale still reads as three steps: 96 / 74 / 65. */
+  --color-ink-faint: oklch(65% 0.007 264);  /* tertiary, labels, counts */
 
   /* ── the attention colour ───────────────────────────────────────────────── */
   /* Reserved. It means "this changed" and nothing else, anywhere. */
@@ -47,7 +53,9 @@
   /* Spent only on what the engine actually determined. */
   --color-verified: oklch(74% 0.13 158);
   --color-verified-wash: oklch(74% 0.13 158 / 0.12);
-  --color-blocked: oklch(66% 0.19 22);
+  /* 68%, not 66%. At 66% it was 4.33:1 against a raised row -- under AA, on
+     the single most important sentence this product prints. */
+  --color-blocked: oklch(68% 0.19 22);
   --color-blocked-wash: oklch(66% 0.19 22 / 0.12);
   --color-review: oklch(78% 0.13 88);
   --color-review-wash: oklch(78% 0.13 88 / 0.12);

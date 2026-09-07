@@ -5,7 +5,10 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "types": ["vitest/globals", "@testing-library/jest-dom"],
+    // `node` is here for the tests only. `contrast.test.ts` reads styles.css
+    // off disk on purpose -- the point is to fail when someone edits the
+    // stylesheet, not to check whatever a bundler inlined.
+    "types": ["vitest/globals", "@testing-library/jest-dom", "node"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,

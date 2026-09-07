@@ -298,6 +298,7 @@ function Tabs({ tab, onChange }: { tab: RightTab; onChange: (t: RightTab) => voi
       {TABS.map((value) => (
         <button
           key={value}
+          type="button"
           id={`tab-${value}`}
           role="tab"
           aria-selected={tab === value}
