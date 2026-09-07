@@ -104,11 +104,11 @@ export default function App() {
                 documentId={workspace.document.id}
                 busy={workspace.phase === "proposing" || workspace.phase === "applying"}
                 onGoToSlide={(n) => workspace.select(n, null)}
-                onTidy={() => {
+                onTidy={(template) => {
                   // Land the reviewer where the decision is. Proposing and then
                   // leaving them on the audit would hide the thing they now
                   // have to approve.
-                  void workspace.tidy();
+                  void workspace.tidy(template);
                   setTab("changes");
                 }}
               />

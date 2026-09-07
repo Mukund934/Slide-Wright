@@ -40,7 +40,7 @@ function audit(over: Partial<Audit> = {}): Audit {
 function plan(over: Partial<TidyPlan> = {}): TidyPlan {
   return {
     typefaces: 266, nudges: 6, tolerance_in: 0.02, worst_shift_in: 0.017,
-    skipped: [], conforms_to: "the deck's own theme", ...over,
+    skipped: [], conforms_to: "the deck's own theme", fonts: [], ...over,
   };
 }
 
@@ -215,5 +215,51 @@ describe("when the audit cannot run", () => {
     await waitFor(() =>
       expect(screen.getByText("that document is not open")).toBeInTheDocument(),
     );
+  });
+});
+
+describe("which standard is being conformed to", () => {
+  const fixable = audit({
+    automatable_count: 1,
+    observations: [
+      observation({ area: "consistency", remedy: "conformance", is_automatable: true,
+                    message: "266 runs hardcode a typeface" }),
+    ],
+  });
+
+  it("names the authority rather than implying it", async () => {
+    // "the deck's own theme" and "House.potx" produce very different sets of
+    // changes. A reviewer approving 266 corrections needs to know which.
+    mount(fixable, plan({ conforms_to: "House.potx", fonts: ["Calibri", "Georgia"] }));
+    expect(await screen.findByText("House.potx")).toBeInTheDocument();
+    expect(screen.getByText(/Calibri, Georgia/)).toBeInTheDocument();
+  });
+
+  it("defaults to the deck's own theme and offers a template", async () => {
+    mount(fixable);
+    expect(await screen.findByText("the deck's own theme")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /use a template/ })).toBeInTheDocument();
+  });
+
+  it("re-plans against the template it is given", async () => {
+    mount(fixable);
+    await userEvent.click(await screen.findByRole("button", { name: /use a template/ }));
+    await userEvent.type(
+      screen.getByLabelText(/Path to a \.potx/),
+      "C:\House.potx",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Use" }));
+
+    await waitFor(() =>
+      expect(vi.mocked(api.tidyPlan)).toHaveBeenLastCalledWith("doc", "C:\House.potx"),
+    );
+  });
+
+  it("says nothing departs from the standard rather than hiding the answer", async () => {
+    // A deck that already conforms is a real and useful result. Showing nothing
+    // at all leaves the reader unable to tell it from a check that never ran.
+    mount(fixable, plan({ typefaces: 0, nudges: 0, conforms_to: "House.potx" }));
+    expect(await screen.findByText(/Nothing departs from/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Propose/ })).toBeNull();
   });
 });

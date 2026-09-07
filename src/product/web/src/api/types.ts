@@ -214,7 +214,9 @@ export interface TidyPlan {
   /** Can never exceed the tolerance: alignment only moves onto an existing line. */
   worst_shift_in: number;
   skipped: string[];
+  /** "the deck's own theme", or the name of the template supplied. */
   conforms_to: string;
+  fonts: string[];
 }
 
 export interface CensusRow {

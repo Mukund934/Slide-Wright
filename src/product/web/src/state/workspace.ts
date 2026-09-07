@@ -292,15 +292,21 @@ export function useWorkspace() {
    * and the one thing this product cannot have is two answers to "did someone
    * approve this".
    */
-  const tidy = useCallback(async () => {
-    if (!state.document) return;
-    dispatch({ type: "proposing" });
-    try {
-      dispatch({ type: "proposed", changeset: await api.tidy(state.document.id) });
-    } catch (error) {
-      fail(error);
-    }
-  }, [state.document, fail]);
+  const tidy = useCallback(
+    async (template = "") => {
+      if (!state.document) return;
+      dispatch({ type: "proposing" });
+      try {
+        dispatch({
+          type: "proposed",
+          changeset: await api.tidy(state.document.id, template),
+        });
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [state.document, fail],
+  );
 
   /**
    * Propose the figures a source explains.

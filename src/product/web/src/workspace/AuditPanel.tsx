@@ -43,6 +43,8 @@ const AREA_ORDER: Area[] = [
   "accessibility",
 ];
 
+const TEMPLATE_PLACEHOLDER = "C:\Users\you\House.potx";
+
 const AREA_LABEL: Record<Area, string> = {
   narrative: "Narrative",
   consistency: "Consistency",
@@ -61,10 +63,11 @@ export function AuditPanel({
   documentId: string;
   busy: boolean;
   onGoToSlide: (slide: number) => void;
-  onTidy: () => void;
+  onTidy: (template: string) => void;
 }) {
   const [audit, setAudit] = useState<Audit | null>(null);
   const [plan, setPlan] = useState<TidyPlan | null>(null);
+  const [template, setTemplate] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   // Re-read whenever the document changes underneath — after an apply or a
@@ -74,7 +77,7 @@ export function AuditPanel({
     let live = true;
     setAudit(null);
     setError(null);
-    Promise.all([api.audit(documentId), api.tidyPlan(documentId)])
+    Promise.all([api.audit(documentId), api.tidyPlan(documentId, template)])
       .then(([nextAudit, nextPlan]) => {
         if (!live) return;
         setAudit(nextAudit);
@@ -86,7 +89,7 @@ export function AuditPanel({
     return () => {
       live = false;
     };
-  }, [documentId, busy]);
+  }, [documentId, busy, template]);
 
   if (error) {
     return (
@@ -149,7 +152,15 @@ export function AuditPanel({
                 onGoToSlide={onGoToSlide}
               />
             ))}
-            {plan && <TidyAction plan={plan} busy={busy} onTidy={onTidy} />}
+            {plan && (
+              <TidyAction
+                plan={plan}
+                busy={busy}
+                template={template}
+                onTemplate={setTemplate}
+                onTidy={() => onTidy(template)}
+              />
+            )}
           </Section>
         )}
 
@@ -278,18 +289,27 @@ function Row({
 function TidyAction({
   plan,
   busy,
+  template,
+  onTemplate,
   onTidy,
 }: {
   plan: TidyPlan;
   busy: boolean;
+  template: string;
+  onTemplate: (path: string) => void;
   onTidy: () => void;
 }) {
   const total = plan.typefaces + plan.nudges;
-  if (total === 0) return null;
 
   return (
     <div className="border-b border-line bg-raised px-3 py-2.5">
-      <ul className="mb-2 space-y-0.5 text-2xs text-ink-muted">
+      <Authority plan={plan} template={template} onTemplate={onTemplate} />
+      {total === 0 && (
+        <p className="text-2xs leading-relaxed text-ink-faint">
+          Nothing departs from {plan.conforms_to}.
+        </p>
+      )}
+      <ul className={total === 0 ? "hidden" : "mb-2 space-y-0.5 text-2xs text-ink-muted"}>
         {plan.typefaces > 0 && (
           <li>
             <span className="text-evidence text-ink">{plan.typefaces}</span> run
@@ -306,13 +326,91 @@ function TidyAction({
           </li>
         )}
       </ul>
-      <Button tone="primary" onClick={onTidy} busy={busy}>
-        Propose {total} correction{total === 1 ? "" : "s"}
-      </Button>
-      <p className="mt-1.5 text-2xs leading-relaxed text-ink-faint">
-        Proposes only. You review each one before anything is written, and content is
-        locked throughout.
+      {total > 0 && (
+        <>
+          <Button tone="primary" onClick={onTidy} busy={busy}>
+            Propose {total} correction{total === 1 ? "" : "s"}
+          </Button>
+          <p className="mt-1.5 text-2xs leading-relaxed text-ink-faint">
+            Proposes only. You review each one before anything is written, and content
+            is locked throughout.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Which standard is being conformed to.
+ *
+ * With no template the deck's own theme is the authority, which is right for
+ * something assembled from several sources: it already has a visual system, and
+ * the pasted-in slides are what departs from it. With a template the house
+ * standard becomes the authority instead — the other real workflow, an
+ * inherited deck that has to end up looking like ours.
+ *
+ * The two produce very different sets of changes, so the authority is named
+ * rather than implied. A reviewer approving two hundred typeface corrections
+ * needs to know which standard they are approving against.
+ */
+function Authority({
+  plan,
+  template,
+  onTemplate,
+}: {
+  plan: TidyPlan;
+  template: string;
+  onTemplate: (path: string) => void;
+}) {
+  const [draft, setDraft] = useState(template);
+  const [open, setOpen] = useState(Boolean(template));
+
+  return (
+    <div className="mb-2">
+      <p className="text-2xs text-ink-faint">
+        conforming to{" "}
+        <span className="text-evidence text-ink-muted">{plan.conforms_to}</span>
+        {plan.fonts.length > 0 && (
+          <span className="text-ink-faint"> · {plan.fonts.join(", ")}</span>
+        )}
+        {!open && (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="ml-1.5 underline decoration-dotted underline-offset-2 transition-colors duration-[120ms] hover:text-ink"
+          >
+            use a template
+          </button>
+        )}
       </p>
+
+      {open && (
+        <div className="mt-1.5 flex gap-1.5">
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && onTemplate(draft.trim())}
+            placeholder={TEMPLATE_PLACEHOLDER}
+            spellCheck={false}
+            aria-label="Path to a .potx or .pptx to conform to"
+            className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-panel px-2 py-1 text-ink placeholder:text-ink-faint focus:border-changed-dim focus:outline-none"
+          />
+          <Button onClick={() => onTemplate(draft.trim())}>Use</Button>
+          {template && (
+            <Button
+              tone="quiet"
+              onClick={() => {
+                setDraft("");
+                onTemplate("");
+                setOpen(false);
+              }}
+            >
+              Clear
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
