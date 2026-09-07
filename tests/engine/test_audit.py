@@ -7,8 +7,9 @@ stops trusting every later finding. Precision is tested harder than recall.
 
 from __future__ import annotations
 
-from slide_wright.audit import Area, audit
+from slide_wright.audit import Area, Observation, Remedy, audit
 from slide_wright.gate import Severity
+from slide_wright.layout import DEFAULT_TOLERANCE_EMU, plan_alignment
 from slide_wright.inspect import (
     EMU_PER_INCH,
     DeckInfo,
@@ -512,3 +513,68 @@ class TestDuplicatedLayouts:
             with_layout(3, "Churn fell to 1.9 percent", "Title and Content"),
         ))
         assert "brought in from another deck" in self._findings(result)[0].suggestion
+
+
+class TestNearMissAlignment:
+    """The audit reports what `tidy` can fix, in the numbers `tidy` will use.
+
+    This check existed as a capability and not as a finding: `layout.py` could
+    detect and snap near-miss edges, `tidy` ran it, and the audit -- whose whole
+    job is answering "what should change?" -- never mentioned it.
+    """
+
+    def test_reports_shapes_that_nearly_line_up(self, adversarial_deck):
+        deck = inspect(adversarial_deck)
+        plan = plan_alignment(deck, DEFAULT_TOLERANCE_EMU)
+        found = [o for o in audit(deck).observations if o.remedy is Remedy.ALIGNMENT]
+
+        if plan.empty:
+            assert not found, "nothing to snap, so nothing to report"
+        else:
+            assert len(found) == 1
+            assert str(len(plan.changes)) in found[0].message
+
+    def test_the_count_is_the_one_tidy_would_act_on(self):
+        """The finding and the fix must agree, or the fix contradicts its cause.
+
+        `tidy` and `align` both default to 0.02in on the command line, and the
+        audit uses the planner's own default. If those ever diverge, the audit
+        would report a number of shapes and the fix would touch a different one.
+        """
+        from slide_wright.cli import build_parser
+
+        parser = build_parser()
+        for command in ("tidy", "align"):
+            args = parser.parse_args([command, "deck.pptx"])
+            assert args.tolerance == DEFAULT_TOLERANCE_EMU / EMU_PER_INCH, (
+                f"{command} would act on a different tolerance from the audit"
+            )
+
+
+class TestRemediesAreTruthful:
+    """"Slide-Wright can fix this" is a promise, so it is asserted, not assumed."""
+
+    def test_a_rule_without_an_explicit_remedy_is_recommendation_only(self):
+        """The safe default. A rule added later must not claim to be fixable."""
+        assert Observation(Area.NARRATIVE, [], "x").remedy is Remedy.NONE
+        assert not Observation(Area.NARRATIVE, [], "x").is_automatable
+
+    def test_colour_sprawl_is_never_offered_as_automatable(self, adversarial_deck):
+        """Measured and rejected: every off-palette colour is far from the theme.
+
+        On both real decks the nearest theme colour is 10.6-63 ΔE away against a
+        2.3 just-noticeable threshold. There are no near misses to snap to, so
+        offering a fix would mean picking a colour on the user's behalf.
+        """
+        colour_findings = [
+            o for o in audit(inspect(adversarial_deck)).observations
+            if "colour" in o.message
+        ]
+        assert all(not o.is_automatable for o in colour_findings)
+
+    def test_judgement_findings_are_never_automatable(self, adversarial_deck):
+        """Titles, density, sourcing and narrative are for a person to decide."""
+        judgement = {Area.NARRATIVE, Area.EVIDENCE}
+        for observation in audit(inspect(adversarial_deck)).observations:
+            if observation.area in judgement:
+                assert not observation.is_automatable, observation.message

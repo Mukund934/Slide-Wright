@@ -21,7 +21,7 @@ from enum import Enum
 
 from slide_wright.brand import is_theme_reference
 from slide_wright.gate import GateResult, Severity, check
-from slide_wright.inspect import DeckInfo, SlideInfo
+from slide_wright.inspect import EMU_PER_INCH, DeckInfo, SlideInfo
 
 # A number with a unit is self-describing; a bare one is not. Getting this
 # rule *precise* matters more than getting it complete: telling someone their
@@ -66,6 +66,26 @@ class Area(str, Enum):
     ACCESSIBILITY = "accessibility"
 
 
+class Remedy(str, Enum):
+    """What, if anything, can correct a finding without a human deciding.
+
+    The distinction matters more than it looks. An audit that presents "no slide
+    titles make a claim" and "nine runs hardcode a typeface the theme already
+    sets" as equally actionable is teaching the reader that its findings are a
+    list of complaints. One of those is a judgement about the argument the deck
+    is making; the other is arithmetic with a verified fix.
+
+    So the answer lives here, next to the rule that produced the finding, rather
+    than in whatever surface happens to be displaying it. A rule added later
+    without a remedy is recommendation-only by default, which is the safe way
+    round.
+    """
+
+    NONE = ""                    # a person has to decide
+    CONFORMANCE = "conformance"  # `tidy` / `brand --fix` — typefaces, per run
+    ALIGNMENT = "alignment"      # `tidy` / `align --fix` — bounded edge snapping
+
+
 @dataclass
 class Observation:
     """Something true about the deck that its author would want to know."""
@@ -75,6 +95,12 @@ class Observation:
     message: str
     suggestion: str = ""
     severity: Severity = Severity.WARNING
+    remedy: Remedy = Remedy.NONE
+
+    @property
+    def is_automatable(self) -> bool:
+        """Whether a deterministic pass can correct this, changing no content."""
+        return self.remedy is not Remedy.NONE
 
     @property
     def where(self) -> str:
@@ -156,6 +182,7 @@ def audit(deck: DeckInfo, name: str = "") -> DeckAudit:
         _layout_outliers,
         _duplicated_layouts,
         _typeface_spellings,
+        _near_miss_alignment,
         _unsourced_figures,
         _bare_numbers,
         _table_shape,
@@ -241,6 +268,7 @@ def _font_sprawl(deck: DeckInfo, out: DeckAudit) -> None:
             Area.CONSISTENCY, [],
             f"{len(fonts)} typefaces are in use: {listed}",
             "a deck reads as considered when it uses two, occasionally three",
+            remedy=Remedy.CONFORMANCE,
         ))
 
 
@@ -249,12 +277,51 @@ def _colour_sprawl(deck: DeckInfo, out: DeckAudit) -> None:
         run.color for shape in deck.all_shapes() for run in shape.runs if run.color
     )
     if len(colours) > 6:
+        # Deliberately no remedy. Correcting colour automatically was measured
+        # and rejected: on both real decks every off-palette colour sits 10.6-63
+        # ΔE from the nearest theme colour against a 2.3 just-noticeable
+        # threshold, so there are no near misses to snap to. Position is dragged
+        # and lands slightly off; colour is picked, and does not.
         out.observations.append(Observation(
             Area.CONSISTENCY, [],
             f"{len(colours)} explicit text colours are in use",
             "explicit colours override the theme; prefer theme colours so a "
             "template change carries through",
         ))
+
+
+def _near_miss_alignment(deck: DeckInfo, out: DeckAudit) -> None:
+    """Edges that nearly agree, which is worse than edges that plainly do not.
+
+    This check existed as a capability and not as a finding. `layout.py` could
+    detect and snap near-miss edges, `tidy` ran it, and the audit -- the command
+    whose entire job is answering "what should change?" -- never mentioned it.
+    On one real 625-shape deck the planner finds 128 shapes to nudge and the
+    audit reported none of them, which made the audit quietly wrong about the
+    largest category of defect it can actually do something about.
+
+    Reported through the planner rather than reimplemented, so the number here
+    is the number `tidy` would act on. A second implementation would eventually
+    disagree with the first, and the disagreement would surface as a fix that
+    does not match its own finding.
+    """
+    from slide_wright.layout import DEFAULT_TOLERANCE_EMU, plan_alignment
+
+    plan = plan_alignment(deck, DEFAULT_TOLERANCE_EMU, out.deck)
+    if plan.empty:
+        return
+
+    slides = sorted({change.slide for change in plan.changes})
+    worst_in = plan.worst_shift_emu / EMU_PER_INCH
+    out.observations.append(Observation(
+        Area.LAYOUT, slides,
+        f"{len(plan.changes)} shape(s) sit within "
+        f"{plan.tolerance_emu / EMU_PER_INCH:.2f}in of an edge others share, "
+        f"without matching it",
+        f"the largest correction would be {worst_in:.3f}in; near-misses read as "
+        f"sloppiness where a deliberate offset reads as a choice",
+        remedy=Remedy.ALIGNMENT,
+    ))
 
 
 def _unsourced_figures(deck: DeckInfo, out: DeckAudit) -> None:
@@ -445,6 +512,7 @@ def _typeface_spellings(deck: DeckInfo, out: DeckAudit) -> None:
         f"{len(inconsistent)} typeface(s) are spelled more than one way: {detail}",
         "the same font typed differently by different people; harmless to look "
         "at, but it doubles every count that groups by typeface",
+        remedy=Remedy.CONFORMANCE,
     ))
 
 
@@ -487,6 +555,7 @@ def _detached_from_the_template(deck: DeckInfo, out: DeckAudit) -> None:
         f"directly rather than deferring to the theme: {listed}",
         "not wrong in itself, but a later template change will not reach any of "
         "them; `brand --fix` re-links them without altering a word",
+        remedy=Remedy.CONFORMANCE,
     ))
 
 
