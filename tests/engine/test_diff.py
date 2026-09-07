@@ -13,7 +13,7 @@ import pytest
 
 from slide_wright.apply import apply_changes
 from slide_wright.changeset import Change, ChangeSet, Op
-from slide_wright.diff import VISIBLE_MOVE_EMU, _describe_text_change, diff
+from slide_wright.diff import VISIBLE_MOVE_EMU, ShapeDelta, _describe_text_change, diff
 from slide_wright.inspect import inspect
 
 
@@ -209,3 +209,52 @@ class TestAcceptsInspectedDecks:
         copy = tmp_path / "copy.pptx"
         shutil.copy(adversarial_deck, copy)
         assert not diff(inspect(adversarial_deck), inspect(copy)).changed
+
+
+class TestFigureChanges:
+    """The sharpest claim this product makes is not "content unchanged".
+
+    It is *no figure changed*. Someone asking for a formatting pass on a
+    pitchbook does not want reassurance about prose; they want to know the
+    multiples are the ones they signed off.
+    """
+
+    def delta(self, kind, before, after):
+        return ShapeDelta(slide=1, shape_id="1", kind=kind,
+                          description="", before=before, after=after)
+
+    def test_a_moved_number_is_a_figure_change(self):
+        assert self.delta("text", "9.4x", "11.8x").changes_figures
+        assert self.delta("table", "312", "340").changes_figures
+
+    def test_presentation_is_never_a_figure_change(self):
+        """A typeface carrying digits must not read as a moved number."""
+        assert not self.delta("formatting", "Arial 10", "Arial 12").changes_figures
+
+    def test_prose_edited_without_touching_a_number_is_not(self):
+        assert not self.delta("text", "teh margin", "the margin").changes_figures
+        assert not self.delta("text", "Revenue", "Revenue up").changes_figures
+
+    def test_reordering_digits_counts(self):
+        """Comparing sets would call this unchanged. It is a different deck."""
+        assert self.delta("text", "9.4 and 4.9", "4.9 and 9.4").changes_figures
+
+    def test_it_errs_toward_flagging(self):
+        """This claim is a negative being proved.
+
+        A false alarm costs a second look; a missed one costs the guarantee. So
+        a label that merely contains a digit is flagged rather than parsed for
+        whether it is really a quantity.
+        """
+        assert self.delta("text", "Q3 2026", "Q4 2026").changes_figures
+
+    def test_the_deck_reports_them_separately(self, adversarial_deck, table, tmp_path):
+        out = tmp_path / "o.pptx"
+        cs = approved(adversarial_deck, Change(
+            id="c1", op=Op.SET_TABLE_CELL, slide=3,
+            target=f"{table.id}/r1/c1", before="9.4x", after="11.8x"))
+        apply_changes(adversarial_deck, cs, out)
+
+        result = diff(adversarial_deck, out)
+        assert result.figure_deltas, "a changed multiple is a figure change"
+        assert all(d.is_content for d in result.figure_deltas)

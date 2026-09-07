@@ -25,6 +25,7 @@ purpose. Everything here is an assertion about structure, and says so.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from slide_wright.inspect import EMU_PER_INCH, DeckInfo, ShapeInfo, inspect
@@ -52,6 +53,26 @@ class ShapeDelta:
         """Content changes alter what the deck says. Everything else is presentation."""
         return self.kind in {"text", "table", "added", "removed"}
 
+    @property
+    def changes_figures(self) -> bool:
+        """Whether a number moved.
+
+        The sharpest claim this product can make is not "content unchanged" but
+        *"no figure changed"*. Someone asking for a formatting pass on a
+        pitchbook does not want reassurance about prose; they want to know the
+        multiples are the ones they signed off.
+
+        Digits are compared rather than parsed. A parser would need to decide
+        what counts as a quantity -- is `Q3` a figure? is `2026`? -- and every
+        such decision is a way to answer "no figures changed" wrongly. Comparing
+        the digit runs either side errs toward flagging, which is the safe
+        direction here: this claim is a negative being proved, so a false alarm
+        costs a second look and a missed one costs the guarantee.
+        """
+        if not self.is_content:
+            return False
+        return _digits(self.before) != _digits(self.after)
+
 
 @dataclass
 class DeckDiff:
@@ -62,6 +83,11 @@ class DeckDiff:
     deltas: list[ShapeDelta] = field(default_factory=list)
     slides_added: list[int] = field(default_factory=list)
     slides_removed: list[int] = field(default_factory=list)
+
+    @property
+    def figure_deltas(self) -> list[ShapeDelta]:
+        """Differences where a number moved. The count nobody wants to be non-zero."""
+        return [d for d in self.deltas if d.changes_figures]
 
     @property
     def changed(self) -> bool:
@@ -243,6 +269,15 @@ def _describe_text_change(before: str, after: str, context: int = 14) -> str:
     where = f"{prefix}{lead}[" if (lead or prefix) else "["
     return (f"{where}{changed_before or '(nothing)'} -> "
             f"{changed_after or '(nothing)'}]{trail}{suffix}")
+
+
+def _digits(value: object) -> list[str]:
+    """Every run of digits in a value, in order.
+
+    Order matters: `9.4 -> 4.9` is a different deck even though the same digits
+    appear. Comparing sets would call that unchanged.
+    """
+    return re.findall(r"\d+", "" if value is None else str(value))
 
 
 def _name(shape: ShapeInfo) -> str:
