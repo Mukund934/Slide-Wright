@@ -25,6 +25,7 @@ import { enter, stagger } from "../motion/tokens";
 export function ChangeSetPanel({
   changeset,
   busy,
+  applied = false,
   onGoTo,
   onApprove,
   onReject,
@@ -32,6 +33,8 @@ export function ChangeSetPanel({
 }: {
   changeset: ChangeSet | null;
   busy: boolean;
+  /** Whether an apply has already landed on this document. */
+  applied?: boolean;
   onGoTo: (change: Change) => void;
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
@@ -43,10 +46,22 @@ export function ChangeSetPanel({
         {/* No strip. The empty state below already says there is nothing
             proposed, and saying it twice in adjacent rows is the same mistake
             as a heading repeating its tab. */}
-        <Empty
-          title="Nothing proposed"
-          detail="Ask for a change and Slide-Wright will write down exactly what it intends to do, before it touches the file."
-        />
+        {/* A change set is closed once it is applied, because every `before` in
+            it was read from the version it was built against. So this panel
+            empties the moment an edit lands, and "nothing proposed" — written
+            for a deck nobody has touched — then reads as if the work had not
+            happened. It did; it is in the result below and in history. */}
+        {applied ? (
+          <Empty
+            title="Applied"
+            detail="That change set is closed — it described the version you edited. The result is beside this panel, and every version is in history. Ask for another change to start a new one."
+          />
+        ) : (
+          <Empty
+            title="Nothing proposed"
+            detail="Ask for a change and Slide-Wright will write down exactly what it intends to do, before it touches the file."
+          />
+        )}
       </>
     );
   }

@@ -48,6 +48,16 @@ describe("the empty state", () => {
     render(<ChangeSetPanel {...handlers} changeset={null} />);
     expect(screen.getByText(/before it touches the file/)).toBeInTheDocument();
   });
+
+  it("does not say 'nothing proposed' to someone who just applied something", () => {
+    // A change set is closed the moment it is applied — every `before` in it
+    // was read from the version it described. So this panel empties on a
+    // successful apply, and the copy written for an untouched deck then reads
+    // as though the work had not happened.
+    render(<ChangeSetPanel {...handlers} changeset={null} applied />);
+    expect(screen.queryByText(/Nothing proposed/)).not.toBeInTheDocument();
+    expect(screen.getByText(/described the version you edited/)).toBeInTheDocument();
+  });
 });
 
 describe("provenance", () => {

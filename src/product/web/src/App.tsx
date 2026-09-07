@@ -151,6 +151,7 @@ export default function App() {
               <ChangeSetPanel
                 changeset={workspace.changeset}
                 busy={workspace.phase === "applying"}
+                applied={workspace.document.versions.length > 1}
                 onGoTo={workspace.goToChange}
                 onApprove={(id) => workspace.review({ approve: [id] })}
                 onReject={(id) => workspace.review({ reject: [id] })}
