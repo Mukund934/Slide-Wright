@@ -136,11 +136,58 @@ export interface Finding {
   shape_name: string;
 }
 
-export interface Audit {
+/** May this be delivered? A per-slide, pass/fail question about an edit. */
+export interface Gate {
   passed: boolean;
   error_count: number;
   warning_count: number;
   findings: Finding[];
+}
+
+export type Area =
+  | "structure"
+  | "narrative"
+  | "consistency"
+  | "evidence"
+  | "layout"
+  | "accessibility";
+
+/** What can correct a finding without a person deciding. "" means nothing can. */
+export type Remedy = "" | "conformance" | "alignment";
+
+export interface Observation {
+  area: Area;
+  slides: number[];
+  where: string;
+  message: string;
+  suggestion: string;
+  severity: Severity;
+  /** The engine's answer, never recomputed here. */
+  remedy: Remedy;
+  is_automatable: boolean;
+}
+
+/** What should change? Asked of a deck nobody has touched yet. */
+export interface Audit {
+  deck: string;
+  slide_count: number;
+  word_count: number;
+  words_per_slide: number;
+  observations: Observation[];
+  gate: Gate;
+  automatable_count: number;
+  rendered: string;
+}
+
+/** What a tidy pass would change, before anything is proposed. */
+export interface TidyPlan {
+  typefaces: number;
+  nudges: number;
+  tolerance_in: number;
+  /** Can never exceed the tolerance: alignment only moves onto an existing line. */
+  worst_shift_in: number;
+  skipped: string[];
+  conforms_to: string;
 }
 
 export interface CensusRow {

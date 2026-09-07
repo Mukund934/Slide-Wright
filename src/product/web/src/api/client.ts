@@ -16,6 +16,7 @@ import type {
   LockSpec,
   SetSpec,
   SlideDocument,
+  TidyPlan,
   Verification,
 } from "./types";
 
@@ -92,6 +93,13 @@ export const api = {
   close: (id: string) => request<{ closed: boolean }>(`/documents/${id}`, { method: "DELETE" }),
 
   audit: (id: string) => request<Audit>(`/documents/${id}/audit`),
+
+  /** What a tidy would change. Reads only. */
+  tidyPlan: (id: string) => request<TidyPlan>(`/documents/${id}/tidy`),
+
+  /** Propose the corrections a tidy would make. Approves and applies nothing. */
+  tidy: (id: string, locks: LockSpec[] = []) =>
+    post<ChangeSet>(`/documents/${id}/tidy`, { locks }),
 
   /** Work out what would change. Writes nothing. */
   propose: (id: string, body: { instruction?: string; sets?: SetSpec[]; locks?: LockSpec[] }) =>
