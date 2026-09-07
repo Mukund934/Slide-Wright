@@ -1,0 +1,189 @@
+/**
+ * The primitives. Deliberately few.
+ *
+ * Each one owns its whole lifecycle -- rest, hover, focus, press, disabled,
+ * busy -- because styling only the default state is what makes an interface
+ * feel unfinished no matter how good the default looks.
+ *
+ * The colour rule from `styles.css` is enforced here by omission: no primitive
+ * accepts an arbitrary colour, and none of them can be made to use the attention
+ * colour. That colour belongs to "this changed", and a button wearing it would
+ * spend the one signal the product cannot afford to dilute.
+ */
+
+import type { ButtonHTMLAttributes, ReactNode } from "react";
+
+type Tone = "default" | "primary" | "quiet" | "danger";
+
+const TONES: Record<Tone, string> = {
+  default:
+    "bg-[--color-raised] text-[--color-ink] border-[--color-line-strong] " +
+    "hover:bg-[color-mix(in_oklab,var(--color-raised),white_6%)]",
+  // "Primary" is weight, not colour: the important action is the solid one.
+  primary:
+    "bg-[--color-ink] text-[--color-ground] border-transparent font-medium " +
+    "hover:bg-[color-mix(in_oklab,var(--color-ink),var(--color-ground)_12%)]",
+  quiet:
+    "bg-transparent text-[--color-ink-muted] border-transparent " +
+    "hover:bg-[--color-raised] hover:text-[--color-ink]",
+  danger:
+    "bg-transparent text-[--color-blocked] border-[color-mix(in_oklab,var(--color-blocked),transparent_65%)] " +
+    "hover:bg-[--color-blocked-wash]",
+};
+
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  tone?: Tone;
+  busy?: boolean;
+  children: ReactNode;
+}
+
+export function Button({
+  tone = "default",
+  busy = false,
+  disabled,
+  className = "",
+  children,
+  ...rest
+}: ButtonProps) {
+  return (
+    <button
+      type="button"
+      // `busy` disables as well as announces. A button that is working and
+      // still clickable is how a deck gets edited twice.
+      disabled={disabled || busy}
+      aria-busy={busy || undefined}
+      className={[
+        "inline-flex items-center justify-center gap-1.5 rounded-[--radius-md] border",
+        "px-2.5 py-1.5 text-xs transition-colors duration-[--duration-fast]",
+        "active:translate-y-px disabled:pointer-events-none disabled:opacity-40",
+        TONES[tone],
+        className,
+      ].join(" ")}
+      {...rest}
+    >
+      {busy && <Spinner />}
+      {children}
+    </button>
+  );
+}
+
+function Spinner() {
+  return (
+    <span
+      aria-hidden
+      className="size-3 animate-spin rounded-full border border-current border-t-transparent opacity-70"
+    />
+  );
+}
+
+/**
+ * A verdict, worn as a pill.
+ *
+ * `verified` and `blocked` are reserved for things the engine actually
+ * determined. Nothing decorative may use them: the moment a green pill means
+ * "nice" somewhere, it stops meaning "checked" everywhere.
+ */
+export type Verdict = "verified" | "blocked" | "review" | "changed" | "neutral";
+
+const VERDICTS: Record<Verdict, string> = {
+  verified: "bg-[--color-verified-wash] text-[--color-verified]",
+  blocked: "bg-[--color-blocked-wash] text-[--color-blocked]",
+  review: "bg-[--color-review-wash] text-[--color-review]",
+  changed: "bg-[--color-changed-wash] text-[--color-changed]",
+  neutral: "bg-[--color-raised] text-[--color-ink-faint]",
+};
+
+export function Pill({
+  verdict = "neutral",
+  children,
+  className = "",
+}: {
+  verdict?: Verdict;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium",
+        VERDICTS[verdict],
+        className,
+      ].join(" ")}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** A region heading. Small, quiet, and always in the same place. */
+export function PanelHeading({
+  children,
+  trailing,
+}: {
+  children: ReactNode;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="flex h-9 shrink-0 items-center justify-between border-b border-[--color-line] px-3">
+      <h2 className="text-2xs font-medium uppercase tracking-[0.08em] text-[--color-ink-faint]">
+        {children}
+      </h2>
+      {trailing}
+    </div>
+  );
+}
+
+/**
+ * An empty state that answers "what can I do here?".
+ *
+ * The UX architecture calls first upload the only onboarding that matters, so
+ * these carry an action rather than an illustration.
+ */
+export function Empty({
+  title,
+  detail,
+  action,
+}: {
+  title: string;
+  detail?: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+      <p className="text-sm text-[--color-ink-muted]">{title}</p>
+      {detail && <p className="max-w-xs text-xs leading-relaxed text-[--color-ink-faint]">{detail}</p>}
+      {action && <div className="mt-2">{action}</div>}
+    </div>
+  );
+}
+
+/**
+ * A count with a label, set in tabular figures.
+ *
+ * These are the product's evidence. `intact` false is the only thing that gets
+ * the blocked colour -- an unremarkable number must look unremarkable, or the
+ * one that matters stops standing out.
+ */
+export function Stat({
+  label,
+  value,
+  intact = true,
+}: {
+  label: string;
+  value: ReactNode;
+  intact?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 py-1">
+      <span className="text-xs text-[--color-ink-faint]">{label}</span>
+      <span
+        className={[
+          "text-evidence",
+          intact ? "text-[--color-ink-muted]" : "text-[--color-blocked]",
+        ].join(" ")}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
