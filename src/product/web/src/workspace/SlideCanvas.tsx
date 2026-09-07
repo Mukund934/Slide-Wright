@@ -151,8 +151,6 @@ function ShapeBox({
         width: px(shape.cx),
         height: px(shape.cy),
         rotate: shape.rotation_deg ?? 0,
-        outlineStyle: "solid",
-        outlineOffset: 0,
       }}
       onPointerDown={
         interactive

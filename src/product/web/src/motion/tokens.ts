@@ -60,13 +60,15 @@ export const stagger = (count: number): Transition => ({
  * result is an alarm.
  */
 export const attention: Variants = {
-  rest: { outlineWidth: 0, outlineColor: "rgba(0,0,0,0)" },
+  rest: { boxShadow: "0 0 0 0 rgba(0,0,0,0)" },
   carried: {
-    outlineWidth: [0, 6, 0],
-    outlineColor: [
-      "rgba(0,0,0,0)",
-      "var(--color-changed-wash)",
-      "rgba(0,0,0,0)",
+    // A halo on `box-shadow`, not `outline`. The three canvas states are told
+    // apart by outline *style* now, so animating outline would have the pulse
+    // fighting the very mark it is drawing attention to.
+    boxShadow: [
+      "0 0 0 0 rgba(0,0,0,0)",
+      "0 0 0 7px var(--color-changed-wash)",
+      "0 0 0 0 rgba(0,0,0,0)",
     ],
     transition: { duration: DURATION.deliberate, ease: EASE_IN_OUT },
   },

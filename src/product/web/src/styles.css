@@ -166,16 +166,24 @@
 }
 
 @layer utilities {
-  /* The changed-region outline. Defined once so the filmstrip mark, the canvas
-     outline and the change-set row cannot drift apart -- they are one idea. */
+  /* Three states an object on the canvas can be in, told apart by *line* before
+     colour is consulted at all:
+
+       changed    solid, heavy      — something moved here
+       selected   dotted, light     — you are pointing at this
+       protected  dashed + hatched  — this may not move
+
+     Changed and selected were both solid rings differing only in hue, which is
+     a colour-only distinction and the exact thing WCAG 1.4.1 forbids. They are
+     also the two most likely to appear on the same slide at the same time. */
   .ring-changed {
-    box-shadow: 0 0 0 1.5px var(--color-changed);
+    outline: 2px solid var(--color-changed);
+    outline-offset: 0;
   }
 
-  /* The selection outline. Deliberately neutral -- selecting is not changing,
-     and wearing the attention colour would say it was. */
   .ring-selected {
-    box-shadow: 0 0 0 1.5px var(--color-line-strong);
+    outline: 1.5px dotted var(--color-line-strong);
+    outline-offset: 1px;
   }
 
   /* The slide sitting on the ground, as paper rather than as a panel. */
