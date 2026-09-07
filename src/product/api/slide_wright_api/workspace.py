@@ -59,8 +59,19 @@ class Workspace:
 
         doc_id = _identify(resolved)
         existing = self.sessions.get(doc_id)
-        if existing is not None:
+        if existing is not None and _intact(existing):
             return doc_id, existing
+
+        # A cached session whose files have gone is worse than no session: it
+        # answers every question with a path that no longer resolves, and the
+        # failure surfaces as a 500 from deep inside the reader. Workspaces live
+        # on disk next to the deck, so they get deleted, synced, restored and
+        # moved by people and by software that knows nothing about us.
+        #
+        # Dropping it and reopening is safe by construction: the workspace is
+        # rebuilt from the source file, and version history that survived is
+        # read back from `history.json` the same way a restart reads it.
+        self.sessions.pop(doc_id, None)
 
         try:
             session = Session.open(resolved)
@@ -86,6 +97,16 @@ class Workspace:
     def close(self, doc_id: str) -> None:
         """Drop the view. The workspace on disk is untouched and still complete."""
         self.sessions.pop(doc_id, None)
+
+
+def _intact(session: Session) -> bool:
+    """Whether every version this session believes in is still on disk.
+
+    Checked on the current version and the original, not all of them: those two
+    are what every request touches, and stat-ing a hundred files on each open
+    would cost more than it catches.
+    """
+    return session.current.path.is_file() and session.versions[0].path.is_file()
 
 
 def _identify(path: Path) -> str:

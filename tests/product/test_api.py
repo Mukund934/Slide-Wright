@@ -1049,3 +1049,63 @@ class TestExportRefusesTheSideDoor:
         response = client.post(f"/api/documents/{document['id']}/export", json={})
         assert response.status_code == 422
         assert "failed verification" in response.json()["detail"]
+
+
+class TestAWorkspaceThatWentAway:
+    """The session workspace lives on disk beside the deck, so it can vanish.
+
+    People delete folders. Sync clients move them. Backup software restores
+    them half-formed. A cached session whose files have gone answers every
+    question with a path that no longer resolves, and the failure surfaced as a
+    500 from deep inside the package reader — which tells the user nothing and
+    looks like the product is broken.
+    """
+
+    def test_reopening_after_the_workspace_is_deleted_recovers(self, client):
+        import shutil
+
+        document = open_document(client)
+        workspace = Path(document["workspace"])
+        assert workspace.is_dir()
+
+        shutil.rmtree(workspace)
+
+        # Same path, same process, same cached session — and it must work.
+        response = client.post("/api/documents", json={"path": str(client.deck)})
+        assert response.status_code == 200, response.text
+        assert response.json()["deck"]["slides"]
+        assert Path(response.json()["workspace"]).is_dir(), "rebuilt from the source"
+
+    def test_the_recovered_session_starts_from_the_original_again(self, client):
+        import shutil
+
+        document = open_document(client)
+        slide, target = table_target(document)
+        client.post(
+            f"/api/documents/{document['id']}/propose",
+            json={"sets": [{"slide": slide, "target": target,
+                            "op": "set_table_cell", "after": "11.8x"}]},
+        )
+        client.post(f"/api/documents/{document['id']}/review", json={"approve_all": True})
+        client.post(f"/api/documents/{document['id']}/apply", json={})
+
+        shutil.rmtree(Path(document["workspace"]))
+        recovered = client.post("/api/documents", json={"path": str(client.deck)}).json()
+
+        # The history went with the folder, which is the truth: those versions
+        # are gone. Claiming otherwise would offer a revert that cannot happen.
+        assert [v["number"] for v in recovered["versions"]] == [0]
+        assert recovered["versions"][0]["is_original"]
+
+    def test_a_deck_deleted_underneath_us_is_explained_not_a_500(self, client, tmp_path):
+        staged = tmp_path / "vanishing.pptx"
+        staged.write_bytes(client.deck.read_bytes())
+        opened = client.post("/api/documents", json={"path": str(staged)}).json()
+
+        import shutil
+        shutil.rmtree(Path(opened["workspace"]))
+        staged.unlink()
+
+        response = client.post("/api/documents", json={"path": str(staged)})
+        assert response.status_code == 422
+        assert "no file at" in response.json()["detail"]
