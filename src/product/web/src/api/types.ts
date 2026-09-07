@@ -179,6 +179,20 @@ export interface Audit {
   rendered: string;
 }
 
+/**
+ * Where an export would go, and whether one is allowed at all.
+ *
+ * `deliverable` is asked before the user types a path. Offering the field and
+ * rejecting the submission would be technically identical and much worse: it
+ * makes a verdict about the deck look like a mistake in what they typed.
+ */
+export interface ExportTarget {
+  suggested: string;
+  deliverable: boolean;
+  blocking_reasons: string[];
+  version: number;
+}
+
 /** One deck cell a source row and column pair explains. */
 export interface Match {
   slide: number;

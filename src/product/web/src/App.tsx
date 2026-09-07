@@ -22,6 +22,7 @@ import { AuditPanel } from "./workspace/AuditPanel";
 import { ChangeSetPanel } from "./workspace/ChangeSetPanel";
 import { DiffPanel } from "./workspace/DiffPanel";
 import { CommandBar } from "./workspace/CommandBar";
+import { Export } from "./workspace/Export";
 import { Filmstrip } from "./workspace/Filmstrip";
 import { History } from "./workspace/History";
 import { OpenDeck } from "./workspace/OpenDeck";
@@ -62,6 +63,8 @@ export default function App() {
         name={workspace.document.name}
         workspacePath={workspace.document.workspace}
         health={health}
+        documentId={workspace.document.id}
+        version={workspace.document.versions.at(-1)?.number ?? 0}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -192,10 +195,14 @@ function TopBar({
   name,
   workspacePath,
   health,
+  documentId,
+  version,
 }: {
   name: string;
   workspacePath: string;
   health: Health | null;
+  documentId: string;
+  version: number;
 }) {
   return (
     <header className="flex h-10 shrink-0 items-center justify-between border-b border-line bg-panel px-3">
@@ -207,9 +214,10 @@ function TopBar({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {health && !health.model_configured && <Pill>offline · deterministic only</Pill>}
-        <span className="text-evidence text-ink-faint">
+        <span className="text-evidence hidden text-ink-faint lg:inline">
           engine {health?.engine ?? "…"}
         </span>
+        <Export documentId={documentId} version={version} />
       </div>
     </header>
   );

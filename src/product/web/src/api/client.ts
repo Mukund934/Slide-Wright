@@ -13,6 +13,7 @@ import type {
   ChangeSet,
   Deck,
   DiffResult,
+  ExportTarget,
   Health,
   LockSpec,
   SetSpec,
@@ -145,7 +146,11 @@ export const api = {
     return request<DiffResult>(`/documents/${id}/diff?${query}`);
   },
 
-  export: (id: string, destination: string) =>
+  /** Where an export would go, and whether the engine will allow one. */
+  exportTarget: (id: string) => request<ExportTarget>(`/documents/${id}/export`),
+
+  /** Write the current version out. Empty destination means the suggestion. */
+  export: (id: string, destination = "") =>
     post<{ path: string }>(`/documents/${id}/export`, { destination }),
 };
 
