@@ -609,4 +609,6 @@ class RevertRequest(BaseModel):
 
 
 class ExportRequest(BaseModel):
-    destination: str
+    # Empty means "wherever the API suggests" — beside the original, named for
+    # the version, and never over the top of the file that was opened.
+    destination: str = ""

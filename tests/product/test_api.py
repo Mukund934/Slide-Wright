@@ -965,3 +965,87 @@ class TestTemplateConformance:
         )
         assert response.status_code == 422
         assert "no file at" in response.json()["detail"]
+
+
+class TestExportRefusesTheSideDoor:
+    """A deck that failed verification must not leave by any route.
+
+    The engine enforces it; these check that the surface does not quietly
+    provide a way around, and that a refusal reads as a verdict about the deck
+    rather than a mistake in what the user typed.
+    """
+
+    def test_suggests_a_name_beside_the_original(self, client):
+        document = open_document(client)
+        target = client.get(f"/api/documents/{document['id']}/export").json()
+
+        suggested = Path(target["suggested"])
+        assert suggested.parent == client.deck.parent
+        assert suggested != client.deck, "the default must never be the original"
+        assert suggested.suffix == client.deck.suffix
+
+    def test_says_whether_an_export_is_allowed_before_a_path_is_typed(self, client):
+        """Offering the field and rejecting the submission is much worse.
+
+        It makes the refusal look like a typo rather than a verdict.
+        """
+        document = open_document(client)
+        target = client.get(f"/api/documents/{document['id']}/export").json()
+        assert target["deliverable"] is True
+        assert target["blocking_reasons"] == []
+
+    def test_writes_where_asked(self, client, tmp_path):
+        document = open_document(client)
+        destination = tmp_path / "out" / "final.pptx"
+
+        body = client.post(
+            f"/api/documents/{document['id']}/export",
+            json={"destination": str(destination)},
+        ).json()
+
+        assert destination.is_file()
+        assert body["path"] == str(destination)
+
+    def test_writes_to_the_suggestion_when_no_path_is_given(self, client):
+        document = open_document(client)
+        body = client.post(f"/api/documents/{document['id']}/export", json={}).json()
+        assert Path(body["path"]).is_file()
+        assert Path(body["path"]) != client.deck
+
+    def test_refuses_to_overwrite_the_file_that_was_opened(self, client):
+        """Every guarantee rests on the original still existing to verify against."""
+        document = open_document(client)
+        before = client.deck.read_bytes()
+
+        response = client.post(
+            f"/api/documents/{document['id']}/export",
+            json={"destination": str(client.deck)},
+        )
+
+        assert response.status_code == 422
+        assert "will not overwrite your original" in response.json()["detail"]
+        assert client.deck.read_bytes() == before
+
+    def test_a_blocked_verification_stops_the_export_and_says_why(self, client):
+        document = open_document(client)
+        slide, target = table_target(document)
+        client.post(
+            f"/api/documents/{document['id']}/propose",
+            json={"sets": [{"slide": slide, "target": target,
+                            "op": "set_table_cell", "after": "11.8x"}]},
+        )
+        client.post(f"/api/documents/{document['id']}/review", json={"approve_all": True})
+        client.post(f"/api/documents/{document['id']}/apply", json={})
+
+        # Force the last report to a blocked verdict, as a native object loss
+        # would. The route must consult the engine, not its own memory of it.
+        session = client.app.state.workspace.require(document["id"])
+        session.last_report.fidelity.output_census.tables = 0
+
+        target_info = client.get(f"/api/documents/{document['id']}/export").json()
+        assert target_info["deliverable"] is False
+        assert target_info["blocking_reasons"]
+
+        response = client.post(f"/api/documents/{document['id']}/export", json={})
+        assert response.status_code == 422
+        assert "failed verification" in response.json()["detail"]

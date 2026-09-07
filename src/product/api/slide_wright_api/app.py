@@ -408,13 +408,46 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
         the entire guarantee.
         """
         session = _require(space, doc_id)
+        destination = Path(body.destination or _suggested_export(session)).expanduser()
+        if not destination.is_absolute():
+            destination = (Path.cwd() / destination).resolve()
+
+        # Refusing to overwrite the file the user opened is not a nicety. Every
+        # guarantee in this product rests on the original still existing to
+        # verify against; a caller who wants it replaced can move the export
+        # themselves, having seen the verification first.
+        if destination.resolve() == session.source.resolve():
+            raise HTTPException(
+                422,
+                "That is the file you opened. Slide-Wright will not overwrite your "
+                "original — choose another name and move it yourself if you want to.",
+            )
+
         try:
-            written = session.export(body.destination)
+            written = session.export(destination)
         except SessionError as exc:
             raise HTTPException(422, str(exc)) from exc
         except OSError as exc:
             raise HTTPException(422, f"could not write there: {exc}") from exc
         return {"path": str(written)}
+
+    @app.get("/api/documents/{doc_id}/export")
+    def export_target(doc_id: str) -> dict[str, Any]:
+        """Where an export would go, and whether one is allowed at all.
+
+        `deliverable` here is the engine's standing refusal, asked before the
+        user types a path. Offering the field and rejecting the submission would
+        be technically identical and much worse: it makes the refusal look like
+        a mistake in what they typed rather than a verdict about the deck.
+        """
+        session = _require(space, doc_id)
+        report = session.last_report
+        return {
+            "suggested": str(_suggested_export(session)),
+            "deliverable": report is None or report.deliverable,
+            "blocking_reasons": [] if report is None else report.blocking_reasons,
+            "version": session.current.number,
+        }
 
     # ── the client ───────────────────────────────────────────────────────────
 
@@ -501,6 +534,18 @@ def _plan_tidy(session: Session, template: str = ""):
     conformance = plan_conformance(deck, profile, name)
     alignment = plan_alignment(deck, DEFAULT_TOLERANCE_EMU, name)
     return conformance, alignment, profile
+
+
+def _suggested_export(session: Session) -> Path:
+    """Beside the original, named for the version, and never over the top of it.
+
+    A default that overwrote the file the user opened would be the single most
+    expensive convenience in the product: the original is what every
+    verification compares against, and it is the thing they can still fall back
+    to when they decide they preferred it.
+    """
+    source = session.source
+    return source.with_name(f"{source.stem}-v{session.current.number:03d}{source.suffix}")
 
 
 def _template_path(raw: str) -> Path:
