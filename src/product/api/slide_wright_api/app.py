@@ -29,8 +29,12 @@ from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from slide_wright import __version__ as engine_version
+from slide_wright.audit import audit as audit_deck
+from slide_wright.brand import plan_conformance, read_profile
 from slide_wright.changeset import ChangeSet
 from slide_wright.diff import diff
+from slide_wright.inspect import EMU_PER_INCH
+from slide_wright.layout import DEFAULT_TOLERANCE_EMU, plan_alignment
 from slide_wright.session import Session, SessionError
 
 from slide_wright_api import __version__
@@ -44,6 +48,8 @@ from slide_wright_api.contracts import (
     ProposeRequest,
     RevertRequest,
     ReviewRequest,
+    TidyPlanOut,
+    TidyRequest,
     VerificationOut,
     VersionOut,
 )
@@ -118,7 +124,72 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
 
     @app.get("/api/documents/{doc_id}/audit", response_model=AuditOut)
     def audit(doc_id: str) -> AuditOut:
-        return AuditOut.of(_require(space, doc_id).audit())
+        """What is wrong with this deck.
+
+        The full structural audit, not just the delivery gate. `Session.audit()`
+        returns only the gate, which answers "may this be delivered" — a
+        question about an edit that has already happened. What someone opening
+        an inherited deck wants is the other one.
+        """
+        session = _require(space, doc_id)
+        return AuditOut.of(audit_deck(session.deck(), session.source.name))
+
+    # ── tidy ─────────────────────────────────────────────────────────────────
+
+    @app.get("/api/documents/{doc_id}/tidy", response_model=TidyPlanOut)
+    def tidy_plan(doc_id: str) -> TidyPlanOut:
+        """What a tidy pass would change. Proposes nothing and writes nothing."""
+        session = _require(space, doc_id)
+        conformance, alignment = _plan_tidy(session)
+        return TidyPlanOut(
+            typefaces=len(conformance.changes),
+            nudges=len(alignment.changes),
+            tolerance_in=alignment.tolerance_emu / EMU_PER_INCH,
+            worst_shift_in=alignment.worst_shift_emu / EMU_PER_INCH,
+            skipped=[*conformance.skipped, *alignment.skipped],
+            conforms_to="the deck's own theme",
+        )
+
+    @app.post("/api/documents/{doc_id}/tidy", response_model=ChangeSetOut)
+    def tidy(doc_id: str, body: TidyRequest) -> ChangeSetOut:
+        """Propose the corrections a tidy pass would make. Applies nothing.
+
+        The CLI's `tidy` approves its own change set, which is right when a
+        person typed the command naming the deck. Here it must not: consent
+        precedes mutation everywhere else in this product, and a button that
+        silently both proposes and applies would be the one place it does not.
+
+        So this lands in the same change set the review panel is already
+        showing, goes through the same approve step, and is applied and verified
+        by the same path as everything else.
+        """
+        session = _require(space, doc_id)
+        conformance, alignment = _plan_tidy(session)
+
+        changeset = session.propose(f"tidy {session.source.name}")
+
+        # The promise of a tidy is the ordinary one inverted: *change every
+        # pixel of formatting, change not one word or number, and prove it.*
+        #
+        # The CLI proves it afterwards, by diffing the result and refusing if
+        # any content moved. Declaring it as a lock is strictly stronger: the
+        # engine then refuses a content-changing op at the moment it is added,
+        # rather than detecting one after the file is written. Nothing a tidy
+        # proposes is blocked by it — conformance emits typeface changes and
+        # alignment emits moves — so the lock costs nothing and closes the door.
+        #
+        # It also shows up in the review panel under "Protected", which is where
+        # a guarantee belongs: visible to the person being asked to approve.
+        changeset.lock("wording", reason="a tidy changes presentation, never content")
+        _guard(lambda: apply_locks(changeset, body.locks))
+        for change in [*conformance.changes, *alignment.changes]:
+            changeset.add(change)
+
+        if not changeset.changes:
+            session.changeset = None
+            raise HTTPException(422, "There is nothing to tidy in this deck.")
+        changeset.save(session.workspace / "changes.json")
+        return ChangeSetOut.of(changeset)
 
     @app.get("/api/documents/{doc_id}/history", response_model=list[VersionOut])
     def history(doc_id: str) -> list[VersionOut]:
@@ -292,6 +363,26 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _plan_tidy(session: Session):
+    """Everything a tidy pass would correct, planned and nothing written.
+
+    The deck's own theme is the authority, not a supplied template. That is the
+    right default rather than a fallback: a deck assembled from several sources
+    has a visual system of its own, and the pasted-in slides are the ones that
+    depart from it.
+
+    The tolerance is the planner's default, which is also what `tidy` and
+    `align` use on the command line and what the audit reports against. If the
+    three ever disagreed, the audit would name a number of shapes and the fix
+    would touch a different set.
+    """
+    deck = session.deck()
+    name = session.source.name
+    conformance = plan_conformance(deck, read_profile(session.current.path), name)
+    alignment = plan_alignment(deck, DEFAULT_TOLERANCE_EMU, name)
+    return conformance, alignment
 
 
 def _guard(call):

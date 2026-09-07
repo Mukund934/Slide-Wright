@@ -21,6 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from slide_wright.changeset import Change, ChangeSet, Lock
+from slide_wright.audit import DeckAudit, Observation
 from slide_wright.gate import Finding, GateResult
 from slide_wright.inspect import DeckInfo, ShapeInfo, SlideInfo, TextRun
 from slide_wright.report import ChangeReport
@@ -214,19 +215,101 @@ class FindingOut(BaseModel):
         )
 
 
-class AuditOut(BaseModel):
+class GateOut(BaseModel):
+    """May this be delivered? A per-slide, pass/fail question about an edit."""
+
     passed: bool
     error_count: int
     warning_count: int
     findings: list[FindingOut] = Field(default_factory=list)
 
     @classmethod
-    def of(cls, result: GateResult) -> AuditOut:
+    def of(cls, result: GateResult) -> GateOut:
         return cls(
             passed=result.passed, error_count=len(result.errors),
             warning_count=len(result.warnings),
             findings=[FindingOut.of(f) for f in result.findings],
         )
+
+
+class ObservationOut(BaseModel):
+    """One thing true about the deck that its author would want to know.
+
+    `remedy` is the engine's answer to "can this be corrected without a person
+    deciding", and the client must not compute its own. A surface that decided
+    for itself which findings are fixable would eventually offer a fix the
+    engine cannot perform — which is the one promise this product cannot break.
+    """
+
+    area: str
+    slides: list[int] = Field(default_factory=list)
+    where: str
+    message: str
+    suggestion: str = ""
+    severity: str
+    remedy: str = ""
+    is_automatable: bool = False
+
+    @classmethod
+    def of(cls, observation: Observation) -> ObservationOut:
+        return cls(
+            area=observation.area.value, slides=list(observation.slides),
+            where=observation.where, message=observation.message,
+            suggestion=observation.suggestion, severity=observation.severity.value,
+            remedy=observation.remedy.value,
+            is_automatable=observation.is_automatable,
+        )
+
+
+class AuditOut(BaseModel):
+    """What should change? Asked of a deck nobody has touched yet.
+
+    Carries both halves the engine computes: the structural observations and the
+    delivery gate. They answer different questions and are shown as different
+    things, so flattening them here would lose the distinction before the client
+    ever sees it.
+    """
+
+    deck: str
+    slide_count: int
+    word_count: int
+    words_per_slide: float
+    observations: list[ObservationOut] = Field(default_factory=list)
+    gate: GateOut
+    automatable_count: int = 0
+    rendered: str = ""
+
+    @classmethod
+    def of(cls, result: DeckAudit) -> AuditOut:
+        return cls(
+            deck=result.deck,
+            slide_count=result.slide_count,
+            word_count=result.word_count,
+            words_per_slide=result.words_per_slide,
+            observations=[ObservationOut.of(o) for o in result.observations],
+            gate=GateOut.of(result.gate) if result.gate else GateOut(
+                passed=True, error_count=0, warning_count=0
+            ),
+            automatable_count=sum(1 for o in result.observations if o.is_automatable),
+            rendered=result.render(),
+        )
+
+
+class TidyPlanOut(BaseModel):
+    """What a tidy pass would change, before anything is proposed.
+
+    Two counts and a bound. The bound matters: alignment is only ever allowed to
+    move a shape onto a line its neighbours already sit on, so `worst_shift_in`
+    can never exceed the tolerance, and showing both is what makes "nothing here
+    is visible to the eye" checkable rather than asserted.
+    """
+
+    typefaces: int
+    nudges: int
+    tolerance_in: float
+    worst_shift_in: float
+    skipped: list[str] = Field(default_factory=list)
+    conforms_to: str
 
 
 # ── verification ─────────────────────────────────────────────────────────────
@@ -430,6 +513,17 @@ class ReviewRequest(BaseModel):
 
 class ApplyRequest(BaseModel):
     note: str = ""
+
+
+class TidyRequest(BaseModel):
+    """Locks apply to a tidy exactly as they do to any other proposal.
+
+    Which is the point: "conform the typefaces but do not touch slide 4, the
+    partner signed it off" is an ordinary request, and it is a constraint rather
+    than a preference, so the engine enforces it.
+    """
+
+    locks: list[LockSpec] = Field(default_factory=list)
 
 
 class RevertRequest(BaseModel):

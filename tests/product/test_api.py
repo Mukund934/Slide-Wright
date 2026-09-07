@@ -11,6 +11,7 @@ The tests that matter here are not "does the route return 200". They are:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -472,3 +473,187 @@ class TestTheEngineDoesNotDependOnTheProduct:
             if "slide_wright_api" in path.read_text(encoding="utf-8")
         ]
         assert not offenders, f"the engine imports the product surface: {offenders}"
+
+
+class TestAudit:
+    """What is wrong with this deck, asked of one nobody has touched yet."""
+
+    def test_returns_the_structural_audit_not_only_the_gate(self, client):
+        """`Session.audit()` is the gate, which answers a different question.
+
+        The gate asks "may this be delivered", about an edit that already
+        happened. Someone opening an inherited deck is asking the other one, and
+        for a while this route answered the wrong question with a straight face.
+        """
+        document = open_document(client)
+        body = client.get(f"/api/documents/{document['id']}/audit").json()
+
+        assert body["slide_count"] > 0
+        assert body["word_count"] > 0
+        assert "observations" in body
+        assert "gate" in body, "the gate is carried alongside, not instead"
+
+    def test_every_observation_carries_where_and_why(self, client):
+        document = open_document(client)
+        for observation in client.get(f"/api/documents/{document['id']}/audit").json()[
+            "observations"
+        ]:
+            assert observation["message"]
+            assert observation["where"]
+            assert observation["area"]
+            assert observation["severity"] in ("error", "warning")
+
+    def test_automatable_is_the_engine_s_answer_not_a_guess(self, client):
+        """`is_automatable` must agree with the remedy the engine attached.
+
+        A surface that decided for itself which findings are fixable would
+        eventually offer a fix the engine cannot perform.
+        """
+        document = open_document(client)
+        body = client.get(f"/api/documents/{document['id']}/audit").json()
+        for observation in body["observations"]:
+            assert observation["is_automatable"] == bool(observation["remedy"])
+        assert body["automatable_count"] == sum(
+            1 for o in body["observations"] if o["is_automatable"]
+        )
+
+    def test_reading_the_audit_writes_nothing(self, client):
+        document = open_document(client)
+        before = client.deck.read_bytes()
+        client.get(f"/api/documents/{document['id']}/audit")
+        assert client.deck.read_bytes() == before
+
+
+class TestTidy:
+    """The wedge as one action: change presentation, change no content, prove it.
+
+    Run against `untidy_deck` rather than the adversarial one, which happens to
+    be immaculate in exactly these two dimensions. Written against it, every
+    test here skipped — and a test that skips is a test that is not run.
+    """
+
+    @pytest.fixture
+    def client(self, tmp_path, untidy_deck):
+        app = create_app(workspace=Workspace(), serve_client=False)
+        with TestClient(app) as test_client:
+            test_client.deck = _stage(untidy_deck, tmp_path)
+            yield test_client
+
+    def test_the_plan_is_bounded_by_its_own_tolerance(self, client):
+        """Alignment may only move a shape onto a line its neighbours share.
+
+        Showing both numbers is what makes "nothing here is visible" checkable
+        rather than asserted.
+        """
+        document = open_document(client)
+        plan = client.get(f"/api/documents/{document['id']}/tidy").json()
+        assert plan["worst_shift_in"] <= plan["tolerance_in"]
+        assert plan["conforms_to"]
+
+    def test_planning_writes_nothing(self, client):
+        document = open_document(client)
+        before = client.deck.read_bytes()
+        client.get(f"/api/documents/{document['id']}/tidy")
+        assert client.deck.read_bytes() == before
+
+    def test_a_proposal_approves_nothing_by_itself(self, client):
+        """The CLI approves its own tidy; here consent must still precede it.
+
+        A button that silently proposed and applied would be the one place in
+        this product where mutation happens without a person saying yes.
+        """
+        document = open_document(client)
+        response = client.post(f"/api/documents/{document['id']}/tidy", json={})
+        assert response.status_code == 200, response.text
+
+        body = response.json()
+        assert body["changes"], "the untidy deck must have something to tidy"
+        assert body["approved_count"] == 0
+        assert body["applied_count"] == 0
+        assert body["proposed_count"] == len(body["changes"])
+
+    def test_a_tidy_proposes_only_presentational_changes(self, client):
+        """The promise inverted: every pixel of formatting, not one word."""
+        document = open_document(client)
+        response = client.post(f"/api/documents/{document['id']}/tidy", json={})
+        assert response.status_code == 200, response.text
+
+        presentational = {"set_font", "set_color", "set_font_size", "move", "resize"}
+        for change in response.json()["changes"]:
+            assert change["op"] in presentational, f"{change['op']} changes content"
+
+    def test_the_content_guarantee_is_a_lock_not_an_afterthought(self, client):
+        """Declared before any change is added, so the engine refuses one.
+
+        The CLI proves this afterwards by diffing the written file. A lock is
+        stronger: a content-changing op is rejected the moment it is added,
+        rather than caught once the bytes are on disk.
+        """
+        document = open_document(client)
+        response = client.post(f"/api/documents/{document['id']}/tidy", json={})
+        assert response.status_code == 200, response.text
+
+        assert "wording" in {lock["scope"] for lock in response.json()["locks"]}
+
+    def test_a_users_own_locks_are_honoured_too(self, client):
+        document = open_document(client)
+        response = client.post(
+            f"/api/documents/{document['id']}/tidy",
+            json={"locks": [{"scope": "layout", "reason": "nothing may move"}]},
+        )
+        assert response.status_code == 200, response.text
+
+        body = response.json()
+        assert "layout" in {lock["scope"] for lock in body["locks"]}
+        # A layout lock forbids moves, so any alignment nudge must arrive rejected.
+        moves = [c for c in body["changes"] if c["op"] == "move"]
+        assert all(c["status"] == "rejected" for c in moves)
+
+    def test_a_deck_with_nothing_to_tidy_says_so(self, client, tmp_path, minimal_deck):
+        staged = tmp_path / "clean.pptx"
+        staged.write_bytes(minimal_deck.read_bytes())
+        document = client.post("/api/documents", json={"path": str(staged)}).json()
+
+        response = client.post(f"/api/documents/{document['id']}/tidy", json={})
+        assert response.status_code == 422
+        assert "nothing to tidy" in response.json()["detail"]
+
+    def test_a_tidy_applied_end_to_end_changes_no_word_or_number(
+        self, client, untidy_deck
+    ):
+        """The wedge's whole promise, proved on a written file.
+
+        The lock stops a content op being added and verification stops an
+        unattributed part changing, but neither of those is the claim. The claim
+        is that after tidying, every word and number a reader would notice is
+        exactly where it was — so it is checked by reading the text back out.
+        """
+        from slide_wright.diff import diff
+
+        document = open_document(client)
+        before_text = _all_text(document)
+
+        client.post(f"/api/documents/{document['id']}/tidy", json={})
+        client.post(f"/api/documents/{document['id']}/review", json={"approve_all": True})
+        verification = client.post(
+            f"/api/documents/{document['id']}/apply", json={"note": "tidy"}
+        ).json()
+
+        assert verification["deliverable"] is True, verification["blocking_reasons"]
+
+        after = client.get(f"/api/documents/{document['id']}").json()
+        assert _all_text(after) == before_text, "tidying altered what the deck says"
+
+        # And the engine's own reader agrees: presentation moved, content did not.
+        edited = sorted(Path(after["workspace"]).glob("v0*-edited.pptx"))[-1]
+        result = diff(untidy_deck, edited)
+        assert result.deltas, "a tidy that changed nothing proves nothing"
+        assert not result.content_deltas, [d.description for d in result.content_deltas]
+
+
+def _all_text(document: dict) -> list[str]:
+    return [
+        shape["text"]
+        for slide in document["deck"]["slides"]
+        for shape in slide["shapes"]
+    ]
