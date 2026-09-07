@@ -476,3 +476,30 @@ class TestTwoSessionsOverOneWorkspace:
         second.apply("fine")
         assert [v.number for v in second.versions] == [0, 1]
         assert first.current.number == 0
+
+
+class TestExportSaysWhereItActuallyWrote:
+    """`shutil.copy` writes *into* a folder rather than refusing it.
+
+    Passing a directory produced a file called `v000-original.pptx` inside it —
+    the workspace's own internal name, which the user never chose and would not
+    recognise — while the caller was handed back the folder as if that were the
+    file. Told one path, given another, under a third name.
+    """
+
+    def test_a_folder_is_refused_rather_than_guessed_at(self, session, tmp_path):
+        folder = tmp_path / "out"
+        folder.mkdir()
+        with pytest.raises(SessionError, match="is a folder"):
+            session.export(folder)
+
+    def test_the_refusal_says_what_to_do_instead(self, session, tmp_path):
+        folder = tmp_path / "out"
+        folder.mkdir()
+        with pytest.raises(SessionError, match="name to write"):
+            session.export(folder)
+
+    def test_an_ordinary_export_still_returns_the_file_it_wrote(self, session, tmp_path):
+        written = session.export(tmp_path / "deck.pptx")
+        assert written.is_file()
+        assert written == tmp_path / "deck.pptx"

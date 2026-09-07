@@ -410,6 +410,16 @@ class Session:
                 "again, or roll back, to export it."
             )
         destination = Path(destination)
+        if destination.is_dir():
+            # `shutil.copy` would happily write *into* it, under the workspace's
+            # own filename, and hand back the folder as if that were the file.
+            # The caller was told a path where nothing exists, and the file that
+            # did get written was called v001-edited.pptx -- an internal name
+            # the user never chose and would not recognise.
+            raise SessionError(
+                f"{destination} is a folder. Give the name to write, not the "
+                "place to put it."
+            )
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(self.current.path, destination)
         return destination

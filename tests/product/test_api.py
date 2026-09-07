@@ -1191,3 +1191,33 @@ class TestItAnswersOnlyToItsOwnMachine:
             )
             assert response.status_code == 421
             assert client.get("/api/health").json()["open_documents"] == 0
+
+
+class TestExportingIntoAFolder:
+    """The engine refuses a folder because it cannot know the naming convention.
+    The API knows it, so it names the file — once, visibly, and using the same
+    name the export field offers by default."""
+
+    def test_a_folder_gets_the_suggested_name(self, client, tmp_path):
+        document = open_document(client)
+        folder = tmp_path / "out"
+        folder.mkdir()
+        response = client.post(
+            f"/api/documents/{document['id']}/export",
+            json={"destination": str(folder)},
+        )
+        assert response.status_code == 200
+        written = Path(response.json()["path"])
+        assert written.is_file(), "the path it reported has to be the file it wrote"
+        assert written.parent == folder
+
+    def test_the_written_name_is_not_the_workspace_s_own(self, client, tmp_path):
+        """v000-original.pptx is an internal name; the user never chose it."""
+        document = open_document(client)
+        folder = tmp_path / "out2"
+        folder.mkdir()
+        response = client.post(
+            f"/api/documents/{document['id']}/export",
+            json={"destination": str(folder)},
+        )
+        assert "original" not in Path(response.json()["path"]).name

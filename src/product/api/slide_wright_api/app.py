@@ -456,6 +456,11 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
         destination = Path(body.destination or _suggested_export(session)).expanduser()
         if not destination.is_absolute():
             destination = (Path.cwd() / destination).resolve()
+        if destination.is_dir():
+            # A folder is a reasonable thing to type, and the engine refuses it
+            # rather than guessing. Naming it here is the guess, made once and
+            # visibly: the same name the export field offers by default.
+            destination = destination / _suggested_export(session).name
 
         # Refusing to overwrite the file the user opened is not a nicety. Every
         # guarantee in this product rests on the original still existing to
