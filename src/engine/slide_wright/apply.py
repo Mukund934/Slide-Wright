@@ -30,8 +30,10 @@ from slide_wright.inspect import NS
 from slide_wright.package import Package
 from slide_wright.charts import ChartUnsupported
 from slide_wright.charts import assert_preserved as assert_charts_preserved
+from slide_wright.charts import find_all as find_charts
 from slide_wright.charts import guard_edit as guard_chart_edit
 from slide_wright.smartart import SmartArtUnsupported, assert_preserved, guard_edit
+from slide_wright.smartart import find_all as find_diagrams
 
 # Operations this module can perform in place, without a slide rebuild.
 IN_PLACE_OPS = {Op.SET_TEXT, Op.SET_TABLE_CELL, Op.SET_FONT_SIZE, Op.SET_FONT,
@@ -83,17 +85,35 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
     # keep the same information twice and go quietly wrong when the copies
     # drift: a diagram's model against its drawing cache (smartart.py), and a
     # chart's cached series against its embedded workbook (charts.py).
+    # Which shapes are charts and which are diagrams, found once.
+    #
+    # `guard_edit` used to be called per change, and each call scanned the whole
+    # package: every slide, every rels file, every chart part. Profiled on a
+    # 272-change tidy of a 26-slide deck, that was 32,778 reads of the archive
+    # and 102 of the 103 seconds it took. A 1,199-change tidy took 7.8 minutes,
+    # and the cost per change was *rising* -- the scan is the same size every
+    # time, so the more changes there are the more times it runs.
+    #
+    # The set is identical for every change, so it is computed once and each
+    # change is a lookup. The expensive descriptive call still happens, but only
+    # on the one change that is about to be refused, where its message is what
+    # the user reads.
+    diagram_shapes = {(d.slide, d.shape_id) for d in find_diagrams(pkg)}
+    chart_shapes = {(c.slide, c.shape_id) for c in find_charts(pkg)}
+
     for change in approved:
+        # Moving either kind is safe. Resizing a chart is too -- PowerPoint lays
+        # the chart out into whatever frame it is given, and the chart part
+        # carries no geometry to fall out of step. A diagram is the exception:
+        # its drawing cache holds absolute coordinates produced by the layout
+        # engine at one particular size, so a resized frame renders a cache that
+        # no regeneration would produce.
+        target = change.target.split("/")[0]
         try:
-            # Moving either kind is safe. Resizing a chart is too -- PowerPoint
-            # lays the chart out into whatever frame it is given, and the chart
-            # part carries no geometry to fall out of step. A diagram is the
-            # exception: its drawing cache holds absolute coordinates produced
-            # by the layout engine at one particular size, so a resized frame
-            # renders a cache that no regeneration would produce.
-            if change.op in CONTENT_OPS or change.op is Op.RESIZE:
+            if ((change.op in CONTENT_OPS or change.op is Op.RESIZE)
+                    and (change.slide, target) in diagram_shapes):
                 guard_edit(pkg, change.slide, change.target)
-            if change.op in CONTENT_OPS:
+            if change.op in CONTENT_OPS and (change.slide, target) in chart_shapes:
                 guard_chart_edit(pkg, change.slide, change.target)
         except (SmartArtUnsupported, ChartUnsupported) as exc:
             raise ApplyError(str(exc)) from exc

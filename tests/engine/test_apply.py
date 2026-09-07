@@ -402,3 +402,84 @@ class TestMovingIsNotEditing:
         ))
         with pytest.raises(ApplyError, match="native chart"):
             apply_changes(adversarial_deck, cs, tmp_path / "nope.pptx")
+
+
+class TestTheCostOfAnApplyDoesNotGrowWithTheChangeCount:
+    """The guards used to run per change, and each one scanned the package.
+
+    Every slide, every rels file, every chart part — the same scan, once for
+    every change in the set. Profiled on a 272-change tidy of a 26-slide deck:
+    **32,778 reads of the archive, and 102 of the 103 seconds it took**. A
+    1,199-change tidy on a 41-slide deck took 7 minutes 48 seconds, and the cost
+    *per change* was rising, because the scan is the same size however many
+    changes there are.
+
+    Hoisted out of the loop: 103s → 1.5s on the first, 468s → 3.9s on the
+    second. The whole test suite halved.
+
+    The number is not what this test protects — machines differ. It protects the
+    shape: the work is done once, so putting the scan back inside the loop fails
+    here rather than being noticed a year later on somebody's 300-slide deck.
+    """
+
+    def _tidy_changes(self, deck, count):
+        info = inspect(deck)
+        shape = next(s for sl in info.slides for s in sl.shapes
+                     if s.kind not in ("table", "chart") and s.runs
+                     and any(r.text.strip() for r in s.runs))
+        slide = next(sl.number for sl in info.slides for s in sl.shapes if s is shape)
+        run = next(r for r in shape.runs if r.text.strip())
+        cs = ChangeSet(deck=str(deck))
+        # The same edit repeated: only the first can apply, and the rest fail
+        # honestly. What is being counted is the guard work, which happens
+        # before any of them are written.
+        for i in range(count):
+            cs.add(Change(id=f"c{i}", op=Op.SET_TEXT, slide=slide,
+                          target=shape.id, before=run.text, after=run.text + "."))
+        cs.approve_all()
+        return cs
+
+    def _reads_during(self, deck, changeset, out, monkeypatch):
+        from slide_wright.package import Package
+
+        calls = []
+        original = Package.read
+        monkeypatch.setattr(
+            Package, "read",
+            lambda self, name: (calls.append(name), original(self, name))[1],
+        )
+        try:
+            apply_changes(deck, changeset, out)
+        except Exception:
+            pass  # a refusal still did the guard work, which is what is counted
+        return len(calls)
+
+    def test_ten_times_the_changes_is_not_ten_times_the_work(
+        self, adversarial_deck, tmp_path, monkeypatch
+    ):
+        few = self._reads_during(
+            adversarial_deck, self._tidy_changes(adversarial_deck, 2),
+            tmp_path / "few.pptx", monkeypatch)
+        many = self._reads_during(
+            adversarial_deck, self._tidy_changes(adversarial_deck, 20),
+            tmp_path / "many.pptx", monkeypatch)
+
+        assert many < few * 2, (
+            f"{few} reads for 2 changes and {many} for 20 — the package is "
+            "being rescanned per change again"
+        )
+
+    def test_the_refusal_still_happens_and_still_explains_itself(
+        self, adversarial_deck, tmp_path
+    ):
+        """The lookup is cheap; the message is not. It must still be produced
+        for the one change that is actually refused."""
+        deck = inspect(adversarial_deck)
+        chart = next((s.number, x) for s in deck.slides for x in s.shapes
+                     if x.kind == "chart")
+        cs = approved(adversarial_deck, Change(
+            id="c1", op=Op.SET_FONT, slide=chart[0], target=chart[1].id,
+            before="Arial", after="Calibri",
+        ))
+        with pytest.raises(ApplyError, match="native chart"):
+            apply_changes(adversarial_deck, cs, tmp_path / "no.pptx")
