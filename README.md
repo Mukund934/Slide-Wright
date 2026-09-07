@@ -392,7 +392,7 @@ src/product/web/            the workspace client — React, TypeScript, Motion
   workspace/                filmstrip · canvas · audit · sources · changes
                             diff · result · history · export
 docs/                       architecture, 10 ADRs, guides
-tests/                      615 engine and API tests, plus 117 in the client
+tests/                      615 engine and API tests, plus 121 in the client
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
 ```
