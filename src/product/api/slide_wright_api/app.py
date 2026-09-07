@@ -35,6 +35,8 @@ from slide_wright.changeset import ChangeSet
 from slide_wright.diff import diff
 from slide_wright.inspect import EMU_PER_INCH, inspect
 from slide_wright.layout import DEFAULT_TOLERANCE_EMU, plan_alignment
+from slide_wright.refresh import plan_refresh
+from slide_wright.sources import SourceError, SourceSet, load
 from slide_wright.session import Session, SessionError
 
 from slide_wright_api import __version__
@@ -47,6 +49,8 @@ from slide_wright_api.contracts import (
     ExportRequest,
     OpenRequest,
     ProposeRequest,
+    RefreshPlanOut,
+    RefreshRequest,
     RevertRequest,
     ReviewRequest,
     TidyPlanOut,
@@ -189,6 +193,44 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
         if not changeset.changes:
             session.changeset = None
             raise HTTPException(422, "There is nothing to tidy in this deck.")
+        changeset.save(session.workspace / "changes.json")
+        return ChangeSetOut.of(changeset)
+
+    # ── refresh ──────────────────────────────────────────────────────────────
+
+    @app.post("/api/documents/{doc_id}/refresh/preview", response_model=RefreshPlanOut)
+    def refresh_preview(doc_id: str, body: RefreshRequest) -> RefreshPlanOut:
+        """What a refresh would do. Proposes nothing and writes nothing."""
+        session = _require(space, doc_id)
+        sources, names = _read_sources(body.sources)
+        plan = plan_refresh(session.deck(), sources)
+        return RefreshPlanOut.of(plan, names, len(sources.tables))
+
+    @app.post("/api/documents/{doc_id}/refresh", response_model=ChangeSetOut)
+    def refresh(doc_id: str, body: RefreshRequest) -> ChangeSetOut:
+        """Propose the figures a source explains. Applies nothing.
+
+        Every change carries the coordinate it came from and arrives as SOURCE
+        origin, so it is grounded without a model having been involved. A figure
+        the source cannot justify with a coordinate is reported as unmatched and
+        left alone -- never guessed at, and never quietly approximated.
+        """
+        session = _require(space, doc_id)
+        sources, _ = _read_sources(body.sources)
+        plan = plan_refresh(session.deck(), sources)
+
+        if not plan.updates:
+            raise HTTPException(
+                422,
+                "The source explains nothing that would change. "
+                f"{len(plan.confirmed)} figure(s) already agree with it, and "
+                f"{len(plan.unmatched)} could not be matched.",
+            )
+
+        changeset = session.propose(f"refresh {session.source.name} from source")
+        _guard(lambda: apply_locks(changeset, body.locks))
+        for change in plan.to_changeset(str(session.current.path)).changes:
+            changeset.add(change)
         changeset.save(session.workspace / "changes.json")
         return ChangeSetOut.of(changeset)
 
@@ -378,6 +420,43 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
+
+def _read_sources(paths: list[str]) -> tuple[SourceSet, list[str]]:
+    """Load every workbook or CSV named, refusing anything unreadable.
+
+    A source that failed to load is not a source with no rows -- it is a file
+    the user believes is contributing numbers and is not. Silently continuing
+    would produce a refresh that looks complete and is missing half its
+    evidence, so an unreadable path fails the whole request by name.
+    """
+    if not paths:
+        raise HTTPException(422, "No source was given. Name a .csv or .xlsx on this machine.")
+
+    sources = SourceSet()
+    names: list[str] = []
+    for raw in paths:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = (Path.cwd() / path).resolve()
+        if not path.is_file():
+            raise HTTPException(422, f"no file at {path}")
+        try:
+            for table in load(path):
+                sources.add(table)
+        except SourceError as exc:
+            raise HTTPException(422, f"{path.name} could not be read: {exc}") from exc
+        except Exception as exc:  # noqa: BLE001 - a bad workbook must not 500
+            raise HTTPException(
+                422, f"{path.name} could not be read as a spreadsheet: {exc}"
+            ) from exc
+        names.append(path.name)
+
+    if not sources.tables:
+        raise HTTPException(
+            422, "Those files hold no table this engine can read values out of."
+        )
+    return sources, names
 
 
 def _plan_tidy(session: Session):

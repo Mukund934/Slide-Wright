@@ -724,3 +724,160 @@ class TestDeckAtAVersion:
             old = shape_of(before, delta["slide"], delta["shape_id"])
             new = shape_of(after, delta["slide"], delta["shape_id"])
             assert old != new, f"diff names {delta['shape_id']} but the shapes match"
+
+
+@pytest.fixture
+def comps(tmp_path):
+    """This quarter's numbers: Alpha's multiple moved, Beta's margin moved.
+
+    Deliberately not a full restatement. The interesting outcomes are the three
+    the engine distinguishes — updated, confirmed unchanged, and not found — and
+    a source that changed everything would only exercise the first.
+    """
+    path = tmp_path / "comps.csv"
+    path.write_text(
+        "Company,EV/EBITDA,Margin\n"
+        "Alpha Corp,11.8x,22.1%\n"
+        "Beta Industries,11.2x,21.4%\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+class TestRefresh:
+    """Last quarter's deck plus this quarter's numbers.
+
+    The most valuable thing this product does and the most dangerous, because a
+    wrong number here is invisible — it looks exactly like a right one. So every
+    change must carry the coordinate it came from, and anything the source
+    cannot justify must be left alone rather than guessed at.
+    """
+
+    def test_the_preview_separates_all_three_outcomes(self, client, comps):
+        document = open_document(client)
+        plan = client.post(
+            f"/api/documents/{document['id']}/refresh/preview",
+            json={"sources": [str(comps)]},
+        ).json()
+
+        assert plan["sources"] == ["comps.csv"]
+        assert plan["updates"], "Alpha's multiple moved and should be offered"
+        # Confirmed cells are positive evidence a figure is still right. A tool
+        # that reports only what it changed cannot tell "checked and correct"
+        # from "never looked at".
+        assert isinstance(plan["confirmed"], list)
+        assert isinstance(plan["unmatched"], list)
+
+    def test_every_update_carries_the_coordinate_it_came_from(self, client, comps):
+        document = open_document(client)
+        plan = client.post(
+            f"/api/documents/{document['id']}/refresh/preview",
+            json={"sources": [str(comps)]},
+        ).json()
+
+        for match in plan["updates"]:
+            assert match["citation"].startswith("comps.csv!"), match
+            assert match["current"] != match["proposed"]
+
+    def test_a_confirmed_cell_proposes_nothing(self, client, comps):
+        """Showing an "after" identical to the "before" reads as a change."""
+        document = open_document(client)
+        plan = client.post(
+            f"/api/documents/{document['id']}/refresh/preview",
+            json={"sources": [str(comps)]},
+        ).json()
+
+        for match in plan["confirmed"]:
+            assert match["proposed"] == ""
+            assert match["citation"]
+
+    def test_previewing_writes_nothing(self, client, comps):
+        document = open_document(client)
+        before = client.deck.read_bytes()
+        client.post(
+            f"/api/documents/{document['id']}/refresh/preview",
+            json={"sources": [str(comps)]},
+        )
+        assert client.deck.read_bytes() == before
+
+    def test_a_proposal_is_grounded_and_approves_nothing(self, client, comps):
+        """SOURCE origin: grounded in a coordinate, with no model involved.
+
+        Grounded is not the same as approved. It means the change traces to
+        something checkable, which is why it needs no model review — a person
+        still has to say yes.
+        """
+        document = open_document(client)
+        body = client.post(
+            f"/api/documents/{document['id']}/refresh",
+            json={"sources": [str(comps)]},
+        ).json()
+
+        assert body["approved_count"] == 0
+        assert body["needs_review_count"] == 0
+        for change in body["changes"]:
+            assert change["origin"] == "source"
+            assert change["is_grounded"] is True
+            assert change["citation"]
+
+    def test_a_numbers_lock_stops_a_refresh_like_anything_else(self, client, comps):
+        """A refresh changes figures, so a numbers lock must refuse all of it."""
+        document = open_document(client)
+        body = client.post(
+            f"/api/documents/{document['id']}/refresh",
+            json={
+                "sources": [str(comps)],
+                "locks": [{"scope": "numbers", "reason": "signed off"}],
+            },
+        ).json()
+
+        assert body["approved_count"] == 0
+        assert all(c["status"] == "rejected" for c in body["changes"])
+
+    def test_a_source_that_explains_nothing_says_what_it_did_find(self, client, tmp_path):
+        unrelated = tmp_path / "weather.csv"
+        unrelated.write_text("City,Rainfall\nOslo,700mm\n", encoding="utf-8")
+        document = open_document(client)
+
+        response = client.post(
+            f"/api/documents/{document['id']}/refresh",
+            json={"sources": [str(unrelated)]},
+        )
+        assert response.status_code == 422
+        assert "already agree" in response.json()["detail"]
+
+    def test_a_missing_source_fails_by_name_rather_than_silently(self, client, tmp_path):
+        """A file that did not load is not a file with no rows.
+
+        Continuing would produce a refresh that looks complete and is missing
+        half its evidence.
+        """
+        document = open_document(client)
+        response = client.post(
+            f"/api/documents/{document['id']}/refresh/preview",
+            json={"sources": [str(tmp_path / "nope.csv")]},
+        )
+        assert response.status_code == 422
+        assert "no file at" in response.json()["detail"]
+
+    def test_naming_no_source_is_refused(self, client):
+        document = open_document(client)
+        response = client.post(
+            f"/api/documents/{document['id']}/refresh/preview", json={"sources": []}
+        )
+        assert response.status_code == 422
+        assert "No source was given" in response.json()["detail"]
+
+    def test_a_file_that_is_not_a_spreadsheet_is_refused_with_a_reason(
+        self, client, tmp_path
+    ):
+        junk = tmp_path / "notes.txt"
+        junk.write_text("not a spreadsheet", encoding="utf-8")
+        document = open_document(client)
+
+        response = client.post(
+            f"/api/documents/{document['id']}/refresh/preview",
+            json={"sources": [str(junk)]},
+        )
+        assert response.status_code == 422
+        assert "could not be read" in response.json()["detail"]

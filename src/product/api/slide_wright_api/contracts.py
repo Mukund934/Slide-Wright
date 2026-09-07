@@ -295,6 +295,65 @@ class AuditOut(BaseModel):
         )
 
 
+class MatchOut(BaseModel):
+    """One deck cell a source row/column pair explains."""
+
+    slide: int
+    target: str
+    current: str
+    proposed: str
+    citation: str
+
+
+class RefreshPlanOut(BaseModel):
+    """What a refresh would do, before anything is proposed.
+
+    Three outcomes, and all three are shown. `updates` is the obvious one.
+
+    `confirmed` is the unusual one and is worth as much: cells the source agrees
+    with, which is positive evidence that a figure is *still right*. A tool that
+    reports only what it changed leaves the reader unable to tell "checked and
+    correct" from "never looked at".
+
+    `unmatched` is the honest one: figures the source cannot explain. They are
+    left untouched, because a figure this engine cannot justify with a
+    coordinate is a figure it will not change.
+    """
+
+    sources: list[str] = Field(default_factory=list)
+    tables: int = 0
+    updates: list[MatchOut] = Field(default_factory=list)
+    confirmed: list[MatchOut] = Field(default_factory=list)
+    unmatched: list[str] = Field(default_factory=list)
+    rendered: str = ""
+
+    @classmethod
+    def of(cls, plan, names: list[str], tables: int) -> RefreshPlanOut:
+        return cls(
+            sources=names,
+            tables=tables,
+            updates=[_match(m, changed=True) for m in plan.updates],
+            confirmed=[_match(m, changed=False) for m in plan.confirmed],
+            unmatched=[
+                f"slide {slide}: {label!r} — {why}" for slide, label, why in plan.unmatched
+            ],
+            rendered=plan.render(),
+        )
+
+
+def _match(match, *, changed: bool) -> MatchOut:
+    return MatchOut(
+        slide=match.slide,
+        target=match.target,
+        current=match.current,
+        # A confirmed cell proposes nothing: the source and the deck already
+        # agree, and showing an "after" identical to the "before" would read as
+        # a change nobody asked for.
+        proposed=match.citation.value if changed else "",
+        citation=match.citation.reference,
+    )
+
+
 class TidyPlanOut(BaseModel):
     """What a tidy pass would change, before anything is proposed.
 
@@ -513,6 +572,17 @@ class ReviewRequest(BaseModel):
 
 class ApplyRequest(BaseModel):
     note: str = ""
+
+
+class RefreshRequest(BaseModel):
+    """Paths to workbooks or CSVs already on this machine.
+
+    Paths, not uploads, for exactly the reason the deck is a path: the numbers
+    behind a board pack are as confidential as the pack (ADR-0008).
+    """
+
+    sources: list[str] = Field(default_factory=list)
+    locks: list[LockSpec] = Field(default_factory=list)
 
 
 class TidyRequest(BaseModel):
