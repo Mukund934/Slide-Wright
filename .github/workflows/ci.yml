@@ -32,8 +32,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e "src/engine[dev]"
 
+      # Scoped to the engine's own tests on purpose. This job installs the
+      # engine and nothing else, which is what makes it evidence that the
+      # engine stands alone -- it must not import the product surface. Running
+      # the whole tests/ tree here would collect tests/product/ and fail on a
+      # missing import, turning a useful isolation property into a packaging
+      # error. The product tests run in their own job, with both installed.
       - name: Test
-        run: python -m pytest tests -v --tb=short
+        run: python -m pytest tests/engine tests/test_repo_hygiene.py -v --tb=short
 
   product:
     name: Product surface

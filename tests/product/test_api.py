@@ -450,3 +450,25 @@ def _parse_sse(raw: str) -> list[tuple[str, dict]]:
                 data = line[len("data: "):]
         events.append((kind, json.loads(data)))
     return events
+
+
+class TestTheEngineDoesNotDependOnTheProduct:
+    """The dependency runs one way, and CI is arranged to prove it.
+
+    The engine job installs `src/engine` alone. If anything under
+    `slide_wright` ever imported `slide_wright_api`, that job would start
+    failing on an import and the reason would be a packaging error rather than
+    the architectural fact it is meant to catch. Asserting it here keeps the
+    statement where someone reading the product code can see it.
+    """
+
+    def test_no_engine_module_imports_the_product(self):
+        from pathlib import Path
+
+        engine = Path(__file__).resolve().parents[2] / "src" / "engine" / "slide_wright"
+        offenders = [
+            str(path.relative_to(engine))
+            for path in engine.rglob("*.py")
+            if "slide_wright_api" in path.read_text(encoding="utf-8")
+        ]
+        assert not offenders, f"the engine imports the product surface: {offenders}"
