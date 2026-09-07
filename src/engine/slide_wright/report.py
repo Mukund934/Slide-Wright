@@ -25,6 +25,20 @@ class RequestedChange:
     target: str = ""
 
 
+# Parts that can execute. A macro project is the one that matters: nothing in
+# this engine produces one, and no formatting pass acquires one, so its
+# appearance means the output is not the document that went in.
+#
+# Matched on the OOXML part name rather than on content, because that is what
+# PowerPoint itself dispatches on — a file renamed to look harmless is still
+# loaded as a macro project if it sits at this path.
+EXECUTABLE_PARTS = ("vbaproject.bin", "vbadata.xml")
+
+
+def is_executable_part(name: str) -> bool:
+    return name.rsplit("/", 1)[-1].lower() in EXECUTABLE_PARTS
+
+
 @dataclass
 class ChangeReport:
     """What changed, what did not, and whether anything unrequested moved."""
@@ -45,13 +59,36 @@ class ChangeReport:
 
     @property
     def unrequested_part_changes(self) -> list[str]:
-        """Non-slide parts that changed.
+        """Non-slide parts that changed, and every part that appeared.
 
-        Some are legitimate consequences of an edit (a chart's data workbook
-        moves when its numbers do). They are surfaced rather than hidden, so a
-        reviewer decides instead of the system deciding silently.
+        Some changes are legitimate consequences of an edit (a chart's data
+        workbook moves when its numbers do). They are surfaced rather than
+        hidden, so a reviewer decides instead of the system deciding silently.
+
+        Additions were missing from this list entirely, which meant a package
+        could come back carrying parts nobody asked for and the report would
+        mention none of them. "Preserve everything else" is a claim about what
+        the output contains, not only about what it lost.
         """
-        return [d.name for d in self.fidelity.changed if d.slide_number is None]
+        return [d.name for d in self.fidelity.changed if d.slide_number is None] + [
+            f"{d.name} (added)" for d in self.fidelity.added
+        ]
+
+    @property
+    def executable_additions(self) -> list[str]:
+        """Parts that appeared and can run code.
+
+        A macro project is not a consequence of any edit this engine performs.
+        Nothing in the in-place applier can produce one, and no legitimate
+        formatting pass acquires one, so its appearance means the output is not
+        the document that went in.
+
+        This is deliberately narrow rather than "block every addition". A
+        round-trip export can legitimately gain a part, and refusing all of them
+        would make the gate fire on the ordinary case until someone learned to
+        ignore it. Precision is what keeps a refusal meaningful.
+        """
+        return [d.name for d in self.fidelity.added if is_executable_part(d.name)]
 
     def explain_unrequested(self):
         """What actually changed on the slides nobody authorised.
@@ -114,13 +151,15 @@ class ChangeReport:
         """Whether this output may be handed to the user.
 
         Fails closed: an unattributed slide change, a removed part, native
-        object loss, or suspected rasterisation all block delivery.
+        object loss, suspected rasterisation, or a part that appeared and can
+        run code all block delivery.
         """
         return (
             not self.unrequested_slide_changes
             and not self.fidelity.removed
             and not self.fidelity.native_losses
             and not self.fidelity.rasterisation_suspected
+            and not self.executable_additions
         )
 
     @property
@@ -137,6 +176,11 @@ class ChangeReport:
             reasons.append("native object loss: " + "; ".join(self.fidelity.native_losses))
         if self.fidelity.rasterisation_suspected:
             reasons.append("content appears to have been rasterised")
+        if self.executable_additions:
+            reasons.append(
+                "the output gained a part that can run code: "
+                + ", ".join(self.executable_additions)
+            )
         return reasons
 
     # ── rendering ────────────────────────────────────────────────────────────
