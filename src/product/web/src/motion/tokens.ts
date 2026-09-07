@@ -47,18 +47,26 @@ export const stagger = (count: number): Transition => ({
 });
 
 /**
- * The changed-region pulse.
+ * The changed-region pulse: a halo that swells once and settles.
  *
- * Runs once when the eye is being carried somewhere, then stops. A pulse that
- * repeats is an alarm, and nothing in a verified result is an alarm.
+ * `rest` must paint nothing. An earlier version put the changed ring in the
+ * rest state, which meant every object on every slide wore the attention
+ * colour permanently — the exact opposite of what the colour is for, and it
+ * made "nothing else moved" impossible to see.
+ *
+ * The ring itself belongs to the `ring-changed` class, so it survives whatever
+ * this animation is doing; only the halo around it is animated. It runs once
+ * and stops, because a pulse that repeats is an alarm and nothing in a verified
+ * result is an alarm.
  */
 export const attention: Variants = {
-  rest: { boxShadow: "0 0 0 1.5px var(--color-changed)" },
+  rest: { outlineWidth: 0, outlineColor: "rgba(0,0,0,0)" },
   carried: {
-    boxShadow: [
-      "0 0 0 1.5px var(--color-changed)",
-      "0 0 0 5px var(--color-changed-wash)",
-      "0 0 0 1.5px var(--color-changed)",
+    outlineWidth: [0, 6, 0],
+    outlineColor: [
+      "rgba(0,0,0,0)",
+      "var(--color-changed-wash)",
+      "rgba(0,0,0,0)",
     ],
     transition: { duration: DURATION.deliberate, ease: EASE_IN_OUT },
   },

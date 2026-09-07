@@ -60,33 +60,44 @@ export function SlideCanvas({
   // canvas would reflow while the user was reading it.
   const ordered = useMemo(() => slide.shapes, [slide.shapes]);
 
+  // Two elements, and the outer one is not decoration. `transform: scale` does
+  // not change the space an element occupies, so a scaled canvas alone still
+  // claims its full 1280x720 and overflows the stage in both directions. The
+  // outer box carries the *scaled* size in layout; the inner one is drawn at
+  // the slide's own size and scaled into it. Both read the same CSS variable,
+  // so zooming re-renders nothing.
   return (
     <div
-      className="relative select-none bg-[--color-paper] text-[--color-paper-ink] shadow-[0_1px_3px_rgba(0,0,0,0.35),0_12px_32px_-8px_rgba(0,0,0,0.45)]"
       style={{
-        width,
-        height,
-        // The scale is applied by the parent via a CSS variable so zoom does
-        // not re-render a single shape.
-        transform: "scale(var(--canvas-scale, 1))",
-        transformOrigin: "top left",
+        width: `calc(${width}px * var(--canvas-scale, 1))`,
+        height: `calc(${height}px * var(--canvas-scale, 1))`,
       }}
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget) onSelectShape?.(null);
-      }}
-      role="group"
-      aria-label={`Slide ${slide.number}${slide.title ? `: ${slide.title}` : ""}`}
     >
-      {ordered.map((shape) => (
-        <ShapeBox
-          key={shape.id}
-          shape={shape}
-          changed={changedShapes.has(shape.id)}
-          carried={carriedShape === shape.id}
-          selected={selectedShape === shape.id}
-          onSelect={onSelectShape}
-        />
-      ))}
+      <div
+        className="paper-lift relative select-none bg-paper text-paper-ink"
+        style={{
+          width,
+          height,
+          transform: "scale(var(--canvas-scale, 1))",
+          transformOrigin: "top left",
+        }}
+        onPointerDown={(event) => {
+          if (event.target === event.currentTarget) onSelectShape?.(null);
+        }}
+        role="group"
+        aria-label={`Slide ${slide.number}${slide.title ? `: ${slide.title}` : ""}`}
+      >
+        {ordered.map((shape) => (
+          <ShapeBox
+            key={shape.id}
+            shape={shape}
+            changed={changedShapes.has(shape.id)}
+            carried={carriedShape === shape.id}
+            selected={selectedShape === shape.id}
+            onSelect={onSelectShape}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -124,7 +135,7 @@ function ShapeBox({
       className={[
         "absolute overflow-hidden",
         changed ? "ring-changed" : "",
-        selected && !changed ? "shadow-[0_0_0_1.5px_var(--color-line-strong)]" : "",
+        selected && !changed ? "ring-selected" : "",
         interactive ? "cursor-pointer" : "",
       ].join(" ")}
       style={{
@@ -133,9 +144,8 @@ function ShapeBox({
         width: px(shape.cx),
         height: px(shape.cy),
         rotate: shape.rotation_deg ?? 0,
-        // Only changed shapes get the ring; everything else has no chrome at
-        // all. Outlining every box would make "nothing else moved" invisible.
-        boxShadow: changed ? undefined : selected ? undefined : "none",
+        outlineStyle: "solid",
+        outlineOffset: 0,
       }}
       onPointerDown={
         interactive
@@ -163,10 +173,13 @@ function TextBody({ shape }: { shape: Shape }) {
   if (!shape.runs.length) {
     // An empty box is real content: it holds space, and the audit has an
     // opinion about it. Drawn as a hairline so the layout stays honest.
-    return <div className="size-full border border-dashed border-[--color-paper-line] opacity-40" />;
+    return <div className="size-full border border-dashed border-paper-line opacity-40" />;
   }
   return (
-    <div className="flex size-full flex-col justify-center px-1 leading-tight">
+    // Top-anchored, which is OOXML's default. Centring looked tidier and was
+    // wrong more often, which on a view whose only claim is accuracy is the
+    // worse trade.
+    <div className="flex size-full flex-col justify-start overflow-hidden px-1 leading-tight">
       {shape.runs.map((run, index) => (
         <span
           // Runs have no stable identity in OOXML; index is the only address.
@@ -176,7 +189,12 @@ function TextBody({ shape }: { shape: Shape }) {
             fontWeight: run.bold ? 600 : undefined,
             fontStyle: run.italic ? "italic" : undefined,
             fontFamily: run.font ?? undefined,
-            color: run.color ? `#${run.color}` : undefined,
+            // Deliberately no colour. This view resolves no fills, so a slide
+            // with white text on a dark photograph would render white on white
+            // and simply vanish -- the object would look absent rather than
+            // unrendered, which is the one impression this canvas must never
+            // give. Colour is real and editable, so it is shown where it can be
+            // shown exactly: in the change row, as before and after.
           }}
         >
           {run.text}
@@ -197,7 +215,7 @@ function TableBody({ shape }: { shape: Shape }) {
             {cols.map((c) => (
               <td
                 key={c}
-                className="border border-[--color-paper-line] px-1 align-middle"
+                className="border border-paper-line px-1 align-middle"
                 data-cell={`r${r}/c${c}`}
               >
                 {shape.table_cells[`r${r}/c${c}`] ?? ""}
@@ -220,8 +238,8 @@ function TableBody({ shape }: { shape: Shape }) {
  */
 function OpaqueBody({ shape }: { shape: Shape }) {
   return (
-    <div className="flex size-full items-center justify-center border border-[--color-paper-line] bg-[color-mix(in_oklab,var(--color-paper),black_3%)]">
-      <span className="text-evidence text-[--color-paper-ink] opacity-45">{shape.kind}</span>
+    <div className="flex size-full items-center justify-center border border-paper-line bg-[color-mix(in_oklab,var(--color-paper),black_3%)]">
+      <span className="text-evidence text-paper-ink opacity-45">{shape.kind}</span>
     </div>
   );
 }

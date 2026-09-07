@@ -160,6 +160,19 @@
     box-shadow: 0 0 0 1.5px var(--color-changed);
   }
 
+  /* The selection outline. Deliberately neutral -- selecting is not changing,
+     and wearing the attention colour would say it was. */
+  .ring-selected {
+    box-shadow: 0 0 0 1.5px var(--color-line-strong);
+  }
+
+  /* The slide sitting on the ground, as paper rather than as a panel. */
+  .paper-lift {
+    box-shadow:
+      0 1px 3px rgb(0 0 0 / 0.35),
+      0 12px 32px -8px rgb(0 0 0 / 0.45);
+  }
+
   .text-evidence {
     font-family: var(--font-mono);
     font-size: var(--text-2xs);
