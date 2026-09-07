@@ -62,6 +62,13 @@ class ShapeInfo:
     # it was replacing, and a `numbers` lock could not see the figures inside.
     table_cells: dict[str, str] = field(default_factory=dict)
     child_count: int = 0
+    # True when x/y/cx/cy came from the layout or master rather than the slide.
+    # The shape really is there; it just has no position of its own, which is
+    # why the applier refuses to move it.
+    geometry_inherited: bool = False
+    # How this placeholder addresses its slot, most specific first. Internal to
+    # geometry resolution; None for anything that is not a placeholder.
+    placeholder_key: list[str] | None = None
 
     @property
     def text(self) -> str:
@@ -166,6 +173,99 @@ def inspect(pkg: Package | str) -> DeckInfo:
 
 # ── slide parsing ────────────────────────────────────────────────────────────
 
+def _related_part(pkg: Package, part_name: str, folder: str) -> str | None:
+    """The part this one points at whose target lives in `folder`.
+
+    Relationship targets are relative and may use either separator, so they are
+    resolved by basename against the folder rather than by joining paths.
+    """
+    rels_name = part_name.replace(f"{_folder_of(part_name)}/", f"{_folder_of(part_name)}/_rels/") + ".rels"
+    if rels_name not in pkg.parts:
+        return None
+    try:
+        root = etree.fromstring(pkg.read(rels_name))
+    except etree.XMLSyntaxError:
+        return None
+    for rel in root.iter(
+        "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
+    ):
+        target = rel.get("Target", "").replace("\\", "/")
+        if f"/{folder}/" not in f"/{target}" and not target.startswith(folder):
+            continue
+        candidate = f"ppt/{folder}/{target.split('/')[-1]}"
+        if candidate in pkg.parts:
+            return candidate
+    return None
+
+
+def _folder_of(part_name: str) -> str:
+    return part_name.rsplit("/", 1)[0].rsplit("/", 1)[-1]
+
+
+def _placeholder_geometry(pkg: Package, part_name: str) -> dict[str, tuple[int, int, int, int]]:
+    """Placeholder positions declared by a layout or master, keyed by placeholder.
+
+    Most placeholders on a real slide carry no `a:xfrm` of their own: they take
+    position and size from the layout, and the layout from the master. Reading
+    only the slide therefore reports `x=None` for the title of almost every
+    professionally built deck.
+
+    That was not merely a gap in what could be drawn. The quality gate skips any
+    shape whose geometry is unknown, so **every inherited placeholder in every
+    deck was exempt from the bounds and margin checks** -- and a title pushed off
+    the canvas by its layout is exactly the arithmetic failure the gate exists
+    to catch.
+
+    Keyed by both `idx` and `type`, because a slide placeholder may name either.
+    """
+    found: dict[str, tuple[int, int, int, int]] = {}
+    if part_name not in pkg.parts:
+        return found
+    try:
+        root = etree.fromstring(pkg.read(part_name))
+    except etree.XMLSyntaxError:
+        return found
+
+    tree = root.find(".//p:cSld/p:spTree", NS)
+    if tree is None:
+        return found
+
+    for el in tree:
+        ph = el.find(".//p:nvSpPr/p:nvPr/p:ph", NS)
+        if ph is None:
+            continue
+        xfrm = el.find(".//a:xfrm", NS)
+        if xfrm is None:
+            continue
+        off, ext = xfrm.find("a:off", NS), xfrm.find("a:ext", NS)
+        if off is None or ext is None:
+            continue
+        box = (
+            int(off.get("x", 0)), int(off.get("y", 0)),
+            int(ext.get("cx", 0)), int(ext.get("cy", 0)),
+        )
+        for key in _placeholder_keys(ph.get("type"), ph.get("idx")):
+            found.setdefault(key, box)
+    return found
+
+
+# `title` and `ctrTitle` are the same slot wearing two names: a slide's centred
+# title inherits from a layout that calls it plain `title`, and matching them
+# literally would leave every title deck-wide unresolved.
+_TITLE_TYPES = {"title", "ctrTitle"}
+
+
+def _placeholder_keys(ph_type: str | None, idx: str | None) -> list[str]:
+    keys = []
+    if idx is not None:
+        keys.append(f"idx:{idx}")
+    kind = ph_type or "body"
+    keys.append(f"type:{kind}")
+    if kind in _TITLE_TYPES:
+        keys.append("type:title*")
+    return keys
+
+
 def _layout_for(pkg: Package, part_name: str) -> str | None:
     """Which slide layout this slide is built on.
 
@@ -220,7 +320,46 @@ def _read_slide(pkg: Package, part_name: str, number: int) -> SlideInfo:
         info = _read_shape(el)
         if info is not None:
             slide.shapes.append(info)
+    _inherit_geometry(pkg, part_name, slide)
     return slide
+
+
+def _inherit_geometry(pkg: Package, part_name: str, slide: SlideInfo) -> None:
+    """Fill in placeholder geometry the slide did not state itself.
+
+    Resolution follows OOXML: the slide's own `a:xfrm` wins, then the layout's,
+    then the master's. Only shapes that stated nothing are touched.
+
+    Inherited values are marked. The distinction is load-bearing: the applier
+    refuses to move a shape that has no position of its own, and a caller that
+    could not tell the difference would propose a move, get it approved, and
+    have it fail at apply time.
+    """
+    unresolved = [
+        shape for shape in slide.shapes
+        if shape.x is None and shape.placeholder_key is not None
+    ]
+    if not unresolved:
+        return
+
+    layout_part = _related_part(pkg, part_name, "slideLayouts")
+    sources = []
+    if layout_part:
+        sources.append(_placeholder_geometry(pkg, layout_part))
+        master_part = _related_part(pkg, layout_part, "slideMasters")
+        if master_part:
+            sources.append(_placeholder_geometry(pkg, master_part))
+
+    for shape in unresolved:
+        for source in sources:
+            box = next(
+                (source[key] for key in shape.placeholder_key if key in source), None
+            )
+            if box is None:
+                continue
+            shape.x, shape.y, shape.cx, shape.cy = box
+            shape.geometry_inherited = True
+            break
 
 
 def _read_cells(rows) -> dict[str, str]:
@@ -264,8 +403,15 @@ def _read_shape(el) -> ShapeInfo | None:
     if ph is not None:
         shape.placeholder_type = ph.get("type", "body")
         shape.kind = "placeholder"
+        shape.placeholder_key = _placeholder_keys(ph.get("type"), ph.get("idx"))
 
+    # A graphicFrame -- every native table and chart -- states its box as
+    # `p:xfrm`, not `a:xfrm`. Looking only for the DrawingML form left the two
+    # object types this product exists to preserve with no position at all: off
+    # the canvas preview, and exempt from the gate's bounds check.
     xfrm = el.find(".//a:xfrm", NS)
+    if xfrm is None:
+        xfrm = el.find("./p:xfrm", NS)
     if xfrm is not None:
         off, ext = xfrm.find("a:off", NS), xfrm.find("a:ext", NS)
         if off is not None:

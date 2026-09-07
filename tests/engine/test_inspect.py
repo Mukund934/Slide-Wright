@@ -7,7 +7,7 @@ are deliberately concrete.
 
 from __future__ import annotations
 
-from slide_wright.inspect import EMU_PER_INCH, inspect
+from slide_wright.inspect import EMU_PER_INCH, ShapeInfo, inspect
 
 
 class TestDeckLevel:
@@ -104,11 +104,15 @@ class TestGeometry:
         assert a.overlaps(a), "a shape overlaps itself"
 
     def test_overlap_is_false_without_geometry(self, adversarial_deck):
-        d = inspect(adversarial_deck)
-        shapes = list(d.all_shapes())
-        ungeometried = [s for s in shapes if s.x is None]
-        if ungeometried:
-            assert not ungeometried[0].overlaps(shapes[0])
+        """Built rather than found.
+
+        Every shape in the corpus now resolves geometry, one way or another, so
+        searching for one without it made this pass by finding nothing. A shape
+        with no position must answer "no" rather than raise, and that is worth
+        asserting on a shape that actually has none.
+        """
+        shapes = list(inspect(adversarial_deck).all_shapes())
+        assert not ShapeInfo(id="x", name="x", kind="shape").overlaps(shapes[0])
 
 
 class TestRealDecks:
@@ -184,3 +188,56 @@ class TestTableCells:
     def test_a_shape_that_is_not_a_table_has_no_cells(self, adversarial_deck):
         others = [s for s in inspect(adversarial_deck).all_shapes() if s.kind != "table"]
         assert all(not s.table_cells for s in others)
+
+
+class TestInheritedGeometry:
+    """Placeholders mostly have no geometry of their own.
+
+    A slide's title takes its box from the layout, and the layout's from the
+    master. Reading only the slide reported x=None for the title of almost every
+    professionally built deck — which meant the gate skipped it, because the gate
+    cannot check bounds it does not know.
+    """
+
+    def test_a_layout_placed_title_resolves_its_box(self, adversarial_deck):
+        title = next(
+            s for s in inspect(adversarial_deck).slide(1).shapes
+            if s.placeholder_type in {"title", "ctrTitle"}
+        )
+        assert title.x is not None and title.cx
+        assert title.geometry_inherited
+
+    def test_inheritance_is_marked_not_silent(self, adversarial_deck):
+        """The applier refuses to move a layout-placed shape.
+
+        A caller that could not tell inherited from owned would propose the
+        move, have it approved, and discover at apply time that it cannot
+        happen — after the reviewer already said yes.
+        """
+        shapes = list(inspect(adversarial_deck).all_shapes())
+        assert any(s.geometry_inherited for s in shapes)
+        assert any(s.x is not None and not s.geometry_inherited for s in shapes)
+
+    def test_native_tables_and_charts_report_their_box(self, adversarial_deck):
+        """graphicFrame states p:xfrm, not a:xfrm.
+
+        The two object types this product exists to preserve were the two it
+        could not locate.
+        """
+        frames = [
+            s for s in inspect(adversarial_deck).all_shapes()
+            if s.kind in {"table", "chart"}
+        ]
+        assert frames, "the corpus deck should carry both"
+        for frame in frames:
+            assert frame.x is not None and frame.cx, f"{frame.kind} has no box"
+            assert not frame.geometry_inherited, "a frame states its own box"
+
+    def test_every_shape_in_the_corpus_deck_now_has_a_box(self, adversarial_deck):
+        missing = [
+            (slide.number, s.id, s.kind)
+            for slide in inspect(adversarial_deck).slides
+            for s in slide.shapes
+            if s.x is None
+        ]
+        assert not missing, f"unresolved geometry: {missing}"
