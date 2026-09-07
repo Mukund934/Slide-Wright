@@ -10,13 +10,19 @@
  * that the document stays where it is, and the engine opens it in place. Drag
  * and drop is supported because it is how people actually reach for a file —
  * and on the browsers that can, it yields the real path.
+ *
+ * The composition earns its restraint rather than defaulting to it. An earlier
+ * version put a small card in the middle of a very large dark field, and the
+ * result read as unfinished rather than spare: nothing was large enough to be
+ * the subject. So the promise carries the page, the input is the only bright
+ * thing on it, and the fine print is the one thing genuinely small.
  */
 
 import { motion } from "motion/react";
 import { useState } from "react";
 
 import { Button } from "../design/primitives";
-import { enter } from "../motion/tokens";
+import { DURATION, EASE_OUT, enter } from "../motion/tokens";
 
 export function OpenDeck({
   busy,
@@ -36,41 +42,51 @@ export function OpenDeck({
   };
 
   return (
-    <div className="flex h-full items-center justify-center p-8">
+    <div
+      className="flex h-full items-center justify-center overflow-y-auto p-6"
+      onDragOver={(event) => {
+        event.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={(event) => {
+        // Only when the pointer actually left the page, not on every child.
+        if (event.currentTarget === event.target) setOver(false);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        setOver(false);
+        const dropped = event.dataTransfer.files[0];
+        if (!dropped) return;
+        // Chromium exposes the real path on a dropped file in some contexts and
+        // not others. Where it does, this is the whole interaction; where it
+        // does not, the name lands in the field and the user completes the
+        // folder. Better than silently failing.
+        const withPath = dropped as File & { path?: string };
+        setPath(withPath.path ?? dropped.name);
+      }}
+    >
       <motion.div
-        variants={enter}
-        initial="hidden"
-        animate="shown"
-        className="w-full max-w-lg"
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: DURATION.deliberate, ease: EASE_OUT }}
+        className="w-full max-w-xl"
       >
-        <h1 className="text-base font-medium text-ink">Slide-Wright</h1>
-        <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-          Change what you asked. Preserve everything else. Prove it.
-        </p>
+        <p className="text-2xs uppercase tracking-[0.18em] text-ink-faint">Slide-Wright</p>
+
+        {/* The promise is the largest thing on the page, because it is the only
+            claim the product makes and the whole reason to trust it with a file
+            that matters. */}
+        <h1 className="mt-2 text-xl font-medium leading-snug tracking-[-0.01em] text-ink">
+          Change what you asked.
+          <br />
+          Preserve everything else.{" "}
+          <span className="text-ink-faint">Prove it.</span>
+        </h1>
 
         <div
-          onDragOver={(event) => {
-            event.preventDefault();
-            setOver(true);
-          }}
-          onDragLeave={() => setOver(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setOver(false);
-            const dropped = event.dataTransfer.files[0];
-            if (!dropped) return;
-            // Chromium exposes the real path on a dropped file in some
-            // contexts and not others. Where it does, this is the whole
-            // interaction; where it does not, the name lands in the field and
-            // the user completes the folder. Better than silently failing.
-            const withPath = dropped as File & { path?: string };
-            setPath(withPath.path ?? dropped.name);
-          }}
           className={[
-            "mt-5 rounded-lg border border-dashed p-6 transition-colors duration-[220ms]",
-            over
-              ? "border-changed bg-changed-wash"
-              : "border-line-strong bg-panel",
+            "mt-7 rounded-lg border p-4 transition-colors duration-[220ms]",
+            over ? "border-changed bg-changed-wash" : "border-line-strong bg-panel",
           ].join(" ")}
         >
           <label
@@ -88,14 +104,14 @@ export function OpenDeck({
               placeholder="C:\Users\you\Documents\Pitchbook_v9.pptx"
               spellCheck={false}
               autoFocus
-              className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2.5 py-2 text-ink placeholder:text-ink-faint focus:border-changed-dim focus:outline-none"
+              className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-3 py-2 text-ink placeholder:text-ink-faint focus:border-changed-dim focus:outline-none"
             />
             <Button tone="primary" onClick={submit} busy={busy} disabled={!path.trim()}>
               Open
             </Button>
           </div>
-          <p className="mt-2 text-2xs leading-relaxed text-ink-faint">
-            or drop a file here
+          <p className="mt-2 text-2xs text-ink-faint">
+            {over ? "Drop it" : "or drop a file anywhere on this page"}
           </p>
         </div>
 
@@ -105,26 +121,44 @@ export function OpenDeck({
             initial="hidden"
             animate="shown"
             role="alert"
-            className="mt-3 rounded-md bg-blocked-wash px-3 py-2 text-xs leading-relaxed text-blocked"
+            className="mt-3 rounded-md border border-blocked/40 bg-blocked-wash px-3 py-2 text-xs leading-relaxed text-blocked"
           >
             {error}
           </motion.p>
         )}
 
-        <div className="mt-6 space-y-1.5 text-2xs leading-relaxed text-ink-faint">
-          <p>
-            Your deck is opened where it sits. Slide-Wright keeps its versions in a
-            folder beside it. Nothing is uploaded, and there is no telemetry.
-          </p>
-          <p>
-            The one exception, stated plainly: if you configure a model key and{" "}
-            <em>describe</em> a change, a structural summary of the whole deck —
-            every slide title, and the first 70 characters of every text object —
-            goes to that provider. Editing objects directly, auditing, verifying
-            and reverting send nothing.
-          </p>
-        </div>
+        <Assurances />
       </motion.div>
     </div>
+  );
+}
+
+/**
+ * What the product will and will not do with the file, as three facts.
+ *
+ * This was two paragraphs of fine print, which is how a privacy disclosure gets
+ * skipped. The one that actually changes behaviour — a model key means a deck
+ * summary leaves the machine — is stated on its own rather than buried in the
+ * middle of a sentence about telemetry.
+ */
+function Assurances() {
+  return (
+    <ul className="mt-7 space-y-1.5 border-t border-line pt-4">
+      {[
+        ["Opened where it sits", "versions are kept in a folder beside it"],
+        ["Nothing is uploaded", "no telemetry, no crash reports, no samples"],
+        [
+          "One exception, stated plainly",
+          "with a model key, describing a change in prose sends a structural summary of the whole deck — every slide title, and the first 70 characters of every text object. Editing directly, auditing, tidying, refreshing, verifying and reverting send nothing.",
+        ],
+      ].map(([heading, detail]) => (
+        <li key={heading} className="flex gap-2 text-2xs leading-relaxed">
+          <span aria-hidden className="mt-1.5 size-1 shrink-0 rounded-full bg-line-strong" />
+          <span className="text-ink-faint">
+            <span className="text-ink-muted">{heading}</span> — {detail}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
