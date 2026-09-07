@@ -243,7 +243,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 593 tests
+python -m pytest tests -q          # 615 tests
 ```
 
 Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
@@ -311,6 +311,18 @@ Measured on a real 26-slide NASA deck: **272 corrections applied, 0 unexpected
 changes, and 0 of them changed what the deck says** — 272 of 272 deltas are
 formatting, every native table, chart, workbook and text run intact.
 
+The workspace covers every capability the engine has:
+
+| | |
+|---|---|
+| **Audit** | What is wrong with this deck, split into what Slide-Wright can correct and what only you can decide |
+| **Tidy** | Conform typefaces and snap near-miss edges — to the deck's own theme, or to a template you supply |
+| **Sources** | Refresh figures from a workbook, each carrying the cell it came from |
+| **Changes** | Review every proposal with its provenance, approve or reject one at a time |
+| **Diff** | Compare any two versions: what the deck *says* against how it *looks* |
+| **History** | Every version, and going back to one |
+| **Export** | Refused outright if verification failed, and never over your original |
+
 Any two versions can be compared. That answers a different question from
 verification, and keeping them apart is most of the value:
 
@@ -377,9 +389,10 @@ src/product/web/            the workspace client — React, TypeScript, Motion
   api/                      typed service layer, one origin, no second base URL
   design/                   primitives; none may wear the attention colour
   motion/                   three durations, two curves, one exception
-  workspace/                filmstrip · canvas · audit · changes · diff · result · history
+  workspace/                filmstrip · canvas · audit · sources · changes
+                            diff · result · history · export
 docs/                       architecture, 10 ADRs, guides
-tests/                      593 engine and API tests, plus 89 in the client
+tests/                      615 engine and API tests, plus 117 in the client
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
 ```
