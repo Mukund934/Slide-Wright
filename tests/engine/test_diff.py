@@ -32,8 +32,17 @@ def table(adversarial_deck):
 
 @pytest.fixture
 def positioned(adversarial_deck):
-    """A shape with geometry of its own, rather than one placed by the layout."""
-    return next(s for s in inspect(adversarial_deck).slides[1].shapes if s.x is not None)
+    """A plain shape the applier will actually move.
+
+    Not a placeholder -- those are positioned by the layout and moving one is
+    refused. Not a chart -- read-only under ADR-0009. Either would make this
+    fixture yield a shape whose move silently does not happen, and the diff
+    assertions would then be testing the refusal rather than the diff.
+    """
+    return next(
+        s for s in inspect(adversarial_deck).slides[1].shapes
+        if s.kind == "shape" and s.x is not None and not s.geometry_inherited
+    )
 
 
 class TestNoDifference:

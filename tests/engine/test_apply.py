@@ -81,6 +81,21 @@ class TestNarrowness:
         assert rep.output_census.text_runs == rep.source_census.text_runs
 
 
+def movable(deck, slide_number: int):
+    """A plain shape with geometry of its own, on the given slide.
+
+    Three things disqualify a shape here and each is a real engine rule, not a
+    fixture convenience: a placeholder is positioned by its layout and the
+    applier refuses to move it; a chart is read-only (ADR-0009); and SmartArt is
+    read-only (ADR-0007). Picking "the first shape with an x" used to land on
+    whichever of those came first and made the test assert the wrong refusal.
+    """
+    return next(
+        s for s in inspect(deck).slide(slide_number).shapes
+        if s.kind == "shape" and s.x is not None and not s.geometry_inherited
+    )
+
+
 class TestOperations:
     def test_set_text_writes_the_new_value(self, adversarial_deck, tmp_path):
         d = inspect(adversarial_deck)
@@ -104,8 +119,7 @@ class TestOperations:
         assert "9.4x" not in inspect(out).slide(3).text
 
     def test_move_updates_offset(self, adversarial_deck, tmp_path):
-        d = inspect(adversarial_deck)
-        shape = next(s for s in d.slide(6).shapes if s.x is not None)
+        shape = movable(adversarial_deck, 6)
         out = tmp_path / "o.pptx"
         cs = approved(adversarial_deck, Change(
             id="c1", op=Op.MOVE, slide=6, target=shape.id,
@@ -116,8 +130,7 @@ class TestOperations:
         assert moved.x == shape.x + 100000
 
     def test_resize_updates_extent(self, adversarial_deck, tmp_path):
-        d = inspect(adversarial_deck)
-        shape = next(s for s in d.slide(6).shapes if s.cx)
+        shape = movable(adversarial_deck, 6)
         out = tmp_path / "o.pptx"
         cs = approved(adversarial_deck, Change(
             id="c1", op=Op.RESIZE, slide=6, target=shape.id,
@@ -239,8 +252,7 @@ class TestFailuresExplainThemselves:
 
     def test_an_inherited_font_size_is_explained_not_denied(self, adversarial_deck, tmp_path):
         """The commonest real case: a run with no explicit formatting override."""
-        shape = next(s for s in inspect(adversarial_deck).slides[1].shapes
-                     if s.x is not None)
+        shape = movable(adversarial_deck, 2)
         why = self._why(adversarial_deck, Change(
             id="c1", op=Op.SET_FONT_SIZE, slide=2, target=shape.id,
             before=None, after=14), tmp_path)
@@ -250,8 +262,11 @@ class TestFailuresExplainThemselves:
     def test_a_layout_placed_shape_explains_why_it_cannot_move(
         self, adversarial_deck, tmp_path
     ):
+        # Layout-placed is now visible as such rather than inferred from a
+        # missing x: inspect resolves inherited geometry, so the shape has
+        # coordinates and still has no position of its own.
         shape = next(s for s in inspect(adversarial_deck).slides[0].shapes
-                     if s.x is None)
+                     if s.geometry_inherited)
         why = self._why(adversarial_deck, Change(
             id="c1", op=Op.MOVE, slide=1, target=shape.id,
             before=(0, 0), after=(100, 100)), tmp_path)
