@@ -243,7 +243,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 589 tests
+python -m pytest tests -q          # 593 tests
 ```
 
 Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
@@ -311,6 +311,22 @@ Measured on a real 26-slide NASA deck: **272 corrections applied, 0 unexpected
 changes, and 0 of them changed what the deck says** — 272 of 272 deltas are
 formatting, every native table, chart, workbook and text run intact.
 
+Any two versions can be compared. That answers a different question from
+verification, and keeping them apart is most of the value:
+
+```
+v000 → v001        0 changes what it says · 272 change how it looks
+                                                        [ v000 | v001 ]
+CHANGES HOW IT LOOKS       Typeface, colour, position, size.
+  1  Title 1 (id=3) run 1 font 'Century Gothic' -> '+mn-lt'   formatting
+```
+
+`verify` says the package is intact — which parts differ byte for byte, whether
+any native object was lost. It cannot tell you whether a *figure* moved.
+`diff` can. Flipping between the two versions on the canvas is a **hard cut with
+no transition**, because a crossfade between two near-identical slides is exactly
+what hides the difference between them.
+
 Three properties it is built to hold, each asserted by a test:
 
 - **Nothing is written before you approve it.** Proposing leaves the file
@@ -361,9 +377,9 @@ src/product/web/            the workspace client — React, TypeScript, Motion
   api/                      typed service layer, one origin, no second base URL
   design/                   primitives; none may wear the attention colour
   motion/                   three durations, two curves, one exception
-  workspace/                filmstrip · canvas · audit · change set · result · history
+  workspace/                filmstrip · canvas · audit · changes · diff · result · history
 docs/                       architecture, 10 ADRs, guides
-tests/                      589 engine and API tests, plus 69 in the client
+tests/                      593 engine and API tests, plus 89 in the client
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
 ```
