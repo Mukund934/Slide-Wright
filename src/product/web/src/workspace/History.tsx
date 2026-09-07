@@ -14,7 +14,7 @@
 import { motion } from "motion/react";
 
 import type { Version } from "../api/types";
-import { Button, PanelHeading } from "../design/primitives";
+import { Button, PanelContext } from "../design/primitives";
 import { enter, stagger } from "../motion/tokens";
 
 export function History({
@@ -31,13 +31,15 @@ export function History({
   const current = versions.find((v) => v.is_current);
   return (
     <>
-      <PanelHeading
+      <PanelContext
         trailing={
-          <span className="text-evidence text-ink-faint">{versions.length}</span>
+          <span className="text-evidence text-ink-muted">
+            {versions.length} version{versions.length === 1 ? "" : "s"}
+          </span>
         }
       >
-        History
-      </PanelHeading>
+        nothing is undone — going back is choosing an earlier file
+      </PanelContext>
       <motion.ol
         className="overflow-y-auto"
         initial="hidden"

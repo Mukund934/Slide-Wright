@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 
 import { ApiError, api } from "../api/client";
 import type { Area, Audit, Observation, TidyPlan } from "../api/types";
-import { Button, Empty, PanelHeading, Pill } from "../design/primitives";
+import { Button, Empty, PanelContext, Pill } from "../design/primitives";
 import { enter, stagger } from "../motion/tokens";
 
 /**
@@ -94,7 +94,7 @@ export function AuditPanel({
   if (error) {
     return (
       <>
-        <PanelHeading>Audit</PanelHeading>
+        <PanelContext>could not run</PanelContext>
         <Empty title="The audit could not run" detail={error} />
       </>
     );
@@ -103,7 +103,7 @@ export function AuditPanel({
   if (!audit) {
     return (
       <>
-        <PanelHeading>Audit</PanelHeading>
+        <PanelContext>reading the deck…</PanelContext>
         <Empty title="Reading the deck…" />
       </>
     );
@@ -114,18 +114,24 @@ export function AuditPanel({
 
   return (
     <>
-      <PanelHeading
+      <PanelContext
         trailing={
-          <span className="text-evidence text-ink-faint">
+          <span className="text-evidence text-ink-muted">
             {audit.observations.length} finding
             {audit.observations.length === 1 ? "" : "s"}
           </span>
         }
       >
-        Audit
-      </PanelHeading>
-
-      <Summary audit={audit} />
+        {/* Facts, and deliberately not a grade. Words per slide is a
+            measurement, not a verdict — a dense appendix is fine and a dense
+            pitch is not, and this cannot tell them apart. */}
+        <span className="text-evidence text-ink-muted">{audit.slide_count}</span> slides ·{" "}
+        <span className="text-evidence text-ink-muted">{audit.word_count}</span> words ·{" "}
+        <span className="text-evidence text-ink-muted">
+          {Math.round(audit.words_per_slide)}
+        </span>{" "}
+        per slide
+      </PanelContext>
 
       <motion.div
         className="min-h-0 flex-1 overflow-y-auto"
@@ -195,28 +201,6 @@ function byArea(observations: Observation[]): Observation[] {
   return [...observations].sort((a, b) => rank(a) - rank(b));
 }
 
-/**
- * Facts about the deck, and deliberately not a grade.
- *
- * Words per slide is a measurement, not a verdict — a dense appendix is fine and
- * a dense pitch is not, and this cannot tell them apart. Stating the number and
- * declining to judge it is the honest version.
- */
-function Summary({ audit }: { audit: Audit }) {
-  return (
-    <div className="shrink-0 border-b border-line px-3 py-2">
-      <p className="text-2xs text-ink-faint">
-        <span className="text-evidence text-ink-muted">{audit.slide_count}</span> slides ·{" "}
-        <span className="text-evidence text-ink-muted">{audit.word_count}</span> words ·{" "}
-        <span className="text-evidence text-ink-muted">
-          {Math.round(audit.words_per_slide)}
-        </span>{" "}
-        per slide
-      </p>
-    </div>
-  );
-}
-
 function Section({
   title,
   note,
@@ -229,9 +213,9 @@ function Section({
   return (
     <section>
       <div className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-1.5">
-        <h3 className="text-2xs font-medium uppercase tracking-[0.08em] text-ink-muted">
+        <h2 className="text-2xs font-medium uppercase tracking-[0.08em] text-ink-muted">
           {title}
-        </h3>
+        </h2>
         <p className="mt-0.5 text-2xs leading-relaxed text-ink-faint">{note}</p>
       </div>
       {children}
@@ -309,23 +293,39 @@ function TidyAction({
           Nothing departs from {plan.conforms_to}.
         </p>
       )}
-      <ul className={total === 0 ? "hidden" : "mb-2 space-y-0.5 text-2xs text-ink-muted"}>
+      {/* Two lines, each one fact. The authority is stated once, above, rather
+          than repeated inside every count -- "1,122 runs re-linked to the
+          deck's own theme" said the same thing twice in a 288px column and
+          wrapped to three lines doing it. */}
+      <dl className={total === 0 ? "hidden" : "mb-2 space-y-1"}>
         {plan.typefaces > 0 && (
-          <li>
-            <span className="text-evidence text-ink">{plan.typefaces}</span> run
-            {plan.typefaces === 1 ? "" : "s"} re-linked to {plan.conforms_to}
-          </li>
+          <div className="flex items-baseline gap-2">
+            <dt className="text-evidence w-10 shrink-0 text-right text-ink">
+              {plan.typefaces}
+            </dt>
+            <dd className="text-2xs leading-relaxed text-ink-muted">
+              run{plan.typefaces === 1 ? "" : "s"} re-linked to the theme
+            </dd>
+          </div>
         )}
         {plan.nudges > 0 && (
-          <li>
-            <span className="text-evidence text-ink">{plan.nudges}</span> shape
-            {plan.nudges === 1 ? "" : "s"} snapped onto a line their neighbours share —
-            largest movement{" "}
-            <span className="text-evidence">{plan.worst_shift_in.toFixed(3)}in</span> of a{" "}
-            <span className="text-evidence">{plan.tolerance_in.toFixed(2)}in</span> bound
-          </li>
+          <div className="flex items-baseline gap-2">
+            <dt className="text-evidence w-10 shrink-0 text-right text-ink">
+              {plan.nudges}
+            </dt>
+            <dd className="text-2xs leading-relaxed text-ink-muted">
+              shape{plan.nudges === 1 ? "" : "s"} snapped onto a line their neighbours
+              share
+              <span className="mt-0.5 block text-ink-faint">
+                largest movement{" "}
+                <span className="text-evidence">{plan.worst_shift_in.toFixed(3)}in</span>{" "}
+                of a <span className="text-evidence">{plan.tolerance_in.toFixed(2)}in</span>{" "}
+                bound
+              </span>
+            </dd>
+          </div>
         )}
-      </ul>
+      </dl>
       {total > 0 && (
         <>
           <Button tone="primary" onClick={onTidy} busy={busy}>
@@ -367,23 +367,32 @@ function Authority({
   const [open, setOpen] = useState(Boolean(template));
 
   return (
-    <div className="mb-2">
-      <p className="text-2xs text-ink-faint">
-        conforming to{" "}
-        <span className="text-evidence text-ink-muted">{plan.conforms_to}</span>
-        {plan.fonts.length > 0 && (
-          <span className="text-ink-faint"> · {plan.fonts.join(", ")}</span>
-        )}
+    <div className="mb-2.5">
+      {/* A labelled row rather than a sentence. Three facts -- the authority,
+          its typefaces, and the way to change it -- ran together in one line
+          that wrapped to three in a narrow column and read as mush. */}
+      <p className="text-2xs uppercase tracking-[0.08em] text-ink-faint">
+        Conforming to
+      </p>
+      <div className="mt-0.5 flex items-baseline justify-between gap-2">
+        <span className="text-evidence min-w-0 truncate text-ink" title={plan.conforms_to}>
+          {plan.conforms_to}
+        </span>
         {!open && (
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="ml-1.5 underline decoration-dotted underline-offset-2 transition-colors duration-[120ms] hover:text-ink"
+            className="shrink-0 text-2xs text-ink-faint underline decoration-dotted underline-offset-2 transition-colors duration-[120ms] hover:text-ink"
           >
             use a template
           </button>
         )}
-      </p>
+      </div>
+      {plan.fonts.length > 0 && (
+        <p className="text-evidence mt-0.5 truncate text-ink-faint" title={plan.fonts.join(", ")}>
+          {plan.fonts.join(" · ")}
+        </p>
+      )}
 
       {open && (
         <div className="mt-1.5 flex gap-1.5">

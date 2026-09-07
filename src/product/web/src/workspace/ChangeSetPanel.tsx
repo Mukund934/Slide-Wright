@@ -16,10 +16,10 @@
  *     did not fail; a guarantee the user asked for stopped it.
  */
 
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 
 import type { Change, ChangeSet } from "../api/types";
-import { Button, Empty, PanelHeading, Pill } from "../design/primitives";
+import { Button, Empty, PanelContext, Pill } from "../design/primitives";
 import { enter, stagger } from "../motion/tokens";
 
 export function ChangeSetPanel({
@@ -40,7 +40,7 @@ export function ChangeSetPanel({
   if (!changeset || changeset.changes.length === 0) {
     return (
       <>
-        <PanelHeading>Changes</PanelHeading>
+        <PanelContext>nothing proposed yet</PanelContext>
         <Empty
           title="Nothing proposed"
           detail="Ask for a change and Slide-Wright will write down exactly what it intends to do, before it touches the file."
@@ -54,7 +54,9 @@ export function ChangeSetPanel({
 
   return (
     <>
-      <PanelHeading trailing={<Tally changeset={changeset} />}>Changes</PanelHeading>
+      <PanelContext trailing={<Tally changeset={changeset} />}>
+        {changeset.instruction || "direct edits"}
+      </PanelContext>
 
       {changeset.locks.length > 0 && <Locks changeset={changeset} />}
 
@@ -64,18 +66,20 @@ export function ChangeSetPanel({
         animate="shown"
         transition={stagger(changes.length)}
       >
-        <AnimatePresence initial={false}>
-          {changes.map((change) => (
-            <ChangeRow
-              key={change.id}
-              change={change}
-              busy={busy}
-              onGoTo={onGoTo}
-              onApprove={onApprove}
-              onReject={onReject}
-            />
-          ))}
-        </AnimatePresence>
+        {/* No AnimatePresence. A change's status moves in place rather than
+            the row leaving, so an exit never fires -- and where it did, the
+            row stayed in the DOM at opacity 0, invisible and still read by a
+            screen reader. The entrance stagger is what carries meaning here. */}
+        {changes.map((change) => (
+          <ChangeRow
+            key={change.id}
+            change={change}
+            busy={busy}
+            onGoTo={onGoTo}
+            onApprove={onApprove}
+            onReject={onReject}
+          />
+        ))}
       </motion.ul>
 
       {undecided.length > 0 && (
@@ -166,7 +170,6 @@ function ChangeRow({
       variants={enter}
       initial="hidden"
       animate="shown"
-      exit="gone"
       className={[
         "group border-b border-line px-3 py-2 last:border-b-0",
         "transition-colors duration-[120ms]",

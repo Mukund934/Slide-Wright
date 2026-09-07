@@ -27,7 +27,7 @@ import { useState } from "react";
 
 import { ApiError, api } from "../api/client";
 import type { Match, RefreshPlan } from "../api/types";
-import { Button, Empty, PanelHeading, Pill } from "../design/primitives";
+import { Button, Empty, PanelContext, Pill } from "../design/primitives";
 import { enter, stagger } from "../motion/tokens";
 
 export function SourcesPanel({
@@ -71,7 +71,7 @@ export function SourcesPanel({
 
   return (
     <>
-      <PanelHeading
+      <PanelContext
         trailing={
           sources.length > 0 ? (
             <Button
@@ -87,8 +87,10 @@ export function SourcesPanel({
           ) : undefined
         }
       >
-        Sources
-      </PanelHeading>
+        {sources.length === 0
+          ? "figures are matched by label, never by position"
+          : sources.map(basename).join(" · ")}
+      </PanelContext>
 
       <div className="shrink-0 border-b border-line px-3 py-2">
         <div className="flex gap-2">
@@ -233,9 +235,9 @@ function Section({
   return (
     <section>
       <div className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-1.5">
-        <h3 className="text-2xs font-medium uppercase tracking-[0.08em] text-ink-muted">
+        <h2 className="text-2xs font-medium uppercase tracking-[0.08em] text-ink-muted">
           {title}
-        </h3>
+        </h2>
         <p className="mt-0.5 text-2xs leading-relaxed text-ink-faint">{note}</p>
       </div>
       {children}

@@ -11,7 +11,7 @@
  * spend the one signal the product cannot afford to dilute.
  */
 
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 
 type Tone = "default" | "primary" | "quiet" | "danger";
 
@@ -35,9 +35,12 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   tone?: Tone;
   busy?: boolean;
   children: ReactNode;
+  // React 19 passes ref as an ordinary prop, so no forwardRef wrapper.
+  ref?: Ref<HTMLButtonElement>;
 }
 
 export function Button({
+  ref,
   tone = "default",
   busy = false,
   disabled,
@@ -47,6 +50,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
+      ref={ref}
       type="button"
       // `busy` disables as well as announces. A button that is working and
       // still clickable is how a deck gets edited twice.
@@ -129,6 +133,32 @@ export function PanelHeading({
         {children}
       </h2>
       {trailing}
+    </div>
+  );
+}
+
+/**
+ * The strip under a tab: what this panel is *about*, not what it is called.
+ *
+ * A panel inside a labelled tab does not need a heading repeating the label.
+ * That was costing two rows of a window that had 137px left for content — and
+ * the second row said "AUDIT" under a tab that said "AUDIT".
+ *
+ * So the space goes to the facts instead: how many slides, how many findings,
+ * how many approved. Actions sit on the right where the heading's trailing slot
+ * used to be, so nothing moved for the reader.
+ */
+export function PanelContext({
+  children,
+  trailing,
+}: {
+  children?: ReactNode;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="flex min-h-7 shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-1">
+      <p className="min-w-0 truncate text-2xs text-ink-faint">{children}</p>
+      {trailing && <div className="flex shrink-0 items-center gap-1">{trailing}</div>}
     </div>
   );
 }
