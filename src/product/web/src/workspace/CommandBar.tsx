@@ -14,12 +14,12 @@
  * enforced by the engine at both the planner and the verifier.
  */
 
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import { useState } from "react";
 
 import { LOCK_SCOPES, type LockScope, type LockSpec } from "../api/types";
 import { Button, Pill } from "../design/primitives";
-import { enter } from "../motion/tokens";
+import { reveal } from "../motion/tokens";
 
 /** The scopes worth one click. The rest are available, just not in the way. */
 const QUICK_LOCKS: { scope: LockScope; label: string; hint: string }[] = [
@@ -46,6 +46,7 @@ export function CommandBar({
 }) {
   const [instruction, setInstruction] = useState("");
   const [locks, setLocks] = useState<LockScope[]>([]);
+  const [detail, setDetail] = useState(false);
 
   const submit = () => {
     const text = instruction.trim();
@@ -132,31 +133,57 @@ export function CommandBar({
         </Button>
       </div>
 
-      <AnimatePresence initial={false}>
-        <motion.p
-          key={modelConfigured ? "configured" : "stub"}
-          variants={enter}
-          initial="hidden"
-          animate="shown"
-          exit="gone"
-          className="mt-1.5 text-2xs leading-relaxed text-ink-faint"
-        >
+      {/* One line, not a paragraph.
+          This was two lines of permanent body text — 36px of a window that had
+          137px left for content, restating the same fact on every screen. It is
+          a disclosure, and a disclosure has to be *findable and true*, not
+          unavoidable. The full sentence is a click away and the standing line
+          says the part that changes behaviour. */}
+      <div className="mt-1 flex items-baseline gap-1.5">
+        <p className="min-w-0 truncate text-2xs text-ink-faint">
           {modelConfigured ? (
             <>
-              Proposing from a description sends a structural summary of the whole
-              deck — every slide title, and the first 70 characters of every text
-              object — to <span className="text-evidence">{modelName}</span>. Direct
-              edits and everything else stay on this machine.
+              describing a change sends a deck summary to{" "}
+              <span className="text-evidence">{modelName}</span>
             </>
           ) : (
-            <>
-              No model key is set, so nothing is sent anywhere. Every deterministic
-              capability — audit, verify, revert, direct edits — works exactly as it
-              does with one.
-            </>
+            "no model key — nothing is sent anywhere"
           )}
-        </motion.p>
-      </AnimatePresence>
+        </p>
+        <button
+          type="button"
+          onClick={() => setDetail((was) => !was)}
+          aria-expanded={detail}
+          className="shrink-0 text-2xs text-ink-faint underline decoration-dotted underline-offset-2 transition-colors duration-[120ms] hover:text-ink"
+        >
+          {detail ? "less" : "what exactly?"}
+        </button>
+      </div>
+
+      {detail && (
+          <motion.p
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={reveal}
+            className="mt-1 text-2xs leading-relaxed text-ink-faint"
+          >
+            {modelConfigured ? (
+              <>
+                A structural summary of the whole deck — every slide title, and the
+                first 70 characters of every text object — goes to{" "}
+                <span className="text-evidence">{modelName}</span>. Editing objects
+                directly, auditing, verifying, tidying, refreshing and reverting send
+                nothing.
+              </>
+            ) : (
+              <>
+                Every deterministic capability — audit, tidy, refresh, verify, revert,
+                direct edits — works exactly as it does with a key. Only proposing from
+                a written description needs one.
+              </>
+            )}
+          </motion.p>
+      )}
     </div>
   );
 }
