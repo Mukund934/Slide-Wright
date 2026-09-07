@@ -318,12 +318,20 @@ class RefreshPlanOut(BaseModel):
     `unmatched` is the honest one: figures the source cannot explain. They are
     left untouched, because a figure this engine cannot justify with a
     coordinate is a figure it will not change.
+
+    `refused` is the loud one, and is not the same as `unmatched`. The source
+    *was* found and it holds a different figure — but writing it would change
+    what the cell says rather than what it reports. A spreadsheet stores a cell
+    formatted as 12.3% as 0.123, and a blank cell is missing data rather than a
+    value of nothing. Those are shown, never applied, and never mixed in with
+    "no match" — a reviewer needs to know the source disagrees.
     """
 
     sources: list[str] = Field(default_factory=list)
     tables: int = 0
     updates: list[MatchOut] = Field(default_factory=list)
     confirmed: list[MatchOut] = Field(default_factory=list)
+    refused: list[str] = Field(default_factory=list)
     unmatched: list[str] = Field(default_factory=list)
     rendered: str = ""
 
@@ -334,6 +342,10 @@ class RefreshPlanOut(BaseModel):
             tables=tables,
             updates=[_match(m, changed=True) for m in plan.updates],
             confirmed=[_match(m, changed=False) for m in plan.confirmed],
+            refused=[
+                f"slide {m.slide} · {m.citation.reference} — {m.refusal}"
+                for m in plan.refused
+            ],
             unmatched=[
                 f"slide {slide}: {label!r} — {why}" for slide, label, why in plan.unmatched
             ],

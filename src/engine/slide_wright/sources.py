@@ -104,17 +104,51 @@ class SourceTable:
 
     def lookup(self, row_label: str, column_label: str) -> Citation | None:
         """Find a value by its row and column labels, the way a person would."""
+        return self.resolve(row_label, column_label)[0]
+
+    def resolve(self, row_label: str, column_label: str) -> tuple[Citation | None, str]:
+        """The same lookup, and why it failed when it did.
+
+        Ambiguity is refused rather than resolved. Two rows labelled "EMEA" --
+        a restated figure beside the original, a subtotal beside its parts --
+        used to return the first one silently, with a citation to a coordinate
+        that reads as authoritative because it is one. The value was simply the
+        wrong cell.
+
+        That is the failure this whole module exists to prevent, and it was
+        worse than the case it was written against: the documented Copilot
+        example put 43% on a banking slide where the truth was 12%, and nothing
+        could trace it. Here it would have been traceable to `B2` -- and still
+        wrong, and now believed.
+
+        A refresh whose source is unambiguous is worth having. One that guesses
+        is worth less than nothing, because it is trusted.
+        """
         want_col = _normalise(column_label)
-        col_index = next(
-            (i for i, h in enumerate(self.header) if _normalise(h) == want_col), None
-        )
-        if col_index is None:
-            return None
+        columns = [i for i, h in enumerate(self.header) if _normalise(h) == want_col]
+        if not columns:
+            return None, f"no column is labelled {column_label!r}"
+        if len(columns) > 1:
+            where = ", ".join(_a1(0, i) for i in columns)
+            return None, (
+                f"{len(columns)} columns are labelled {column_label!r} ({where}); "
+                "the source does not say which one the deck means"
+            )
+
         want_row = _normalise(row_label)
-        for r, line in enumerate(self.rows[1:], start=1):
-            if line and _normalise(line[0]) == want_row:
-                return self.cell(r, col_index)
-        return None
+        rows = [
+            r for r, line in enumerate(self.rows[1:], start=1)
+            if line and _normalise(line[0]) == want_row
+        ]
+        if not rows:
+            return None, f"no row is labelled {row_label!r}"
+        if len(rows) > 1:
+            where = ", ".join(_a1(r, 0) for r in rows)
+            return None, (
+                f"{len(rows)} rows are labelled {row_label!r} ({where}); "
+                "the source does not say which one the deck means"
+            )
+        return self.cell(rows[0], columns[0]), ""
 
 
 @dataclass

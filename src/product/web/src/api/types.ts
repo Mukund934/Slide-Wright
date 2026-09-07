@@ -216,6 +216,13 @@ export interface RefreshPlan {
   tables: number;
   updates: Match[];
   confirmed: Match[];
+  /**
+   * The source was found, holds a different figure, and writing it would change
+   * what the cell says rather than what it reports — a percentage against a raw
+   * decimal, or a blank cell. Shown, never applied, and deliberately not mixed
+   * in with `unmatched`: "the source disagrees" is not "no match".
+   */
+  refused: string[];
   unmatched: string[];
   rendered: string;
 }

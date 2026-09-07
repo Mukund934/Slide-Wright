@@ -173,6 +173,15 @@ function Plan({
           already correct ·{" "}
           <span className="text-evidence text-ink-muted">{plan.unmatched.length}</span> not
           found
+          {plan.refused.length > 0 && (
+            <>
+              {" · "}
+              <span className="text-evidence text-ink-muted">
+                {plan.refused.length}
+              </span>{" "}
+              not safe to write
+            </>
+          )}
         </p>
       </div>
 
@@ -204,6 +213,26 @@ function Plan({
         >
           {plan.confirmed.map((match, index) => (
             <Row key={`c${index}`} match={match} onGoToSlide={onGoToSlide} confirmed />
+          ))}
+        </Section>
+      )}
+
+      {/* Above "not found", because it is the more alarming of the two: the
+          source was found, it holds a different figure, and the engine is
+          declining to write it. A reviewer who reads no further should read
+          this one. */}
+      {plan.refused.length > 0 && (
+        <Section
+          title="The source disagrees, and this cannot be written"
+          note="Writing these would change what the cell says, not what it reports — a spreadsheet stores 12.3% as 0.123, and a blank cell is missing data rather than a value of nothing."
+        >
+          {plan.refused.map((line) => (
+            <p
+              key={line}
+              className="border-b border-line px-3 py-2 text-2xs leading-relaxed text-ink last:border-b-0"
+            >
+              {line}
+            </p>
           ))}
         </Section>
       )}

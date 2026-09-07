@@ -19,11 +19,64 @@ change.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from slide_wright.changeset import Change, ChangeSet, Op, Origin
 from slide_wright.inspect import DeckInfo, ShapeInfo
 from slide_wright.sources import Citation, SourceSet, SourceTable, _normalise
+
+
+# How a figure is written is a decision the deck's author made, and a refresh
+# is about what the figure *is*. These separate the two.
+#
+# A leading currency symbol and a trailing unit are decoration: "$120" against a
+# source of 125 should become "$125", not "125". A percent sign or a magnitude
+# suffix is not decoration -- it says what scale the number is on, and a source
+# cell that does not carry it cannot be placed on that scale. Excel stores a
+# cell formatted as 12.3% as 0.123, so "refreshing" a deck's "12.3%" from it
+# writes "0.123": a figure off by two orders of magnitude, cited to a real
+# coordinate, and marked SOURCE so it needs no human review.
+_DECORATED = re.compile(
+    r"^(?P<prefix>[^\d\-+.]*)(?P<number>[-+]?[\d,\s]*\.?\d+)(?P<suffix>.*)$"
+)
+_SCALE_SUFFIX = re.compile(r"^\s*(%|k|m|bn?|tn?|x)\s*$", re.I)
+
+
+@dataclass
+class Shape:
+    """A figure split into how it is written and what it says."""
+
+    prefix: str
+    number: float | None
+    suffix: str
+    raw: str
+
+    @property
+    def is_scaled(self) -> bool:
+        """Whether the decoration changes what the number *means*, not just how
+        it looks."""
+        return bool(_SCALE_SUFFIX.match(self.suffix) or self.prefix.strip() == "%")
+
+    @property
+    def is_plain(self) -> bool:
+        return not self.prefix.strip() and not self.suffix.strip()
+
+
+def read_figure(text: str) -> Shape:
+    match = _DECORATED.match(text.strip())
+    if match is None:
+        return Shape(prefix="", number=None, suffix="", raw=text.strip())
+    try:
+        number = float(re.sub(r"[\s,]", "", match.group("number")))
+    except ValueError:
+        number = None
+    return Shape(
+        prefix=match.group("prefix"),
+        number=number,
+        suffix=match.group("suffix"),
+        raw=text.strip(),
+    )
 
 
 @dataclass
@@ -39,7 +92,53 @@ class Match:
 
     @property
     def changed(self) -> bool:
+        """Whether the figure moved -- not whether the text differs.
+
+        Compared as numbers when both sides are numbers, so a source that writes
+        120.00 where the deck writes 120 does not churn the file to say the same
+        thing. Precision in a deck is a presentation choice; a refresh is not
+        entitled to overrule one on the way past.
+        """
+        here, there = read_figure(self.current), read_figure(self.citation.value)
+        if here.number is not None and there.number is not None and self.writable:
+            return here.number != there.number
         return _normalise(self.current) != _normalise(self.citation.value)
+
+    @property
+    def writable(self) -> bool:
+        """Whether this cell can be refreshed without changing what it says."""
+        return not self.refusal
+
+    @property
+    def refusal(self) -> str:
+        """Why this cell must not be written, in words a reviewer can act on."""
+        here, there = read_figure(self.current), read_figure(self.citation.value)
+
+        if not there.raw:
+            return ("the source cell is empty; a blank is missing data, not a "
+                    "value of nothing")
+        if here.is_scaled and not there.is_scaled:
+            return (f"the deck writes {here.raw!r} and the source has "
+                    f"{there.raw!r}, which is not on that scale — a spreadsheet "
+                    "stores 12.3% as 0.123, and writing it here would move the "
+                    "figure by two orders of magnitude")
+        if there.is_scaled and not here.is_scaled:
+            return (f"the source writes {there.raw!r} and the deck cell is not "
+                    "on that scale")
+        return ""
+
+    @property
+    def replacement(self) -> str:
+        """What to write, keeping how the deck writes it.
+
+        "$120" refreshed from 125 becomes "$125". The author chose the symbol
+        and the unit; only the figure came from the source.
+        """
+        here, there = read_figure(self.current), read_figure(self.citation.value)
+        if here.is_plain or here.number is None or there.number is None:
+            return self.citation.value
+        number = re.sub(r"[\s,]", "", _DECORATED.match(there.raw).group("number"))
+        return f"{here.prefix}{number}{here.suffix}"
 
     @property
     def target(self) -> str:
@@ -55,7 +154,18 @@ class RefreshPlan:
 
     @property
     def updates(self) -> list[Match]:
-        return [m for m in self.matches if m.changed]
+        return [m for m in self.matches if m.changed and m.writable]
+
+    @property
+    def refused(self) -> list[Match]:
+        """Cells the source disagrees with but must not overwrite.
+
+        Surfaced rather than dropped: "the source has a different number here
+        and I will not write it" is exactly what a reviewer needs to know, and
+        silently filtering it would make the refresh look complete when it is
+        not.
+        """
+        return [m for m in self.matches if m.changed and not m.writable]
 
     @property
     def confirmed(self) -> list[Match]:
@@ -71,7 +181,7 @@ class RefreshPlan:
                 slide=match.slide,
                 target=match.target,
                 before=match.current,
-                after=match.citation.value,
+                after=match.replacement,
                 rationale=f"source: {match.citation.reference}",
                 # Grounded in a coordinate, not a model's opinion — so this is
                 # SOURCE origin and does not need human review to be trusted.
@@ -86,6 +196,7 @@ class RefreshPlan:
         lines.append(
             f"  {len(self.updates)} figure(s) to update · "
             f"{len(self.confirmed)} already correct · "
+            f"{len(self.refused)} the source cannot safely replace · "
             f"{len(self.unmatched)} not found in the source"
         )
         if self.updates:
@@ -93,7 +204,7 @@ class RefreshPlan:
             for m in self.updates:
                 lines.append(
                     f"    · slide {m.slide} r{m.row}c{m.col}: "
-                    f"{m.current!r} -> {m.citation.value!r}"
+                    f"{m.current!r} -> {m.replacement!r}"
                 )
                 lines.append(f"        from {m.citation.reference}")
         if self.confirmed:
@@ -103,6 +214,15 @@ class RefreshPlan:
                              f"{m.citation.reference}")
             if len(self.confirmed) > 8:
                 lines.append(f"    · … {len(self.confirmed) - 8} more")
+        if self.refused:
+            # Louder than "not found", and it should be: the source has a
+            # different figure here and the engine is declining to write it.
+            lines += ["", "  The source disagrees, and this will not be written"]
+            for m in self.refused[:8]:
+                lines.append(f"    · slide {m.slide} r{m.row}c{m.col}: {m.refusal}")
+                lines.append(f"        source {m.citation.reference}")
+            if len(self.refused) > 8:
+                lines.append(f"    · … {len(self.refused) - 8} more")
         if self.unmatched:
             lines += ["", "  Not found in the source (left untouched)"]
             for slide, label, why in self.unmatched[:8]:
@@ -145,11 +265,15 @@ def _match_table(slide_no: int, shape: ShapeInfo, sources: SourceSet, plan: Refr
         for c, current in enumerate(row[1:], start=1):
             if c >= len(header):
                 continue
-            citation = source.lookup(row_label, header[c])
+            citation, why = source.resolve(row_label, header[c])
             if citation is None:
+                # The source's own words, not a generic one. "2 rows are
+                # labelled 'EMEA' (A2, A3)" tells someone how to fix the
+                # spreadsheet; "no cell has both labels" sends them looking for
+                # a row that is demonstrably there.
                 plan.unmatched.append(
                     (slide_no, f"{row_label} / {header[c]}",
-                     "no cell in the source has both labels")
+                     why or "no cell in the source has both labels")
                 )
                 continue
             plan.matches.append(Match(

@@ -34,6 +34,7 @@ function plan(over: Partial<RefreshPlan> = {}): RefreshPlan {
     sources: ["comps.csv"], tables: 1,
     updates: [match()],
     confirmed: [match({ current: "22.1%", proposed: "", citation: "comps.csv!C2" })],
+    refused: [],
     unmatched: ["slide 4: 'Delta Ltd' — no row in the source"],
     rendered: "", ...over,
   };
@@ -66,6 +67,33 @@ describe("before a source is attached", () => {
   it("offers nothing to propose", () => {
     render(<SourcesPanel documentId="doc" {...handlers} />);
     expect(screen.queryByRole("button", { name: /Propose/ })).toBeNull();
+  });
+});
+
+describe("a figure the source cannot safely replace", () => {
+  const REFUSED =
+    "slide 2 · book.xlsx!Sheet1!B4 — the deck writes '12.3%' and the source " +
+    "has '0.123', which is not on that scale";
+
+  it("is shown, and not filed under 'not found'", async () => {
+    // The source *was* found. It holds a different figure and the engine is
+    // declining to write it, which is a louder fact than "no match" and must
+    // not be flattened into one.
+    await attach(plan({ refused: [REFUSED] }));
+    expect(screen.getByText(new RegExp("not on that scale"))).toBeInTheDocument();
+    expect(
+      screen.getByText(/The source disagrees, and this cannot be written/),
+    ).toBeInTheDocument();
+  });
+
+  it("is counted separately from the ones that were never matched", async () => {
+    await attach(plan({ refused: [REFUSED] }));
+    expect(screen.getByText(/not safe to write/)).toBeInTheDocument();
+  });
+
+  it("says nothing at all when there are none", async () => {
+    await attach(plan());
+    expect(screen.queryByText(/not safe to write/)).not.toBeInTheDocument();
   });
 });
 

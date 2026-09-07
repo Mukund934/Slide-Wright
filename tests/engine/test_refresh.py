@@ -208,3 +208,124 @@ class TestEndToEndOnARealPackage:
         assert report.deliverable
         assert "11.8x" in inspect(session.current.path).slide(3).text
         assert not report.fidelity.native_losses
+
+
+def csv_source(tmp_path, text, name="book.csv") -> SourceSet:
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return SourceSet([read_csv(path)])
+
+
+class TestAnAmbiguousSourceIsNotResolved:
+    """Two rows labelled "EMEA" is not a lookup with two answers. It is a
+    source that does not say which figure the deck means.
+
+    Returning the first was worse than the failure this module was written
+    against. The documented Copilot example put 43% on a banking slide where the
+    truth was 12% and nothing could trace it; here the wrong number would arrive
+    cited to a real coordinate, marked SOURCE, and therefore — by this engine's
+    own rules — not needing human review.
+    """
+
+    def _deck(self):
+        return deck_with_table([["Region", "Revenue"], ["EMEA", "120"]], slide=2)
+
+    def test_a_repeated_row_label_is_refused(self, tmp_path):
+        plan = plan_refresh(self._deck(), csv_source(
+            tmp_path, "Region,Revenue\nEMEA,120\nEMEA,999\n"))
+        assert not plan.updates
+        assert any("2 rows are labelled" in why for _, _, why in plan.unmatched)
+
+    def test_a_repeated_column_label_is_refused(self, tmp_path):
+        """FY24 and FY25 both headed "Revenue" is an ordinary spreadsheet."""
+        plan = plan_refresh(self._deck(), csv_source(
+            tmp_path, "Region,Revenue,Revenue\nEMEA,120,150\n"))
+        assert not plan.updates
+        assert any("columns are labelled" in why for _, _, why in plan.unmatched)
+
+    def test_the_refusal_names_where_the_duplicates_are(self, tmp_path):
+        """So the person can go and fix the source, which is the real remedy."""
+        plan = plan_refresh(self._deck(), csv_source(
+            tmp_path, "Region,Revenue\nEMEA,120\nEMEA,999\n"))
+        assert any("A2" in why and "A3" in why for _, _, why in plan.unmatched)
+
+    def test_an_unambiguous_source_still_works(self, tmp_path):
+        plan = plan_refresh(self._deck(), csv_source(
+            tmp_path, "Region,Revenue\nEMEA,125\nAPAC,999\n"))
+        assert [m.replacement for m in plan.updates] == ["125"]
+
+
+class TestHowAFigureIsWrittenSurvivesTheRefresh:
+    """A refresh is about what a figure *is*, not how the deck writes it.
+
+    Two different failures hide here, and they pull in opposite directions.
+    Rewriting "$120" as "125" drops a symbol the author chose. Rewriting "12.3%"
+    as "0.123" — which is exactly what a spreadsheet stores for that cell — is a
+    figure off by two orders of magnitude, and it arrives cited, grounded, and
+    needing no review.
+    """
+
+    def _deck(self, current):
+        return deck_with_table([["Region", "Revenue"], ["EMEA", current]], slide=2)
+
+    def _plan(self, tmp_path, current, source_value):
+        return plan_refresh(
+            self._deck(current),
+            csv_source(tmp_path, f"Region,Revenue\nEMEA,{source_value}\n"),
+        )
+
+    def test_a_currency_symbol_is_kept(self, tmp_path):
+        plan = self._plan(tmp_path, "$120", "125")
+        assert [m.replacement for m in plan.updates] == ["$125"]
+
+    def test_a_trailing_unit_is_kept(self, tmp_path):
+        plan = self._plan(tmp_path, "120 kg", "125")
+        assert [m.replacement for m in plan.updates] == ["125 kg"]
+
+    def test_a_percentage_is_not_refreshed_from_a_bare_decimal(self, tmp_path):
+        """The one that would have been catastrophic and silent."""
+        plan = self._plan(tmp_path, "12.3%", "0.123")
+        assert not plan.updates
+        assert len(plan.refused) == 1
+        assert "two orders of magnitude" in plan.refused[0].refusal
+
+    def test_a_percentage_is_refreshed_from_a_percentage(self, tmp_path):
+        """Narrow, or it would disable the feature for every percentage."""
+        plan = self._plan(tmp_path, "12.3%", "14.1%")
+        assert [m.replacement for m in plan.updates] == ["14.1%"]
+
+    def test_a_magnitude_suffix_is_not_silently_expanded(self, tmp_path):
+        plan = self._plan(tmp_path, "$1.2m", "1200000")
+        assert not plan.updates and plan.refused
+
+    def test_an_empty_source_cell_never_blanks_a_figure(self, tmp_path):
+        """A blank is missing data, not a value of nothing — and a workbook of
+        unevaluated formulas is full of them."""
+        plan = self._plan(tmp_path, "120", "")
+        assert not plan.updates
+        assert "empty" in plan.refused[0].refusal
+
+    def test_a_refusal_is_surfaced_rather_than_dropped(self, tmp_path):
+        """Filtering it out would make the refresh look complete when it is not."""
+        plan = self._plan(tmp_path, "12.3%", "0.123")
+        assert "cannot safely replace" in plan.render()
+        assert "will not be written" in plan.render()
+
+    def test_the_same_number_written_differently_is_not_a_change(self, tmp_path):
+        """Precision in a deck is a presentation choice, and a refresh is not
+        entitled to overrule one on the way past."""
+        plan = self._plan(tmp_path, "120", "120.00")
+        assert not plan.updates
+        assert not plan.refused
+        assert len(plan.confirmed) == 1
+
+    def test_a_real_move_is_still_a_change(self, tmp_path):
+        plan = self._plan(tmp_path, "120", "125")
+        assert len(plan.updates) == 1
+
+    def test_the_change_set_carries_the_written_form(self, tmp_path):
+        """Not the raw source value — that is the whole point."""
+        plan = self._plan(tmp_path, "$120", "125")
+        change = plan.to_changeset("deck.pptx").changes[0]
+        assert change.after == "$125"
+        assert change.op is Op.SET_TABLE_CELL
