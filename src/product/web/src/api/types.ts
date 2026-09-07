@@ -179,6 +179,33 @@ export interface Audit {
   rendered: string;
 }
 
+/** One deck cell a source row and column pair explains. */
+export interface Match {
+  slide: number;
+  target: string;
+  current: string;
+  /** Empty for a confirmed cell: the source and the deck already agree. */
+  proposed: string;
+  citation: string;
+}
+
+/**
+ * What a refresh would do, before anything is proposed.
+ *
+ * Three outcomes, all shown. `confirmed` is positive evidence a figure is still
+ * right; without it a reader cannot tell "checked and correct" from "never
+ * looked at". `unmatched` is what the source could not explain and what was
+ * therefore left alone.
+ */
+export interface RefreshPlan {
+  sources: string[];
+  tables: number;
+  updates: Match[];
+  confirmed: Match[];
+  unmatched: string[];
+  rendered: string;
+}
+
 /** What a tidy pass would change, before anything is proposed. */
 export interface TidyPlan {
   typefaces: number;

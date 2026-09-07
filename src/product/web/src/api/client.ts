@@ -16,6 +16,7 @@ import type {
   Health,
   LockSpec,
   SetSpec,
+  RefreshPlan,
   SlideDocument,
   TidyPlan,
   Verification,
@@ -103,6 +104,14 @@ export const api = {
 
   /** What a tidy would change. Reads only. */
   tidyPlan: (id: string) => request<TidyPlan>(`/documents/${id}/tidy`),
+
+  /** What a refresh would do. Reads the sources; writes nothing. */
+  refreshPreview: (id: string, sources: string[]) =>
+    post<RefreshPlan>(`/documents/${id}/refresh/preview`, { sources }),
+
+  /** Propose the figures a source explains. Approves and applies nothing. */
+  refresh: (id: string, sources: string[], locks: LockSpec[] = []) =>
+    post<ChangeSet>(`/documents/${id}/refresh`, { sources, locks }),
 
   /** Propose the corrections a tidy would make. Approves and applies nothing. */
   tidy: (id: string, locks: LockSpec[] = []) =>

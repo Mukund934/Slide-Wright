@@ -302,6 +302,30 @@ export function useWorkspace() {
     }
   }, [state.document, fail]);
 
+  /**
+   * Propose the figures a source explains.
+   *
+   * The same `proposed` action as everything else. Refresh is the highest-stakes
+   * thing this product does — a wrong number is invisible, because it looks
+   * exactly like a right one — which is the strongest possible argument for it
+   * going through the ordinary review step rather than around it.
+   */
+  const refresh = useCallback(
+    async (sources: string[]) => {
+      if (!state.document) return;
+      dispatch({ type: "proposing" });
+      try {
+        dispatch({
+          type: "proposed",
+          changeset: await api.refresh(state.document.id, sources),
+        });
+      } catch (error) {
+        fail(error);
+      }
+    },
+    [state.document, fail],
+  );
+
   const revert = useCallback(
     async (to: number) => {
       if (!state.document) return;
@@ -370,6 +394,7 @@ export function useWorkspace() {
     open,
     propose,
     tidy,
+    refresh,
     review,
     apply,
     revert,
