@@ -382,6 +382,7 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
             "source_version": before.number,
             "output_version": after.number,
             "changed": result.changed,
+            "figures_changed": len(result.figure_deltas),
             "slides_added": result.slides_added,
             "slides_removed": result.slides_removed,
             "deltas": [
@@ -393,6 +394,9 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
                     # The axis the whole wedge turns on: a content change alters
                     # what the deck says, everything else alters how it looks.
                     "is_content": d.is_content,
+                    # And the sharper half of it. "No figure changed" is the
+                    # claim someone asking for a formatting pass actually wants.
+                    "changes_figures": d.changes_figures,
                 }
                 for d in result.deltas
             ],

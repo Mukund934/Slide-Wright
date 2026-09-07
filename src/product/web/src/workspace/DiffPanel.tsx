@@ -42,6 +42,7 @@ export function DiffPanel({
 }) {
   const content = sorted(comparison.deltas.filter((d) => d.is_content));
   const presentation = sorted(comparison.deltas.filter((d) => !d.is_content));
+  const figures = comparison.deltas.filter((d) => d.changes_figures);
 
   return (
     <>
@@ -56,15 +57,31 @@ export function DiffPanel({
       </PanelHeading>
 
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-2">
+        {/* Figures first, and stated even when the answer is none.
+            "No figure changed" is the sharpest claim this product can make and
+            the one someone asking for a formatting pass actually wants — a
+            reassurance about prose is not what they came for. It is the only
+            count worth printing when it is zero, because a zero here is the
+            whole point and a reader who has to infer it from an absence has not
+            been told anything. */}
         <p className="text-2xs leading-relaxed text-ink-faint">
           {comparison.deltas.length === 0 ? (
             "Nothing a reader would notice."
           ) : (
             <>
-              <span className="text-evidence text-ink-muted">{content.length}</span> change
-              {content.length === 1 ? "" : "s"} what it says ·{" "}
-              <span className="text-evidence text-ink-muted">{presentation.length}</span>{" "}
-              change{presentation.length === 1 ? "" : "s"} how it looks
+              <span
+                className={[
+                  "text-evidence",
+                  figures.length === 0 ? "text-verified" : "text-changed",
+                ].join(" ")}
+              >
+                {figures.length === 0 ? "no figure changed" : `${figures.length} figure${figures.length === 1 ? "" : "s"} changed`}
+              </span>{" "}
+              ·{" "}
+              <span className="text-evidence text-ink-muted">{content.length}</span> in what
+              it says ·{" "}
+              <span className="text-evidence text-ink-muted">{presentation.length}</span> in
+              how it looks
             </>
           )}
         </p>
@@ -188,12 +205,10 @@ function Row({ delta, onGoTo }: { delta: Delta; onGoTo: (delta: Delta) => void }
         <span className="text-evidence w-5 shrink-0 pt-0.5 text-ink-faint">{delta.slide}</span>
         <span className="min-w-0 flex-1">
           <span className="block text-xs leading-snug text-ink">{delta.description}</span>
-          <Pill
-            className="mt-1"
-            verdict={delta.is_content ? "changed" : "neutral"}
-          >
-            {delta.kind}
-          </Pill>
+          <span className="mt-1 flex flex-wrap items-center gap-1">
+            <Pill verdict={delta.is_content ? "changed" : "neutral"}>{delta.kind}</Pill>
+            {delta.changes_figures && <Pill verdict="changed">figure</Pill>}
+          </span>
         </span>
       </button>
     </motion.li>

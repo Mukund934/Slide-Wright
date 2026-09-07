@@ -24,7 +24,7 @@ function delta(over: Partial<Delta> = {}): Delta {
   return {
     slide: 3, shape_id: "5", kind: "formatting",
     description: "Title 1 (id=3) run 1 font 'Century Gothic' -> '+mn-lt'",
-    is_content: false, ...over,
+    is_content: false, changes_figures: false, ...over,
   };
 }
 
@@ -39,18 +39,46 @@ const handlers = { onGoTo: vi.fn(), onFlip: vi.fn(), onClose: vi.fn() };
 
 describe("the two questions are kept apart", () => {
   const mixed = comparison([
-    delta({ kind: "text", is_content: true, description: "Table 2 text 9.4 -> 11.8" }),
+    delta({ kind: "text", is_content: true, changes_figures: true,
+            description: "Table 2 text 9.4 -> 11.8" }),
     delta({ kind: "formatting", is_content: false }),
     delta({ kind: "geometry", is_content: false, description: "Box moved 0.01in right" }),
   ]);
 
-  it("counts content and presentation separately", () => {
-    // The summary interpolates its counts, so it is matched on the assembled
-    // text rather than on a single node.
+  it("leads with the figures, then counts content and presentation", () => {
+    // "No figure changed" is the sharpest claim the product makes and the one
+    // someone asking for a formatting pass actually wants. The summary
+    // interpolates its counts, so it is matched on the assembled text.
     const { container } = render(<DiffPanel {...handlers} comparison={mixed} />);
     const summary = container.textContent?.replace(/\s+/g, " ") ?? "";
-    expect(summary).toContain("1 change what it says");
-    expect(summary).toContain("2 changes how it looks");
+    expect(summary).toContain("1 figure changed");
+    expect(summary).toContain("1 in what it says");
+    expect(summary).toContain("2 in how it looks");
+  });
+
+  it("says no figure changed rather than leaving a zero to be inferred", () => {
+    // A zero here is the whole point. A reader who has to notice an absence
+    // has not been told anything.
+    const noFigures = comparison([
+      delta({ kind: "formatting", is_content: false, changes_figures: false }),
+      delta({ kind: "text", is_content: true, changes_figures: false,
+              description: "teh -> the" }),
+    ]);
+    const { container } = render(<DiffPanel {...handlers} comparison={noFigures} />);
+    expect(container.textContent).toContain("no figure changed");
+  });
+
+  it("marks a row whose figure moved, in words", () => {
+    render(
+      <DiffPanel
+        {...handlers}
+        comparison={comparison([
+          delta({ kind: "text", is_content: true, changes_figures: true,
+                  description: "9.4 -> 11.8" }),
+        ])}
+      />,
+    );
+    expect(screen.getByText("figure")).toBeInTheDocument();
   });
 
   it("puts them in different sections", () => {

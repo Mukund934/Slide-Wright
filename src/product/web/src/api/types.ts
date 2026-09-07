@@ -302,12 +302,16 @@ export interface Delta {
   description: string;
   /** True when it changes what the deck *says*, not how it looks. */
   is_content: boolean;
+  /** True when a number moved — the sharper half of `is_content`. */
+  changes_figures: boolean;
 }
 
 export interface DiffResult {
   source_version: number;
   output_version: number;
   changed: boolean;
+  /** The count nobody wants to be non-zero after a formatting pass. */
+  figures_changed: number;
   slides_added: number[];
   slides_removed: number[];
   deltas: Delta[];
