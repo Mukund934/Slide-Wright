@@ -7,8 +7,11 @@ and what it cost at published rates.
 
 Two things this makes answerable that guesswork cannot:
 
-  · **"can we afford this at scale?"** — we can price a deck edit from real
-    measurements instead of the $5–15 estimate we have been carrying unverified;
+  · **"can we afford this at scale?"** — the prompt half is now measured
+    (`scripts/cost_report.py`): about $0.008 for the most expensive real deck
+    here, against a $5–15 estimate this project carried unverified for weeks.
+    What is still missing is the response half, and only a real call produces
+    that — which is what this ledger is for;
   · **"are we near the free-tier ceiling?"** — request counts per day, before a
     429 tells us the hard way.
 
