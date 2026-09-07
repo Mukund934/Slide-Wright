@@ -14,6 +14,7 @@ import pytest
 from slide_wright.gate import (
     DENSE_WORDS_PER_SLIDE,
     MIN_BODY_PT,
+    MIN_REPORTABLE_EMU,
     Severity,
     check,
     contrast_ratio,
@@ -200,3 +201,78 @@ class TestRealDeckFindings:
         result = check(inspect(deck))
         assert result.findings, "a 64-slide lecture deck should not be flawless"
         assert all(f.repair for f in result.errors), "every error needs a repair instruction"
+
+
+class TestAFindingCanStateItsOwnMagnitude:
+    """A finding that quantifies the problem as nothing is a false finding.
+
+    Measured across 29 real decks before the floor: 250 findings, of which 13
+    read "extends 0.00in past the right edge" or "starts 0.00in left of the
+    canvas" — ERRORs whose own numbers said nothing was wrong. `audit.py`'s
+    doctrine is that a false finding costs more than a missed one, because a
+    user told something wrong about their own deck stops trusting every later
+    finding. Nine of those thirteen were reasons to disbelieve the other 237.
+
+    The floor is derived from the printed precision rather than chosen, so the
+    two cannot drift: change the format to three decimals and `BOUNDS_DECIMALS`
+    has to change with it, which is a visible edit.
+    """
+
+    def _deck(self, shape: ShapeInfo) -> DeckInfo:
+        return DeckInfo(
+            slide_width=W, slide_height=H,
+            slides=[SlideInfo(number=1, part_name="s1", shapes=[shape])],
+        )
+
+    def _shape(self, **over) -> ShapeInfo:
+        base = dict(id="1", name="Box", kind="shape", x=0, y=0,
+                    cx=EMU_PER_INCH, cy=EMU_PER_INCH)
+        base.update(over)
+        return ShapeInfo(**base)
+
+    def test_an_overflow_too_small_to_print_is_not_reported(self):
+        """A hair over the right edge, and the message would say 0.00in."""
+        sliver = int(MIN_REPORTABLE_EMU) - 1
+        result = check(self._deck(self._shape(x=W - EMU_PER_INCH + sliver)))
+        assert not [f for f in result.findings if f.code.startswith("bounds")]
+
+    def test_an_overflow_it_can_print_still_is(self):
+        """Narrow, or the check is disabled rather than bounded."""
+        over = int(MIN_REPORTABLE_EMU) * 4
+        result = check(self._deck(self._shape(x=W - EMU_PER_INCH + over)))
+        assert [f for f in result.findings if f.code == "bounds.horizontal"]
+
+    def test_the_same_holds_below_the_bottom_edge(self):
+        sliver = int(MIN_REPORTABLE_EMU) - 1
+        result = check(self._deck(self._shape(y=H - EMU_PER_INCH + sliver)))
+        assert not [f for f in result.findings if f.code == "bounds.vertical"]
+
+    def test_and_off_the_left_of_the_canvas(self):
+        result = check(self._deck(self._shape(x=-(int(MIN_REPORTABLE_EMU) - 1))))
+        assert not [f for f in result.findings if f.code == "bounds.offcanvas"]
+
+    def test_a_shape_genuinely_off_the_canvas_is_still_an_error(self):
+        result = check(self._deck(self._shape(x=-EMU_PER_INCH)))
+        assert [f for f in result.findings if f.code == "bounds.offcanvas"]
+
+    def test_no_bounds_finding_ever_prints_a_zero_magnitude(self):
+        """The invariant, asserted directly rather than through the threshold.
+
+        Swept across a range that straddles the floor, so a future change to
+        either the floor or the format string that reintroduces "0.00in" fails
+        here rather than on somebody's deck.
+        """
+        import re
+
+        for offset in range(0, 20_000, 137):
+            for shape in (self._shape(x=W - EMU_PER_INCH + offset),
+                          self._shape(y=H - EMU_PER_INCH + offset),
+                          self._shape(x=-offset)):
+                for finding in check(self._deck(shape)).findings:
+                    if not finding.code.startswith("bounds"):
+                        continue
+                    stated = re.findall(r"(\d+\.\d+)in", finding.message)
+                    assert stated and all(float(v) > 0 for v in stated), (
+                        f"{finding.code} says {finding.message!r}, which claims "
+                        "a problem of no size"
+                    )
