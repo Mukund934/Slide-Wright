@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from lxml import etree
+
 from slide_wright.package import (
     CHART_PART,
     DIAGRAM_PART,
@@ -34,7 +36,26 @@ class PartDelta:
 
     @property
     def slide_number(self) -> int | None:
+        """The slide this part *is*. Only ever the body."""
         m = re.match(r"^ppt/slides/slide(\d+)\.xml$", self.name)
+        return int(m.group(1)) if m else None
+
+    @property
+    def slide_owner(self) -> int | None:
+        """The slide this part belongs to: its body, or its relationships.
+
+        A slide's rels are not a separate document. They are where its pictures,
+        charts and hyperlinks are; empty that file and the slide renders as a
+        page of broken frames while the slide part itself stays byte-identical.
+
+        Attributed here rather than checked separately, because attribution is
+        what the whole report is built on. Left as an ordinary non-slide part it
+        was listed under "other parts changed (review)" -- alongside a chart
+        workbook that moved because the user asked it to -- and did not block.
+        """
+        if (n := self.slide_number) is not None:
+            return n
+        m = re.match(r"^ppt/slides/_rels/slide(\d+)\.xml\.rels$", self.name)
         return int(m.group(1)) if m else None
 
 
@@ -102,6 +123,11 @@ class FidelityReport:
     source_census: NativeObjectCensus = field(default_factory=NativeObjectCensus)
     output_census: NativeObjectCensus = field(default_factory=NativeObjectCensus)
 
+    # The order slides are presented in, which no part hash can see. `None`
+    # means it could not be read -- distinct from "read, and empty".
+    source_order: list[str] | None = None
+    output_order: list[str] | None = None
+
     # ── part accounting ──────────────────────────────────────────────────────
 
     @property
@@ -137,7 +163,7 @@ class FidelityReport:
 
     @property
     def changed_slide_numbers(self) -> list[int]:
-        return sorted(d.slide_number for d in self.changed if d.slide_number is not None)
+        return sorted({d.slide_owner for d in self.changed if d.slide_owner is not None})
 
     # ── integrity ────────────────────────────────────────────────────────────
 
@@ -150,9 +176,31 @@ class FidelityReport:
         return self.output_census.rasterisation_suspected(self.source_census)
 
     @property
+    def slide_order_changed(self) -> bool:
+        """Whether the deck reads in a different order than it did.
+
+        Every part can be byte-for-byte identical while the deck says something
+        else, because the running order lives in `presentation.xml` rather than
+        in any slide. Measured: swap the first two entries of the `sldIdLst` on
+        a real deck and the report came back 99.56% identical, deliverable, with
+        `ppt/presentation.xml` listed under "other parts changed (review)" --
+        indistinguishable, to a reviewer, from a workbook that moved because a
+        chart's numbers did.
+
+        No operation in this engine reorders slides, so any difference here is
+        unrequested by construction.
+        """
+        # `None != [...]` is the answer that is wanted when one side could not
+        # be read: a deck that stops declaring an order has changed. Two
+        # unreadable sides compare equal, which is a fact about the check rather
+        # than a claim about the deck -- and a deck whose presentation part
+        # cannot be parsed fails elsewhere, loudly.
+        return self.source_order != self.output_order
+
+    @property
     def structurally_intact(self) -> bool:
-        """No parts vanished and no native objects were lost."""
-        return not self.removed and not self.native_losses
+        """No parts vanished, no native objects lost, and the order preserved."""
+        return not self.removed and not self.native_losses and not self.slide_order_changed
 
     def summary(self) -> str:
         lines = [
@@ -216,4 +264,52 @@ def compare(source: Package | str, output: Package | str) -> FidelityReport:
         deltas=sorted(deltas, key=lambda d: d.name),
         source_census=NativeObjectCensus.of(src),
         output_census=NativeObjectCensus.of(out),
+        source_order=slide_order(src),
+        output_order=slide_order(out),
     )
+
+
+PRESENTATION = "ppt/presentation.xml"
+PRESENTATION_RELS = "ppt/_rels/presentation.xml.rels"
+R_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+P_NS = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+PKG_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+
+def slide_order(pkg: Package) -> list[str] | None:
+    """The slide part names in the order the deck presents them.
+
+    Returns `None` when it cannot be read, which is deliberately not the same
+    as `[]`. An empty list is a claim -- "this deck presents no slides" -- and
+    making an unreadable presentation part look like one would turn a broken
+    deck into a matching pair of empty orders, which is exactly the fail-open
+    this check exists to remove.
+    """
+    if PRESENTATION not in pkg.parts or PRESENTATION_RELS not in pkg.parts:
+        return None
+    try:
+        pres = etree.fromstring(pkg.read(PRESENTATION))
+        rels = etree.fromstring(pkg.read(PRESENTATION_RELS))
+    except (etree.XMLSyntaxError, KeyError):
+        return None
+
+    targets = {
+        rel.get("Id", ""): rel.get("Target", "")
+        for rel in rels.iter(f"{PKG_REL_NS}Relationship")
+    }
+    order = []
+    for sld_id in pres.iter(f"{P_NS}sldId"):
+        target = targets.get(sld_id.get(f"{R_NS}id", ""))
+        if target is None:
+            # A slide the deck presents but whose part cannot be named. Not a
+            # gap to paper over: the order is not knowable, so say so.
+            return None
+        order.append(_resolve_part(target))
+    return order
+
+
+def _resolve_part(target: str) -> str:
+    cleaned = target.replace("\\", "/").lstrip("/")
+    while cleaned.startswith("../"):
+        cleaned = cleaned[3:]
+    return cleaned if cleaned.startswith("ppt/") else f"ppt/{cleaned}"

@@ -70,7 +70,7 @@ class ChangeReport:
         mention none of them. "Preserve everything else" is a claim about what
         the output contains, not only about what it lost.
         """
-        return [d.name for d in self.fidelity.changed if d.slide_number is None] + [
+        return [d.name for d in self.fidelity.changed if d.slide_owner is None] + [
             f"{d.name} (added)" for d in self.fidelity.added
         ]
 
@@ -151,8 +151,8 @@ class ChangeReport:
         """Whether this output may be handed to the user.
 
         Fails closed: an unattributed slide change, a removed part, native
-        object loss, suspected rasterisation, or a part that appeared and can
-        run code all block delivery.
+        object loss, suspected rasterisation, a part that appeared and can run
+        code, and a deck that reads in a different order all block delivery.
         """
         return (
             not self.unrequested_slide_changes
@@ -160,6 +160,7 @@ class ChangeReport:
             and not self.fidelity.native_losses
             and not self.fidelity.rasterisation_suspected
             and not self.executable_additions
+            and not self.fidelity.slide_order_changed
         )
 
     @property
@@ -181,6 +182,8 @@ class ChangeReport:
                 "the output gained a part that can run code: "
                 + ", ".join(self.executable_additions)
             )
+        if self.fidelity.slide_order_changed:
+            reasons.append("the deck presents its slides in a different order")
         return reasons
 
     # ── rendering ────────────────────────────────────────────────────────────
@@ -256,6 +259,9 @@ def _tick(ok: bool) -> str:
 
 
 def _slide_part_count(f: FidelityReport) -> int:
+    # Bodies, not owners. This counts slides, and a slide's rels are not a
+    # second slide -- attributing them that way is right for blame and wrong
+    # for arithmetic.
     return len([d for d in f.deltas if d.slide_number is not None and d.status != "added"])
 
 
