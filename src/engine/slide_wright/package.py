@@ -164,5 +164,30 @@ def _assert_safe(path: Path) -> None:
                     f"compression ratio {ratio:.0f}:1 on {name!r} exceeds limit"
                 )
 
+    # Two entries under one name. Nothing legitimate produces this, and it
+    # defeats verification outright rather than partially.
+    #
+    # A zip's directory may name the same part twice. Python's `read()` returns
+    # the last; other readers take the first, and OPC does not say which is
+    # right because OPC does not permit the situation. So the engine can hash
+    # one copy while PowerPoint renders the other -- measured on a real deck:
+    # payload first, genuine part last, and the report came back 100.00%
+    # byte-for-byte identical, zero changes, deliverable. Every number true of
+    # the copy it looked at.
+    #
+    # This is checked against the directory rather than the extracted names,
+    # because `namelist()` is a list and `parts` is a dict: by the time the
+    # package is loaded the duplicate has already collapsed and the evidence is
+    # gone.
+    seen: set[str] = set()
+    for info in infos:
+        if info.filename in seen:
+            raise UnsafePackageError(
+                f"duplicate part in package: {info.filename!r}. An OPC package "
+                "names each part once; two entries under one name mean readers "
+                "can disagree about which is the document."
+            )
+        seen.add(info.filename)
+
     if not any(i.filename == "[Content_Types].xml" for i in infos):
         raise UnsafePackageError("missing [Content_Types].xml; not an OPC package")

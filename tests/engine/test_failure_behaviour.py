@@ -153,3 +153,63 @@ class TestPartsThatAppearAreNotIgnored:
             adversarial_deck, tmp_path / "rendered.pptx", {"ppt/media/added.png": b"\x89PNG\x00"}
         )
         assert "added.png" in report.render()
+
+
+class TestOneNamePerPart:
+    """A duplicate entry does not weaken verification. It defeats it.
+
+    A zip directory may name the same part twice. Python's `read()` returns the
+    last entry; other readers take the first, and OPC does not say which wins
+    because OPC does not permit the situation at all. So the engine can hash one
+    copy while PowerPoint renders the other, and every number in the report is
+    true of the copy it looked at.
+
+    Measured before the check existed: payload first, genuine part last, and
+    `compare` returned 100.00% byte-for-byte identical, zero changed parts, zero
+    added parts, deliverable. Not a degraded verdict -- a perfect one.
+    """
+
+    def _duplicated(self, deck, out, name, payload, first: bool):
+        with zipfile.ZipFile(deck) as zin, zipfile.ZipFile(out, "w") as zout:
+            if first:
+                zout.writestr(name, payload)
+            for info in zin.infolist():
+                zout.writestr(info.filename, zin.read(info.filename))
+            if not first:
+                zout.writestr(name, payload)
+        return out
+
+    def test_a_smuggled_first_copy_is_refused(self, adversarial_deck, tmp_path):
+        """The direction that scored 100%: the genuine part is what gets hashed."""
+        out = self._duplicated(
+            adversarial_deck, tmp_path / "first.pptx",
+            "ppt/slides/slide1.xml", b"<p:sld/>", first=True,
+        )
+        with pytest.raises(UnsafePackageError, match="duplicate part"):
+            Package.open(out)
+
+    def test_a_smuggled_last_copy_is_refused_too(self, adversarial_deck, tmp_path):
+        """The other direction was already caught, but by hash and by accident.
+
+        It read as an unrequested slide change, which is the right refusal for
+        the wrong reason: it depended on which entry Python happened to return.
+        """
+        out = self._duplicated(
+            adversarial_deck, tmp_path / "last.pptx",
+            "ppt/slides/slide1.xml", b"<p:sld/>", first=False,
+        )
+        with pytest.raises(UnsafePackageError, match="duplicate part"):
+            Package.open(out)
+
+    def test_the_refusal_names_the_part(self, adversarial_deck, tmp_path):
+        """A reviewer has to be told which part, not merely that there was one."""
+        out = self._duplicated(
+            adversarial_deck, tmp_path / "named.pptx",
+            "ppt/presentation.xml", b"<p:presentation/>", first=True,
+        )
+        with pytest.raises(UnsafePackageError, match="ppt/presentation.xml"):
+            Package.open(out)
+
+    def test_an_ordinary_deck_still_opens(self, adversarial_deck):
+        """The check runs on every open, so it has to be exactly this narrow."""
+        assert Package.open(adversarial_deck).part_count > 0
