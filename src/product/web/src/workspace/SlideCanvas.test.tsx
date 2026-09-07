@@ -1,0 +1,136 @@
+/**
+ * The canvas, tested for restraint.
+ *
+ * The one rule this component can break silently is the colour rule: if
+ * anything other than a changed object wears the attention ring, "nothing else
+ * moved" stops being visible and the canvas is just a diagram. An earlier
+ * version put the ring in the rest state of a motion variant and every object
+ * on every slide wore it, which looked deliberate and was not.
+ */
+
+import { render } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import type { Shape, Slide } from "../api/types";
+import { SlideCanvas } from "./SlideCanvas";
+
+const WIDTH = 12192000;
+const HEIGHT = 6858000;
+
+function shape(over: Partial<Shape> = {}): Shape {
+  return {
+    id: "1", name: "Rectangle 1", kind: "shape", placeholder_type: null,
+    x: 914400, y: 914400, cx: 1828800, cy: 914400,
+    rotation_deg: null, geometry_inherited: false, geometry: "rect",
+    runs: [{ text: "hello", size_pt: 18, bold: false, italic: false, font: null, color: null }],
+    table_rows: 0, table_cols: 0, table_cells: {}, child_count: 0, text: "hello",
+    ...over,
+  };
+}
+
+function slide(shapes: Shape[]): Slide {
+  return {
+    number: 12, part_name: "slide12.xml", layout: "Title and Content",
+    title: "Comparables", word_count: 4, shapes,
+  };
+}
+
+function draw(shapes: Shape[], changed: string[] = [], extra = {}) {
+  return render(
+    <SlideCanvas
+      slide={slide(shapes)}
+      slideWidth={WIDTH}
+      slideHeight={HEIGHT}
+      changedShapes={new Set(changed)}
+      {...extra}
+    />,
+  );
+}
+
+describe("the ring", () => {
+  it("goes on the changed object and nowhere else", () => {
+    const { container } = draw([shape({ id: "1" }), shape({ id: "2" }), shape({ id: "3" })], ["2"]);
+    const ringed = container.querySelectorAll(".ring-changed");
+    expect(ringed).toHaveLength(1);
+    expect(ringed[0]?.getAttribute("data-shape-id")).toBe("2");
+  });
+
+  it("is absent entirely when nothing has been proposed", () => {
+    const { container } = draw([shape({ id: "1" }), shape({ id: "2" })]);
+    expect(container.querySelectorAll(".ring-changed")).toHaveLength(0);
+  });
+
+  it("does not follow the selection", () => {
+    // Selecting is not changing. Wearing the attention colour would say it was.
+    const { container } = draw([shape({ id: "1" })], [], { selectedShape: "1" });
+    expect(container.querySelectorAll(".ring-changed")).toHaveLength(0);
+    expect(container.querySelectorAll(".ring-selected")).toHaveLength(1);
+  });
+});
+
+describe("what it draws", () => {
+  it("places an object at the exact position and size the file gives", () => {
+    const { container } = draw([shape({ x: 914400, y: 457200, cx: 1828800, cy: 914400 })]);
+    const box = container.querySelector("[data-shape-id]") as HTMLElement;
+    // 914400 EMU is one inch, which is 96px at 96 DPI.
+    expect(box.style.left).toBe("96px");
+    expect(box.style.top).toBe("48px");
+    expect(box.style.width).toBe("192px");
+    expect(box.style.height).toBe("96px");
+  });
+
+  it("omits a shape with no geometry at all rather than dropping it at the origin", () => {
+    // Drawing it at 0,0 would look like a defect in the user's deck.
+    const { container } = draw([shape({ x: null, y: null, cx: null, cy: null })]);
+    expect(container.querySelectorAll("[data-shape-id]")).toHaveLength(0);
+  });
+
+  it("names an object it cannot draw instead of greying it out", () => {
+    // "chart" and "picture" mean very different things to someone checking
+    // their deck survived.
+    const { container } = draw([shape({ kind: "chart", runs: [], text: "" })]);
+    expect(container.textContent).toContain("chart");
+  });
+
+  it("renders a table as a table, cell by cell", () => {
+    const { container } = draw([
+      shape({
+        kind: "table", runs: [], text: "",
+        table_rows: 2, table_cols: 2,
+        table_cells: { "r0/c0": "Company", "r0/c1": "EV/EBITDA", "r1/c0": "Alpha", "r1/c1": "9.4x" },
+      }),
+    ]);
+    expect(container.querySelectorAll("td")).toHaveLength(4);
+    expect(container.querySelector('[data-cell="r1/c1"]')?.textContent).toBe("9.4x");
+  });
+
+  it("does not colour text, because it cannot resolve what is behind it", () => {
+    // White text on a dark photograph would render white on white and vanish,
+    // which reads as the object being absent rather than unrendered.
+    const { container } = draw([
+      shape({
+        runs: [{ text: "hi", size_pt: 18, bold: false, italic: false, font: null, color: "FFFFFF" }],
+      }),
+    ]);
+    const span = container.querySelector("[data-shape-id] span") as HTMLElement;
+    expect(span.style.color).toBe("");
+  });
+});
+
+describe("layout", () => {
+  it("claims the scaled size in layout, not the slide's own size", () => {
+    // `transform: scale` does not change the space an element occupies, so
+    // without this the canvas overflows the stage in both directions.
+    const { container } = draw([shape()]);
+    const outer = container.firstElementChild as HTMLElement;
+    expect(outer.style.width).toContain("var(--canvas-scale");
+    expect(outer.style.height).toContain("var(--canvas-scale");
+  });
+
+  it("labels itself with the slide it is showing", () => {
+    const { container } = draw([shape()]);
+    expect(container.querySelector('[role="group"]')?.getAttribute("aria-label")).toBe(
+      "Slide 12: Comparables",
+    );
+  });
+});
