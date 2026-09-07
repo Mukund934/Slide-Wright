@@ -56,6 +56,11 @@ class ShapeInfo:
     runs: list[TextRun] = field(default_factory=list)
     table_rows: int = 0
     table_cols: int = 0
+    # Cell text, row-major, addressed the way a change addresses it: "r1/c1".
+    # Counting rows was enough to describe a table and not enough to edit one --
+    # a caller could not read what a cell held, so it could not name the value
+    # it was replacing, and a `numbers` lock could not see the figures inside.
+    table_cells: dict[str, str] = field(default_factory=dict)
     child_count: int = 0
 
     @property
@@ -73,6 +78,10 @@ class ShapeInfo:
     @property
     def bottom(self) -> int | None:
         return None if self.y is None or self.cy is None else self.y + self.cy
+
+    def cell(self, row: int, col: int) -> str | None:
+        """What a cell holds, or None if the table has no such cell."""
+        return self.table_cells.get(f"r{row}/c{col}")
 
     def overlaps(self, other: ShapeInfo) -> bool:
         if None in (self.x, self.y, self.cx, self.cy, other.x, other.y, other.cx, other.cy):
@@ -214,6 +223,22 @@ def _read_slide(pkg: Package, part_name: str, number: int) -> SlideInfo:
     return slide
 
 
+def _read_cells(rows) -> dict[str, str]:
+    """Cell text keyed as the applier addresses it.
+
+    Indices are zero-based to match `_set_table_cell`, which reads them straight
+    off the row and cell lists. Getting that wrong would be silent: every read
+    would be off by one row, and a `before` derived from it would never match.
+    """
+    cells: dict[str, str] = {}
+    for row_index, row in enumerate(rows):
+        for col_index, cell in enumerate(row.findall("a:tc", NS)):
+            cells[f"r{row_index}/c{col_index}"] = "".join(
+                t.text or "" for t in cell.findall(".//a:t", NS)
+            )
+    return cells
+
+
 def _read_shape(el) -> ShapeInfo | None:
     tag = etree.QName(el).localname
     kind = {
@@ -263,6 +288,7 @@ def _read_shape(el) -> ShapeInfo | None:
             rows = el.findall(".//a:tr", NS)
             shape.table_rows = len(rows)
             shape.table_cols = len(rows[0].findall("a:tc", NS)) if rows else 0
+            shape.table_cells = _read_cells(rows)
         elif el.find(".//*[@uri='http://schemas.openxmlformats.org/drawingml/2006/chart']") is not None:
             shape.kind = "chart"
         elif el.find(".//*[@uri='http://schemas.openxmlformats.org/drawingml/2006/diagram']") is not None:

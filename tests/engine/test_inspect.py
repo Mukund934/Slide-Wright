@@ -150,3 +150,37 @@ class TestSlideLayout:
     def test_a_deck_using_several_layouts_reports_several(self, adversarial_deck):
         deck = inspect(adversarial_deck)
         assert len({s.layout for s in deck.slides if s.layout}) >= 1
+
+
+class TestTableCells:
+    """Counting a table describes it. Reading its cells is what lets you edit it.
+
+    The indices must match `apply._set_table_cell`, which reads them straight
+    off the row and cell lists. An off-by-one here is silent: every `before`
+    derived from a cell read would simply never match at apply time.
+    """
+
+    def _table(self, deck_path):
+        return next(s for s in inspect(deck_path).all_shapes() if s.kind == "table")
+
+    def test_reads_every_cell(self, adversarial_deck):
+        table = self._table(adversarial_deck)
+        assert len(table.table_cells) == table.table_rows * table.table_cols
+
+    def test_indices_are_zero_based_and_match_the_applier(self, adversarial_deck):
+        table = self._table(adversarial_deck)
+        assert "r0/c0" in table.table_cells
+        assert f"r{table.table_rows}/c0" not in table.table_cells
+
+    def test_cell_reads_by_row_and_column(self, adversarial_deck):
+        table = self._table(adversarial_deck)
+        assert table.cell(0, 0) == table.table_cells["r0/c0"]
+        assert table.cell(99, 99) is None
+
+    def test_the_cell_the_edit_tests_use_holds_what_they_expect(self, adversarial_deck):
+        """Guards the fixture the whole apply suite is written against."""
+        assert self._table(adversarial_deck).cell(1, 1) == "9.4x"
+
+    def test_a_shape_that_is_not_a_table_has_no_cells(self, adversarial_deck):
+        others = [s for s in inspect(adversarial_deck).all_shapes() if s.kind != "table"]
+        assert all(not s.table_cells for s in others)
