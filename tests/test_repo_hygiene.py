@@ -245,3 +245,40 @@ class TestSafetyRailsPresent:
         source = read("src/engine/slide_wright/apply.py")
         assert "guard_edit" in source
         assert "assert_preserved" in source
+
+
+class TestSessionWorkspacesAreIgnored:
+    """A session workspace holds copies of the user's deck. It must never be committable.
+
+    This existed as a `.gitignore` line and was wrong: the pattern read
+    `.slidewright-tmp/` while `Session.open` writes `.slidewright/`. For the
+    whole life of the session code those folders -- which by construction
+    contain the confidential file the user opened -- were not ignored at all,
+    and the mistake was invisible because nobody had run a session inside the
+    repository.
+
+    So the two are asserted to agree rather than assumed to.
+    """
+
+    def workspace_directory_name(self) -> str:
+        """The folder name `Session.open` builds, read from the source."""
+        source = read("src/engine/slide_wright/session.py")
+        match = re.search(r'f"\.(\w[\w-]*)/\{deck\.stem\}"', source)
+        assert match, "session.py no longer builds its workspace path the expected way"
+        return f".{match.group(1)}/"
+
+    def test_the_ignore_pattern_matches_what_the_engine_creates(self):
+        assert self.workspace_directory_name() in read(".gitignore").splitlines()
+
+    def test_git_actually_ignores_a_workspace_path(self):
+        """Reading the file is not the same as git agreeing with it."""
+        candidate = f"{self.workspace_directory_name()}deck/v000-original.pptx"
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", candidate],
+            cwd=REPO, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, f"git would track {candidate}"
+
+    def test_no_workspace_file_is_tracked(self):
+        tracked = [f for f in tracked_files() if ".slidewright" in f]
+        assert not tracked, f"session workspace files are in the repository: {tracked}"

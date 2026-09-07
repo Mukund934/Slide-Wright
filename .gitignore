@@ -22,6 +22,12 @@ secrets/
 
 # Session workspaces. `edit` keeps versions next to the deck it is working on,
 # so these folders hold copies of confidential material by construction.
+#
+# The name must match what Session.open actually creates. It did not: the
+# pattern read `.slidewright-tmp/` while the engine writes `.slidewright/`, so
+# for the whole life of the session code these folders were never ignored at
+# all. A test asserts the two agree from here on.
+.slidewright/
 .slidewright-tmp/
 
 # ── Customer material — decks are confidential by default ────────────────────
