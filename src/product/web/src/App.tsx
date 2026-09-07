@@ -20,6 +20,7 @@ import { enter } from "./motion/tokens";
 import { useWorkspace } from "./state/workspace";
 import { AuditPanel } from "./workspace/AuditPanel";
 import { ChangeSetPanel } from "./workspace/ChangeSetPanel";
+import { DiffPanel } from "./workspace/DiffPanel";
 import { CommandBar } from "./workspace/CommandBar";
 import { Filmstrip } from "./workspace/Filmstrip";
 import { History } from "./workspace/History";
@@ -87,10 +88,17 @@ export default function App() {
         </main>
 
         <aside className="flex min-w-0 flex-1 flex-col border-l border-line bg-panel lg:w-72 lg:flex-none xl:w-80">
-          <Tabs tab={tab} onChange={setTab} />
+          {!workspace.comparison && <Tabs tab={tab} onChange={setTab} />}
 
           <div className="flex min-h-0 flex-1 flex-col">
-            {tab === "audit" ? (
+            {workspace.comparison ? (
+              <DiffPanel
+                comparison={workspace.comparison}
+                onGoTo={(delta) => workspace.select(delta.slide, delta.shape_id, true)}
+                onFlip={workspace.flip}
+                onClose={workspace.stopComparing}
+              />
+            ) : tab === "audit" ? (
               <AuditPanel
                 documentId={workspace.document.id}
                 busy={workspace.phase === "proposing" || workspace.phase === "applying"}
@@ -122,18 +130,21 @@ export default function App() {
                 versions={workspace.document.versions}
                 busy={workspace.phase === "applying"}
                 onRevert={workspace.revert}
+                onCompare={workspace.compare}
               />
             )}
           </div>
 
-          <VerificationPanel
+          {!workspace.comparison && (
+            <VerificationPanel
             verification={workspace.verification}
             progress={workspace.progress}
             applying={workspace.phase === "applying"}
             onGoToSlide={(n) => workspace.select(n, null)}
-          />
+            />
+          )}
 
-          {workspace.canApply && (
+          {workspace.canApply && !workspace.comparison && (
             <div className="shrink-0 border-t border-line p-2">
               <Button
                 tone="primary"
@@ -292,6 +303,12 @@ function Stage({ workspace }: { workspace: ReturnType<typeof useWorkspace> }) {
       <AnimatePresence mode="wait">
         {slide && doc && (
           <motion.div
+            // Keyed on the slide only, never on which side of a comparison is
+            // showing. Fading between two nearly identical slides is precisely
+            // what hides the difference between them: the eye follows the fade
+            // instead of the change. Flipping before/after is a hard cut, and
+            // that is the one place in this application where motion is
+            // refused on purpose.
             key={slide.number}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -314,6 +331,20 @@ function Stage({ workspace }: { workspace: ReturnType<typeof useWorkspace> }) {
       </AnimatePresence>
 
       <div className="absolute bottom-3 right-3 flex items-center gap-1">
+        {workspace.comparison && (
+          // Which version is on screen, said on the canvas itself. The flip
+          // control lives in the other panel, and a reader who has just
+          // flipped needs to know what they are looking at without moving
+          // their eyes back across the window.
+          <span className="text-evidence mr-2 rounded-sm bg-changed-wash px-1.5 py-0.5 text-changed">
+            showing v
+            {String(
+              workspace.comparison.showing === "before"
+                ? workspace.comparison.from
+                : workspace.comparison.to,
+            ).padStart(3, "0")}
+          </span>
+        )}
         <StructuralNote />
         <Button tone="quiet" onClick={() => setZoom((z) => Math.max(0.5, z - 0.1))}>
           −

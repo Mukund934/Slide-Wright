@@ -21,11 +21,14 @@ export function History({
   versions,
   busy,
   onRevert,
+  onCompare,
 }: {
   versions: Version[];
   busy: boolean;
   onRevert: (to: number) => void;
+  onCompare: (from: number, to: number) => void;
 }) {
+  const current = versions.find((v) => v.is_current);
   return (
     <>
       <PanelHeading
@@ -83,14 +86,19 @@ export function History({
               </p>
             </div>
             {!version.is_current && (
-              <Button
-                tone="quiet"
-                busy={busy}
-                onClick={() => onRevert(version.number)}
-                className="opacity-0 transition-opacity duration-[120ms] focus-visible:opacity-100 group-hover:opacity-100"
-              >
-                Go back
-              </Button>
+              // Compare before revert, deliberately in that order. Seeing what
+              // differs is the safe action and the one someone reaches for
+              // first; going back is the one they should have to mean.
+              <div className="flex shrink-0 gap-1 opacity-0 transition-opacity duration-[120ms] focus-within:opacity-100 group-hover:opacity-100">
+                {current && (
+                  <Button onClick={() => onCompare(version.number, current.number)}>
+                    Compare
+                  </Button>
+                )}
+                <Button tone="quiet" busy={busy} onClick={() => onRevert(version.number)}>
+                  Go back
+                </Button>
+              </div>
             )}
           </motion.li>
         ))}
