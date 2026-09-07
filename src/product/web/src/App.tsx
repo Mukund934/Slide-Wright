@@ -16,7 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "./api/client";
 import type { Health, LockSpec } from "./api/types";
 import { Button, Pill } from "./design/primitives";
-import { enter } from "./motion/tokens";
+import { reveal } from "./motion/tokens";
 import { useWorkspace } from "./state/workspace";
 import { AuditPanel } from "./workspace/AuditPanel";
 import { ChangeSetPanel } from "./workspace/ChangeSetPanel";
@@ -68,7 +68,7 @@ export default function App() {
       />
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-44 shrink-0 flex-col border-r border-line bg-panel xl:w-56">
+        <aside className="flex w-36 shrink-0 flex-col border-r border-line bg-panel lg:w-44 xl:w-56">
           <Filmstrip
             slides={workspace.document.deck.slides}
             selected={workspace.selectedSlide}
@@ -81,20 +81,30 @@ export default function App() {
           />
         </aside>
 
-        {/* The canvas is what needs width, so the canvas is what goes.
-            Below a laptop the three regions cannot all be useful at once, and
-            cramming them makes all three useless rather than one of them
-            absent. What survives is the review — the change set, the verdict
-            and the filmstrip — which is the part someone is most likely to be
-            doing on a smaller screen anyway. */}
-        <main className="hidden min-w-0 flex-1 flex-col lg:flex">
+        {/* The canvas is what needs width, so the canvas is what goes — but
+            later than it used to. At 1024 the threshold was costing the canvas
+            to every window that was not close to full screen, including the
+            ordinary half-of-a-laptop case. The measurement that settled it: at
+            768 the two panels take 400px, leaving ~370 for the slide, which is
+            enough to see *where* a change landed — the only thing this canvas
+            claims to show.
+            Below that the three regions cannot all be useful at once, and
+            cramming them makes all three useless rather than one absent. What
+            survives is the review, which is the part someone is most likely to
+            be doing on a small screen anyway. */}
+        <main className="hidden min-w-0 flex-1 flex-col md:flex">
           <Stage workspace={workspace} />
         </main>
 
-        <aside className="flex min-w-0 flex-1 flex-col border-l border-line bg-panel lg:w-72 lg:flex-none xl:w-80">
+        <aside className="flex min-w-0 flex-1 flex-col border-l border-line bg-panel md:w-64 md:flex-none lg:w-72 xl:w-80">
           {!workspace.comparison && <Tabs tab={tab} onChange={setTab} />}
 
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            id="deck-panel"
+            role={workspace.comparison ? undefined : "tabpanel"}
+            aria-labelledby={workspace.comparison ? undefined : `tab-${tab}`}
+            className="flex min-h-0 flex-1 flex-col"
+          >
             {workspace.comparison ? (
               <DiffPanel
                 comparison={workspace.comparison}
@@ -207,7 +217,10 @@ function TopBar({
   return (
     <header className="flex h-10 shrink-0 items-center justify-between border-b border-line bg-panel px-3">
       <div className="flex min-w-0 items-baseline gap-2">
-        <span className="truncate text-xs font-medium text-ink">{name}</span>
+        {/* The deck is what this document is about, so it is the h1. Without
+            one the outline started at h3 and a screen-reader user arrived with
+            no idea what they were looking at. */}
+        <h1 className="truncate text-xs font-medium text-ink">{name}</h1>
         <span className="text-evidence truncate text-ink-faint" title={workspacePath}>
           {workspacePath}
         </span>
@@ -242,17 +255,34 @@ function Untouched({ total, changed }: { total: number; changed: number }) {
   );
 }
 
+const TABS = ["audit", "sources", "changes", "history"] as const;
+
 function Tabs({ tab, onChange }: { tab: RightTab; onChange: (t: RightTab) => void }) {
   return (
     <div
       role="tablist"
+      aria-label="Deck panels"
       className="flex h-9 shrink-0 items-stretch border-b border-line"
+      onKeyDown={(event) => {
+        // Arrow keys move between tabs, which is what the role promises. A
+        // tablist that only responds to clicks is a row of buttons wearing a
+        // costume.
+        const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+        if (!step) return;
+        event.preventDefault();
+        const next = TABS[(TABS.indexOf(tab) + step + TABS.length) % TABS.length];
+        if (next) onChange(next);
+      }}
     >
-      {(["audit", "sources", "changes", "history"] as const).map((value) => (
+      {TABS.map((value) => (
         <button
           key={value}
+          id={`tab-${value}`}
           role="tab"
           aria-selected={tab === value}
+          aria-controls="deck-panel"
+          // Only the selected tab is in the tab order; arrows move within.
+          tabIndex={tab === value ? 0 : -1}
           onClick={() => onChange(value)}
           className={[
             "relative flex-1 truncate px-1 text-2xs font-medium uppercase tracking-[0.06em]",
@@ -408,23 +438,23 @@ function scopeLabel(workspace: ReturnType<typeof useWorkspace>): string {
 
 function ErrorBar({ message, onDismiss }: { message: string | null; onDismiss: () => void }) {
   return (
-    <AnimatePresence>
-      {message && (
-        <motion.div
-          variants={enter}
-          initial="hidden"
-          animate="shown"
-          exit="gone"
-          role="alert"
-          className="flex shrink-0 items-start gap-3 border-t border-blocked bg-blocked-wash px-3 py-2"
-        >
-          <p className="flex-1 text-xs leading-relaxed text-blocked">{message}</p>
-          <Button tone="quiet" onClick={onDismiss}>
-            Dismiss
-          </Button>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    // Rendered plainly. An exit animation on an alert left it in the DOM at
+    // opacity 0, and opacity does not hide anything from a screen reader --
+    // a dismissed error would still have been announced.
+    message && (
+      <motion.div
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={reveal}
+        role="alert"
+        className="flex shrink-0 items-start gap-3 border-t border-blocked bg-blocked-wash px-3 py-2"
+      >
+        <p className="flex-1 text-xs leading-relaxed text-blocked">{message}</p>
+        <Button tone="quiet" onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </motion.div>
+    )
   );
 }
 

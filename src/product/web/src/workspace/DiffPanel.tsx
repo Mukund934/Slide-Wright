@@ -116,13 +116,11 @@ export function DiffPanel({
  */
 function Flip({ comparison, onFlip }: { comparison: Comparison; onFlip: () => void }) {
   return (
-    // Hidden at the width where the canvas is, and for the same reason. Below a
-    // laptop the canvas is dropped so the review has room; a flip control with
-    // nothing to look at is a button that appears to do nothing. The delta list
-    // is still entirely useful there — reading what changed does not need a
-    // picture.
+    // Hidden at the width where the canvas is, and for the same reason: a flip
+    // control with nothing to look at is a button that appears to do nothing.
+    // The delta list stays — reading what changed does not need a picture.
     <div
-      className="hidden shrink-0 overflow-hidden rounded-md border border-line-strong lg:flex"
+      className="hidden shrink-0 overflow-hidden rounded-md border border-line-strong md:flex"
       role="group"
       aria-label="Which version the canvas is showing"
     >
@@ -160,6 +158,9 @@ function Group({
   return (
     <section>
       <div className="sticky top-0 z-10 border-b border-line bg-panel px-3 py-1.5">
+        {/* h3: these sit under the panel heading, which is the h2. The tabbed
+            panels have no heading of their own — their tab labels them — so
+            their sections are h2 instead. */}
         <h3 className="text-2xs font-medium uppercase tracking-[0.08em] text-ink-muted">
           {title}
         </h3>
