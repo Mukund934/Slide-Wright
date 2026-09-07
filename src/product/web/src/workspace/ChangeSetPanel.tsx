@@ -40,7 +40,9 @@ export function ChangeSetPanel({
   if (!changeset || changeset.changes.length === 0) {
     return (
       <>
-        <PanelContext>nothing proposed yet</PanelContext>
+        {/* No strip. The empty state below already says there is nothing
+            proposed, and saying it twice in adjacent rows is the same mistake
+            as a heading repeating its tab. */}
         <Empty
           title="Nothing proposed"
           detail="Ask for a change and Slide-Wright will write down exactly what it intends to do, before it touches the file."

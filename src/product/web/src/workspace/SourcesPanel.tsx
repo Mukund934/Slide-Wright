@@ -87,9 +87,10 @@ export function SourcesPanel({
           ) : undefined
         }
       >
-        {sources.length === 0
-          ? "figures are matched by label, never by position"
-          : sources.map(basename).join(" · ")}
+        {/* Once a source is attached this names it. Before that the empty
+            state below explains the matching rule, and repeating it here would
+            be the same sentence twice in adjacent rows. */}
+        {sources.length === 0 ? "no source attached" : sources.map(basename).join(" · ")}
       </PanelContext>
 
       <div className="shrink-0 border-b border-line px-3 py-2">
@@ -134,8 +135,8 @@ export function SourcesPanel({
 
       {!plan ? (
         <Empty
-          title="No source attached"
-          detail="Point at this quarter's workbook. Figures are matched by row label and column header — never by position, and never by resemblance."
+          title="Point at this quarter's workbook"
+          detail="Figures are matched by row label and column header — never by position, and never by resemblance. Anything the source cannot explain is left alone."
         />
       ) : (
         <Plan plan={plan} busy={busy} onGoToSlide={onGoToSlide} onRefresh={() => onRefresh(sources)} />
