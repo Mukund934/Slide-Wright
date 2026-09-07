@@ -25,7 +25,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from slide_wright import __version__ as engine_version
@@ -71,6 +71,24 @@ from slide_wright_api.workspace import (
 # no entry at all.
 DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 
+# The only names this server answers to.
+#
+# Binding to 127.0.0.1 stops another machine reaching the socket. It does not
+# stop a *web page* reaching it, and CORS does not either: in a DNS rebinding
+# attack, evil.example resolves to 127.0.0.1 after its TTL expires, so the
+# browser considers requests to evil.example:8787 same-origin and never consults
+# CORS at all. Every route is then reachable from a page the user merely
+# visited -- read the deck, drive an edit, export a copy somewhere.
+#
+# The Host header is what survives that, because the browser still sends the
+# name the page was loaded from. A request that arrives asking for a name this
+# server does not have is not from the user's own client.
+#
+# It matters more here than for most local servers. The promise is that the
+# document does not leave this machine (ADR-0008), and a rebinding attack is
+# precisely a way to make it leave.
+LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
 WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 
 
@@ -89,6 +107,29 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Content-Type"],
     )
+
+    @app.middleware("http")
+    async def only_answer_to_loopback(request, call_next):
+        """Refuse a request addressed to a name this machine does not have.
+
+        Runs before every route, including the static client, because the
+        attack does not care which URL it lands on.
+        """
+        host = request.headers.get("host", "")
+        if _host_name(host) not in LOOPBACK_HOSTS:
+            # 421 is the honest code: the request reached a server that is not
+            # the one it was addressed to.
+            return JSONResponse(
+                status_code=421,
+                content={
+                    "detail": (
+                        f"this server answers only to localhost, not to {host!r}. "
+                        "A request addressed elsewhere did not come from your "
+                        "own client."
+                    )
+                },
+            )
+        return await call_next(request)
 
     # ── health ───────────────────────────────────────────────────────────────
 
@@ -601,6 +642,19 @@ def _version(session: Session, number: int):
         have = ", ".join(str(v.number) for v in session.versions)
         raise HTTPException(404, f"no version {number}; this document has {have}")
     return found
+
+
+def _host_name(header: str) -> str:
+    """The host out of a Host header, without its port.
+
+    IPv6 arrives bracketed (`[::1]:8787`), so the port cannot be split off at
+    the first colon.
+    """
+    host = header.strip().lower()
+    if host.startswith("["):
+        end = host.find("]")
+        return host[: end + 1] if end != -1 else host
+    return host.rsplit(":", 1)[0] if ":" in host else host
 
 
 def _model_name() -> str:

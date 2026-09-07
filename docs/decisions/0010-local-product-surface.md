@@ -38,6 +38,19 @@ engine, and a TypeScript client that talks to it over loopback.**
 3. **Bound to `127.0.0.1` only.** Not configurable to a public interface. A product
    whose governing constraint is that the file does not leave the machine must not
    ship a flag that lets it.
+
+   **And it answers only to `localhost`.** Binding to loopback stops another
+   machine reaching the socket; it does not stop a *web page*, and CORS does not
+   either. In a DNS rebinding attack `evil.example` resolves to `127.0.0.1` once
+   its TTL expires, so the browser treats requests to `evil.example:8787` as
+   same-origin and never consults CORS at all — every route becomes reachable
+   from a page the user merely visited. The Host header is what survives it,
+   because the browser still sends the name the page was loaded from. A request
+   addressed to any other name is refused with 421 before it reaches a route.
+
+   This is the only place the local surface takes a real security measure, and
+   it is not optional here: "the document does not leave this machine" is the
+   promise, and rebinding is precisely a way to make it leave.
 4. **No accounts, no persistence beyond the session workspace the engine already
    writes.** History and revert are already local files; that stays the whole
    storage model.
@@ -66,6 +79,10 @@ engine, and a TypeScript client that talks to it over loopback.**
 - Streaming makes the API stateful in a way a REST surface is not. Session state
   lives in the API process keyed by deck; the durable state stays on disk in the
   engine's workspace, so a restart loses a view, never a version.
+- One trusted local user is assumed everywhere *except* the network boundary. There
+  is no authentication and there does not need to be, because nothing that is not
+  the user's own client can reach a route: the socket is loopback and the Host
+  header must name it.
 - If a hosted surface is ever built, this API is not reusable as-is — it assumes one
   trusted local user. That is a real cost and is accepted, because building for two
   deployment models before either has a customer is how the previous 33 studio

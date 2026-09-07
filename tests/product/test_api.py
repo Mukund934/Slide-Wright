@@ -25,7 +25,7 @@ from slide_wright_api.workspace import Workspace
 def client(tmp_path, adversarial_deck):
     """A client over a deck copied into tmp, so versions land in tmp too."""
     app = create_app(workspace=Workspace(), serve_client=False)
-    with TestClient(app) as test_client:
+    with TestClient(app, base_url="http://127.0.0.1:8787") as test_client:
         test_client.deck = _stage(adversarial_deck, tmp_path)
         yield test_client
 
@@ -564,7 +564,7 @@ class TestTidy:
     @pytest.fixture
     def client(self, tmp_path, untidy_deck):
         app = create_app(workspace=Workspace(), serve_client=False)
-        with TestClient(app) as test_client:
+        with TestClient(app, base_url="http://127.0.0.1:8787") as test_client:
             test_client.deck = _stage(untidy_deck, tmp_path)
             yield test_client
 
@@ -923,7 +923,7 @@ class TestTemplateConformance:
     @pytest.fixture
     def client(self, tmp_path, untidy_deck):
         app = create_app(workspace=Workspace(), serve_client=False)
-        with TestClient(app) as test_client:
+        with TestClient(app, base_url="http://127.0.0.1:8787") as test_client:
             test_client.deck = _stage(untidy_deck, tmp_path)
             yield test_client
 
@@ -1138,3 +1138,56 @@ class TestAWorkspaceThatWentAway:
         response = client.post("/api/documents", json={"path": str(staged)})
         assert response.status_code == 422
         assert "no file at" in response.json()["detail"]
+
+
+class TestItAnswersOnlyToItsOwnMachine:
+    """Binding to loopback stops another machine. It does not stop a web page.
+
+    In a DNS rebinding attack, evil.example resolves to 127.0.0.1 once its TTL
+    expires, so the browser treats requests to evil.example:8787 as same-origin
+    and never consults CORS at all. Every route is then reachable from a page
+    the user merely visited: read the deck, drive an edit, write a copy out.
+
+    The Host header is what survives it, because the browser still sends the
+    name the page was loaded from. It matters more here than for most local
+    servers — the promise is that the document does not leave this machine
+    (ADR-0008), and rebinding is precisely a way to make it leave.
+    """
+
+    @pytest.fixture
+    def app(self, tmp_path):
+        from slide_wright_api.app import create_app
+        return create_app(workspace=Workspace(), serve_client=False)
+
+    @pytest.mark.parametrize("host", ["127.0.0.1:8787", "localhost:8787",
+                                      "localhost", "[::1]:8787", "LOCALHOST"])
+    def test_its_own_client_is_served(self, app, host):
+        with TestClient(app, base_url="http://127.0.0.1:8787") as client:
+            assert client.get("/api/health", headers={"Host": host}).status_code == 200
+
+    @pytest.mark.parametrize("host", ["attacker.example", "deck-stealer.io:8787",
+                                      "0.0.0.0:8787", "localhost.evil.example",
+                                      "127.0.0.1.evil.example"])
+    def test_a_request_addressed_elsewhere_is_refused(self, app, host):
+        with TestClient(app, base_url="http://127.0.0.1:8787") as client:
+            response = client.get("/api/health", headers={"Host": host})
+            assert response.status_code == 421
+            assert "localhost" in response.json()["detail"]
+
+    def test_the_refusal_covers_every_route_not_only_the_api(self, app):
+        """The attack does not care which URL it lands on."""
+        with TestClient(app, base_url="http://127.0.0.1:8787") as client:
+            for path in ["/api/documents", "/", "/openapi.json"]:
+                assert client.get(
+                    path, headers={"Host": "attacker.example"}
+                ).status_code == 421
+
+    def test_a_mutating_route_is_refused_before_it_runs(self, app, adversarial_deck):
+        with TestClient(app, base_url="http://127.0.0.1:8787") as client:
+            response = client.post(
+                "/api/documents",
+                json={"path": str(adversarial_deck)},
+                headers={"Host": "attacker.example"},
+            )
+            assert response.status_code == 421
+            assert client.get("/api/health").json()["open_documents"] == 0
