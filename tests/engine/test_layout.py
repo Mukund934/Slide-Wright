@@ -323,3 +323,72 @@ class TestOneRunReachesAFixpoint:
         assert MAX_ROUNDS > 0
         many = deck(*[shape(str(i), x=IN + i * 3, y=IN + i * IN) for i in range(30)])
         plan_alignment(many)  # must return, not hang
+
+
+# A genuine near miss: above the noise floor, well inside the tolerance.
+NEAR = 4000
+
+
+class TestLayoutPlacedShapesAreNotNudged:
+    """The module says it "must not override" the layout. It has to stay true.
+
+    The filter used to be `x is not None and y is not None`, which worked only
+    because a layout-placed placeholder had no coordinates to report. Then
+    `inspect` learned to resolve inherited geometry -- a real fix, worth 44
+    previously invisible gate findings -- and the predicate silently stopped
+    meaning "has a box of its own" while still being read that way.
+
+    The consequence was not a near miss. `align --fix` on a real deck exited 2:
+    the applier had no `a:xfrm` to write into and refused the whole change set.
+    A louder failure than it deserved to be, and lucky -- the quiet version is
+    the applier writing one, which detaches the shape from its layout forever,
+    so a later template change moves every sibling and leaves that one behind.
+    """
+
+    def _inherited(self, sid, x, y):
+        s = shape(sid, x, y, kind="placeholder")
+        s.geometry_inherited = True
+        return s
+
+    def _stray_beside_a_line(self):
+        """One layout-placed stray, and a line two other shapes already share.
+
+        Without the exclusion this is precisely the case that snaps: a lone
+        shape a hair off a line that two others agree on.
+        """
+        return deck(
+            self._inherited("1", IN + NEAR, IN),
+            shape("2", IN, IN),
+            shape("3", IN, IN),
+        )
+
+    def test_an_inherited_box_is_never_moved(self):
+        assert not plan_alignment(self._stray_beside_a_line()).changes
+
+    def test_it_is_counted_as_left_alone_not_silently_dropped(self):
+        plan = plan_alignment(self._stray_beside_a_line())
+        assert any("positioned by the layout" in note for note in plan.skipped)
+
+    def test_shapes_with_their_own_box_still_snap(self):
+        """The exclusion must be narrow, or it quietly disables the feature."""
+        plan = plan_alignment(deck(
+            self._inherited("1", IN + NEAR, IN),
+            shape("2", IN + NEAR, IN),
+            shape("3", IN, IN),
+            shape("4", IN, IN),
+        ))
+        assert [c.target for c in plan.changes] == ["2"]
+
+    def test_an_inherited_box_cannot_form_the_line_others_snap_to(self):
+        """It is not a cluster member, so it cannot vote for the target either.
+
+        Otherwise the exclusion is cosmetic: the shape holds still but still
+        decides where everything else goes.
+        """
+        plan = plan_alignment(deck(
+            self._inherited("1", IN, IN),
+            self._inherited("2", IN, IN),
+            shape("3", IN + NEAR, IN),
+            shape("4", IN + NEAR * 2, IN),
+        ))
+        assert not plan.changes

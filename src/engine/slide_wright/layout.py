@@ -155,7 +155,20 @@ def plan_alignment(
     plan = LayoutPlan(deck=name or "deck", tolerance_emu=tolerance_emu)
 
     for slide in deck.slides:
-        positioned = [s for s in slide.shapes if s.x is not None and s.y is not None]
+        # `geometry_inherited`, not merely "has coordinates". `inspect` resolves
+        # a placeholder's box from the layout that places it, so a layout-placed
+        # shape now reports an x and a y like any other -- and the old test for
+        # one silently stopped meaning what this module needs it to mean.
+        #
+        # It matters more than a filter usually does. Nudging such a shape means
+        # writing it an `a:xfrm` of its own, which detaches it from the layout
+        # for good: a later template change would move every sibling and leave
+        # this one behind. That is a permanent structural change, traded for a
+        # correction of two thousandths of an inch.
+        positioned = [
+            s for s in slide.shapes
+            if s.x is not None and s.y is not None and not s.geometry_inherited
+        ]
         placed_by_layout = len(slide.shapes) - len(positioned)
         if placed_by_layout:
             plan.skipped.append(

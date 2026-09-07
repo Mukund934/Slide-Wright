@@ -37,6 +37,14 @@ from slide_wright.smartart import SmartArtUnsupported, assert_preserved, guard_e
 IN_PLACE_OPS = {Op.SET_TEXT, Op.SET_TABLE_CELL, Op.SET_FONT_SIZE, Op.SET_FONT,
                 Op.SET_COLOR, Op.MOVE, Op.RESIZE}
 
+# Operations that change what an object *says*. The two content guards below
+# exist because a chart and a diagram each keep the same information twice, and
+# an edit that updates one copy and not the other is the silent corruption this
+# product refuses. Geometry is not one of those copies: a graphicFrame's box
+# lives in the slide part, and neither the chart part nor the diagram model
+# records where on the slide it sits.
+CONTENT_OPS = IN_PLACE_OPS - {Op.MOVE, Op.RESIZE}
+
 
 class ApplyError(Exception):
     """A change could not be applied. Fail closed rather than approximate."""
@@ -77,8 +85,16 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
     # chart's cached series against its embedded workbook (charts.py).
     for change in approved:
         try:
-            guard_edit(pkg, change.slide, change.target)
-            guard_chart_edit(pkg, change.slide, change.target)
+            # Moving either kind is safe. Resizing a chart is too -- PowerPoint
+            # lays the chart out into whatever frame it is given, and the chart
+            # part carries no geometry to fall out of step. A diagram is the
+            # exception: its drawing cache holds absolute coordinates produced
+            # by the layout engine at one particular size, so a resized frame
+            # renders a cache that no regeneration would produce.
+            if change.op in CONTENT_OPS or change.op is Op.RESIZE:
+                guard_edit(pkg, change.slide, change.target)
+            if change.op in CONTENT_OPS:
+                guard_chart_edit(pkg, change.slide, change.target)
         except (SmartArtUnsupported, ChartUnsupported) as exc:
             raise ApplyError(str(exc)) from exc
 
@@ -335,6 +351,13 @@ def _set_run_format(shape, change: Change) -> bool:
 
 def _set_geometry(shape, change: Change) -> bool:
     xfrm = shape.find(".//a:xfrm", NS)
+    if xfrm is None:
+        # A graphicFrame -- every native table and chart -- states its box as
+        # `p:xfrm`. Missing it here did not fail loudly: the caller reported
+        # "no position of its own; it is placed by the layout", which is untrue
+        # of a graphicFrame and sends a reviewer looking for a layout that does
+        # not place it.
+        xfrm = shape.find("./p:xfrm", NS)
     if xfrm is None:
         return False
     if change.op is Op.MOVE:

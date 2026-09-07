@@ -336,3 +336,69 @@ class TestRunAddressingMatchesInspect:
         assert runs[1].find(
             "{http://schemas.openxmlformats.org/drawingml/2006/main}t"
         ).text == "second"
+
+
+class TestMovingIsNotEditing:
+    """The content guards were refusing an operation they have no argument against.
+
+    A chart and a diagram each keep the same information twice — cached series
+    against an embedded workbook, a diagram model against its drawing cache —
+    and both guards exist because an edit that updates one copy and not the
+    other produces a deck whose picture disagrees with its own data. That is
+    the whole justification, and it is about content.
+
+    Neither cache records where on the slide the frame sits. Refusing a move on
+    those grounds cost more than it sounds: the alignment pass emits `MOVE` and
+    nothing else, so one chart anywhere in a deck made `tidy` refuse the entire
+    change set. Which is the demo.
+    """
+
+    CHART = (2, "3")   # slide, shape id — a native chart in the fixture
+    TABLE = (3, "3")   # a native table
+
+    def _move(self, deck, slide, target, tmp_path, name="moved.pptx"):
+        pkg_shape = next(s for s in inspect(deck).slides[slide - 1].shapes
+                         if s.id == target)
+        cs = approved(deck, Change(
+            id="m1", op=Op.MOVE, slide=slide, target=target,
+            before=(pkg_shape.x, pkg_shape.y),
+            after=(pkg_shape.x + 12700, pkg_shape.y),
+        ))
+        return apply_changes(deck, cs, tmp_path / name), pkg_shape
+
+    def test_a_chart_frame_can_be_moved(self, adversarial_deck, tmp_path):
+        result, _ = self._move(adversarial_deck, *self.CHART, tmp_path)
+        assert result.ok, result.failed
+
+    def test_the_move_actually_lands(self, adversarial_deck, tmp_path):
+        """A graphicFrame states its box as `p:xfrm`, not `a:xfrm`.
+
+        Looking only for the DrawingML form did not raise. It returned "shape 3
+        has no position of its own; it is placed by the layout" — untrue of a
+        graphicFrame, and it sends a reviewer looking for a layout that does not
+        place it.
+        """
+        result, before = self._move(adversarial_deck, *self.CHART, tmp_path)
+        after = next(s for s in inspect(result.output).slides[1].shapes if s.id == "3")
+        assert after.x == before.x + 12700
+        assert after.y == before.y
+
+    def test_a_table_frame_can_be_moved_too(self, adversarial_deck, tmp_path):
+        result, _ = self._move(adversarial_deck, *self.TABLE, tmp_path, "table.pptx")
+        assert result.ok, result.failed
+
+    def test_moving_a_chart_leaves_the_chart_part_untouched(self, adversarial_deck, tmp_path):
+        """The reason the guard has no argument here, asserted rather than argued."""
+        result, _ = self._move(adversarial_deck, *self.CHART, tmp_path, "parts.pptx")
+        rep = compare(adversarial_deck, result.output)
+        assert not [d.name for d in rep.changed if d.name.startswith("ppt/charts/")]
+        assert not [d.name for d in rep.changed if d.name.startswith("ppt/embeddings/")]
+
+    def test_editing_a_chart_is_still_refused(self, adversarial_deck, tmp_path):
+        """The scoping must not become a way around the guard."""
+        cs = approved(adversarial_deck, Change(
+            id="c1", op=Op.SET_FONT, slide=self.CHART[0], target=self.CHART[1],
+            before="Arial", after="Calibri",
+        ))
+        with pytest.raises(ApplyError, match="native chart"):
+            apply_changes(adversarial_deck, cs, tmp_path / "nope.pptx")
