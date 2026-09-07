@@ -1,0 +1,254 @@
+/**
+ * The wire shapes, mirroring `slide_wright_api/contracts.py`.
+ *
+ * Kept by hand rather than generated, for now, and that is a deliberate debt:
+ * generation needs a schema step in both toolchains, and until the surface
+ * stops moving the step would cost more than the drift. The API tests are what
+ * actually catch a mismatch, because they assert on the same field names.
+ *
+ * Nothing here is a guess about engine behaviour. Every derived fact --
+ * `deliverable`, `isGrounded`, `needsReview` -- arrives already decided.
+ */
+
+export type ChangeStatus = "proposed" | "approved" | "rejected" | "applied" | "failed";
+export type ChangeOrigin = "user" | "source" | "model" | "rule";
+export type Severity = "error" | "warning";
+
+export type Op =
+  | "set_text"
+  | "set_table_cell"
+  | "move"
+  | "resize"
+  | "set_font_size"
+  | "set_font"
+  | "set_color"
+  | "delete_shape";
+
+/** The guarantees a user can declare. Each is enforced at the engine, not the UI. */
+export const LOCK_SCOPES = [
+  "slide",
+  "shape",
+  "numbers",
+  "wording",
+  "layout",
+  "formatting",
+  "tables",
+  "charts",
+  "media",
+] as const;
+
+export type LockScope = (typeof LOCK_SCOPES)[number];
+
+export interface Run {
+  text: string;
+  size_pt: number | null;
+  bold: boolean;
+  italic: boolean;
+  font: string | null;
+  color: string | null;
+}
+
+export interface Shape {
+  id: string;
+  name: string;
+  kind: string;
+  placeholder_type: string | null;
+  /** EMU. The slide's own dimensions come alongside; convert at render time. */
+  x: number | null;
+  y: number | null;
+  cx: number | null;
+  cy: number | null;
+  rotation_deg: number | null;
+  geometry: string | null;
+  runs: Run[];
+  table_rows: number;
+  table_cols: number;
+  /** Keyed "r0/c0", zero-based, matching the suffix a change target carries. */
+  table_cells: Record<string, string>;
+  child_count: number;
+  text: string;
+}
+
+export interface Slide {
+  number: number;
+  part_name: string;
+  layout: string | null;
+  title: string | null;
+  word_count: number;
+  shapes: Shape[];
+}
+
+export interface Deck {
+  slide_width: number;
+  slide_height: number;
+  theme_fonts: Record<string, string>;
+  slides: Slide[];
+}
+
+export interface Change {
+  id: string;
+  op: Op;
+  slide: number;
+  target: string;
+  before: unknown;
+  after: unknown;
+  rationale: string;
+  status: ChangeStatus;
+  origin: ChangeOrigin;
+  citation: string;
+  confidence: number;
+  impact: string;
+  object_kind: string;
+  description: string;
+  /** Traces to something checkable: a person typed it, or a cell says so. */
+  is_grounded: boolean;
+  /** A model invented it and cited nothing. Never auto-approved. */
+  needs_review: boolean;
+}
+
+export interface Lock {
+  scope: LockScope;
+  target: string;
+  reason: string;
+}
+
+export interface ChangeSet {
+  deck: string;
+  instruction: string;
+  changes: Change[];
+  locks: Lock[];
+  proposed_count: number;
+  approved_count: number;
+  rejected_count: number;
+  applied_count: number;
+  needs_review_count: number;
+}
+
+export interface Finding {
+  code: string;
+  severity: Severity;
+  slide: number;
+  message: string;
+  repair: string;
+  shape_id: string;
+  shape_name: string;
+}
+
+export interface Audit {
+  passed: boolean;
+  error_count: number;
+  warning_count: number;
+  findings: Finding[];
+}
+
+export interface CensusRow {
+  label: string;
+  source: number;
+  output: number;
+  intact: boolean;
+}
+
+export interface RequestedChange {
+  slide: number;
+  description: string;
+  target: string;
+}
+
+export interface Verification {
+  /** The engine's fail-closed verdict. Never recomputed here. */
+  deliverable: boolean;
+  identical_parts: number;
+  total_parts: number;
+  fidelity_score: number;
+  changed_parts: string[];
+  changed_slides: number[];
+  untouched_slides: number;
+  /** Slides that moved without a change-set entry authorising it. */
+  unrequested_slides: number[];
+  unrequested_parts: string[];
+  blocking_reasons: string[];
+  requested: RequestedChange[];
+  census: CensusRow[];
+  rendered: string;
+}
+
+export interface Version {
+  number: number;
+  created_at: string;
+  note: string;
+  changes: string[];
+  is_original: boolean;
+  is_current: boolean;
+}
+
+export interface SlideDocument {
+  id: string;
+  name: string;
+  workspace: string;
+  deck: Deck;
+  versions: Version[];
+  changeset: ChangeSet | null;
+  verification: Verification | null;
+}
+
+export interface Health {
+  ok: boolean;
+  api: string;
+  engine: string;
+  /** "gemini" | "anthropic" | "stub". Stub means no key: the deterministic
+   *  half of the product is unaffected, and the UI says so rather than
+   *  offering a box that silently proposes nothing. */
+  model: string;
+  model_configured: boolean;
+  open_documents: number;
+}
+
+export interface Delta {
+  slide: number;
+  shape_id: string;
+  kind: string;
+  description: string;
+  /** True when it changes what the deck *says*, not how it looks. */
+  is_content: boolean;
+}
+
+export interface DiffResult {
+  source_version: number;
+  output_version: number;
+  changed: boolean;
+  slides_added: number[];
+  slides_removed: number[];
+  deltas: Delta[];
+  rendered: string;
+}
+
+/** One edit the user made directly. Origin is USER; `before` is read server-side. */
+export interface SetSpec {
+  slide: number;
+  target: string;
+  op: Op;
+  after: unknown;
+  rationale?: string;
+}
+
+export interface LockSpec {
+  scope: LockScope;
+  target?: string;
+  reason?: string;
+}
+
+/** The stages an apply actually passes through. No interpolated percentage. */
+export type ApplyStage =
+  | "applying"
+  | "applied"
+  | "verifying"
+  | "verified"
+  | "blocked"
+  | "refused";
+
+export interface ApplyProgress {
+  stage: ApplyStage;
+  detail: string;
+  slides?: number[];
+  version?: number;
+}
