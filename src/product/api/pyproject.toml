@@ -1,0 +1,25 @@
+[project]
+name = "slide-wright-api"
+version = "0.1.0"
+description = "Slide-Wright's local product surface: an HTTP API over the engine, bound to loopback"
+requires-python = ">=3.11"
+dependencies = [
+    "slide-wright-engine",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.7",
+]
+
+[project.scripts]
+slide-wright-app = "slide_wright_api.__main__:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["slide_wright_api*"]

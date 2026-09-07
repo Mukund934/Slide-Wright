@@ -59,6 +59,8 @@ export interface Shape {
   cx: number | null;
   cy: number | null;
   rotation_deg: number | null;
+  /** The box came from the layout or master; the shape cannot be moved. */
+  geometry_inherited: boolean;
   geometry: string | null;
   runs: Run[];
   table_rows: number;

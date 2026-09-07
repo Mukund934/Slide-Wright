@@ -157,6 +157,15 @@ def build_typed_changes(deck: DeckInfo, specs, start: int = 1) -> list[Change]:
                 raise WorkspaceError(
                     f"slide {spec.slide} has no object {spec.target!r} to edit"
                 )
+            if op in (Op.MOVE, Op.RESIZE) and shape.geometry_inherited:
+                # The applier would refuse this, but only after a reviewer had
+                # already approved it. Refusing here means the explanation
+                # arrives while it can still change what the user asks for.
+                raise WorkspaceError(
+                    f"{shape.name or spec.target} is placed by its layout, so it "
+                    "has no position of its own to change. Edit the layout, or "
+                    "give the shape its own position in PowerPoint first."
+                )
             before = _geometry_before(shape, op)
 
         changes.append(

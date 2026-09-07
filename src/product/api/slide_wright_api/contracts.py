@@ -57,6 +57,10 @@ class ShapeOut(BaseModel):
     cx: int | None = None
     cy: int | None = None
     rotation_deg: float | None = None
+    # True when the box came from the layout or master. The shape is really
+    # there and really that size; it just has no position of its own, which is
+    # why the applier refuses to move it.
+    geometry_inherited: bool = False
     geometry: str | None = None
     runs: list[RunOut] = Field(default_factory=list)
     table_rows: int = 0
@@ -73,7 +77,9 @@ class ShapeOut(BaseModel):
             id=shape.id, name=shape.name, kind=shape.kind,
             placeholder_type=shape.placeholder_type,
             x=shape.x, y=shape.y, cx=shape.cx, cy=shape.cy,
-            rotation_deg=shape.rotation_deg, geometry=shape.geometry,
+            rotation_deg=shape.rotation_deg,
+            geometry_inherited=shape.geometry_inherited,
+            geometry=shape.geometry,
             runs=[RunOut.of(r) for r in shape.runs],
             table_rows=shape.table_rows, table_cols=shape.table_cols,
             table_cells=dict(shape.table_cells),
