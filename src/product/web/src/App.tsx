@@ -10,7 +10,7 @@
  * interface.
  */
 
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "./api/client";
@@ -350,35 +350,37 @@ function Stage({ workspace }: { workspace: ReturnType<typeof useWorkspace> }) {
       ref={stageRef}
       className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-8"
     >
-      <AnimatePresence mode="wait">
-        {slide && doc && (
-          <motion.div
-            // Keyed on the slide only, never on which side of a comparison is
-            // showing. Fading between two nearly identical slides is precisely
-            // what hides the difference between them: the eye follows the fade
-            // instead of the change. Flipping before/after is a hard cut, and
-            // that is the one place in this application where motion is
-            // refused on purpose.
-            key={slide.number}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            // Fast enough that moving through a filmstrip does not feel gated
-            // on an animation, present enough that the swap is not a jump cut.
-            transition={{ duration: 0.12 }}
-          >
-            <SlideCanvas
-              slide={slide}
-              slideWidth={doc.deck.slide_width}
-              slideHeight={doc.deck.slide_height}
-              changedShapes={workspace.changedShapes}
-              carriedShape={workspace.carriedShape}
-              selectedShape={workspace.selectedShape}
-              onSelectShape={(id) => workspace.select(workspace.selectedSlide, id)}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Keyed, and rendered plainly.
+          This was an AnimatePresence with mode="wait", which gates the incoming
+          slide on the outgoing one finishing its exit. The exit did not finish,
+          so the canvas stuck: the filmstrip moved to slide 10 and the canvas
+          went on showing slide 1, permanently. On the surface whose entire job
+          is proving what did and did not change, that is the worst defect the
+          application could have — a reviewer would have been checking a change
+          against the wrong slide.
+
+          A slide swap needs no exit. Changing the key remounts, the entrance
+          plays, and clicking a slide shows that slide with nothing to wait for. */}
+      {slide && doc && (
+        <motion.div
+          key={slide.number}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          // Fast enough that moving through a filmstrip never feels gated on an
+          // animation, present enough that the swap is not a jump cut.
+          transition={{ duration: 0.12 }}
+        >
+          <SlideCanvas
+            slide={slide}
+            slideWidth={doc.deck.slide_width}
+            slideHeight={doc.deck.slide_height}
+            changedShapes={workspace.changedShapes}
+            carriedShape={workspace.carriedShape}
+            selectedShape={workspace.selectedShape}
+            onSelectShape={(id) => workspace.select(workspace.selectedSlide, id)}
+          />
+        </motion.div>
+      )}
 
       <div className="absolute bottom-3 right-3 flex items-center gap-1">
         {workspace.comparison && (

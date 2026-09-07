@@ -306,3 +306,54 @@ describe("comparing two versions", () => {
     expect(state.document).not.toBeNull();
   });
 });
+
+describe("the canvas follows the selection", () => {
+  /**
+   * The invariant a broken slide swap violated in the worst possible way: the
+   * filmstrip reached slide 10 while the canvas went on showing slide 1, and
+   * stayed there. On the surface whose whole job is proving what did and did
+   * not change, a reviewer would have been checking against the wrong slide.
+   *
+   * The cause was an animation, which no reducer test can reach. What is
+   * testable is the rule underneath: the slide on screen is always the slide
+   * that is selected, from whichever deck is in view.
+   */
+  const deck = {
+    slide_width: 12192000,
+    slide_height: 6858000,
+    theme_fonts: {},
+    slides: [1, 4, 10].map((number) => ({
+      number,
+      part_name: `s${number}.xml`,
+      layout: null,
+      title: `Slide ${number}`,
+      word_count: 1,
+      shapes: [],
+    })),
+  };
+
+  const shown = (state: WorkspaceState) => {
+    const source = state.comparison ? state.comparison[state.comparison.showing] : deck;
+    return source.slides.find((s) => s.number === state.selectedSlide)?.number ?? null;
+  };
+
+  it("shows whichever slide was selected, not the one before it", () => {
+    let state = reducer(initial, { type: "opened", document: document({ deck }) });
+    expect(shown(state)).toBe(1);
+
+    state = reducer(state, { type: "select", slide: 10 });
+    expect(shown(state)).toBe(10);
+
+    state = reducer(state, { type: "select", slide: 4 });
+    expect(shown(state)).toBe(4);
+  });
+
+  it("keeps up when selections arrive faster than anything could animate", () => {
+    let state = reducer(initial, { type: "opened", document: document({ deck }) });
+    for (const slide of [4, 10, 1, 10, 4]) {
+      state = reducer(state, { type: "select", slide });
+    }
+    expect(state.selectedSlide).toBe(4);
+    expect(shown(state)).toBe(4);
+  });
+});

@@ -109,12 +109,23 @@ the tab order â€” a keyboard user could tab into a dialog that had been closed â
 and the same shape left a dismissed error alert in the tree, where zero opacity
 hides nothing at all from a screen reader.
 
+The **slide canvas** had the same fault and the worst consequence of it. It used
+`AnimatePresence mode="wait"`, which gates the incoming slide on the outgoing one
+finishing. The outgoing one never finished, so the canvas stuck: the filmstrip
+reached slide 10 while the canvas went on showing slide 1, permanently. On the
+surface whose entire job is proving what did and did not change, a reviewer would
+have been checking a change against the wrong slide.
+
 Both were invisible to the component tests, which pass in jsdom because jsdom
 completes the exit and the browser did not. The fix was to remove the animation
 rather than repair it: it was carrying no information, and a popover that simply
 goes is what every tool does and what the reader expects. Motion that does no
 work and costs correctness is not a trade worth making. Entrances stay, because
 they say *this arrived*.
+
+**There is no `AnimatePresence` anywhere in the client**, and that is the rule
+rather than the current state. A keyed remount plays an entrance; nothing needs
+to wait for anything to leave.
 
 ## Progress is stages, never a percentage
 
