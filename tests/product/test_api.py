@@ -657,3 +657,70 @@ def _all_text(document: dict) -> list[str]:
         for slide in document["deck"]["slides"]
         for shape in slide["shapes"]
     ]
+
+
+class TestDeckAtAVersion:
+    """Comparing two versions needs both of them readable, not just the current one.
+
+    A before/after that reconstructed "before" by subtracting the diff from
+    "after" would be a second implementation of the diff, and the two would
+    eventually disagree about the one thing they exist to agree on.
+    """
+
+    def _edit(self, client, document) -> None:
+        slide, target = table_target(document)
+        client.post(
+            f"/api/documents/{document['id']}/propose",
+            json={"sets": [{"slide": slide, "target": target,
+                            "op": "set_table_cell", "after": "11.8x"}]},
+        )
+        client.post(f"/api/documents/{document['id']}/review", json={"approve_all": True})
+        client.post(f"/api/documents/{document['id']}/apply", json={})
+
+    def test_defaults_to_the_current_version(self, client):
+        document = open_document(client)
+        body = client.get(f"/api/documents/{document['id']}/deck").json()
+        assert body["slides"] == document["deck"]["slides"]
+
+    def test_an_earlier_version_still_reads_as_it_was(self, client):
+        document = open_document(client)
+        original = document["deck"]
+        self._edit(client, document)
+
+        before = client.get(f"/api/documents/{document['id']}/deck?version=0").json()
+        after = client.get(f"/api/documents/{document['id']}/deck").json()
+
+        assert before["slides"] == original["slides"], "version 0 must not move"
+        assert after["slides"] != original["slides"], "the edit must be visible"
+
+    def test_an_unknown_version_says_which_exist(self, client):
+        document = open_document(client)
+        response = client.get(f"/api/documents/{document['id']}/deck?version=42")
+        assert response.status_code == 404
+        assert "no version 42" in response.json()["detail"]
+
+    def test_the_two_sides_of_a_comparison_agree_with_the_diff(self, client):
+        """The canvas and the delta list must not tell different stories.
+
+        Every shape the diff names as changed has to actually differ between the
+        two decks the canvas draws, or a reviewer sees a ring around something
+        that looks identical and stops believing the rings.
+        """
+        document = open_document(client)
+        self._edit(client, document)
+
+        before = client.get(f"/api/documents/{document['id']}/deck?version=0").json()
+        after = client.get(f"/api/documents/{document['id']}/deck?version=1").json()
+        deltas = client.get(
+            f"/api/documents/{document['id']}/diff?source=0&output=1"
+        ).json()["deltas"]
+        assert deltas, "the edit should have produced at least one delta"
+
+        def shape_of(deck, slide_number, shape_id):
+            slide = next(s for s in deck["slides"] if s["number"] == slide_number)
+            return next(s for s in slide["shapes"] if s["id"] == shape_id)
+
+        for delta in deltas:
+            old = shape_of(before, delta["slide"], delta["shape_id"])
+            new = shape_of(after, delta["slide"], delta["shape_id"])
+            assert old != new, f"diff names {delta['shape_id']} but the shapes match"

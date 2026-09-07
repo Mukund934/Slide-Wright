@@ -33,7 +33,7 @@ from slide_wright.audit import audit as audit_deck
 from slide_wright.brand import plan_conformance, read_profile
 from slide_wright.changeset import ChangeSet
 from slide_wright.diff import diff
-from slide_wright.inspect import EMU_PER_INCH
+from slide_wright.inspect import EMU_PER_INCH, inspect
 from slide_wright.layout import DEFAULT_TOLERANCE_EMU, plan_alignment
 from slide_wright.session import Session, SessionError
 
@@ -42,6 +42,7 @@ from slide_wright_api.contracts import (
     ApplyRequest,
     AuditOut,
     ChangeSetOut,
+    DeckOut,
     DocumentOut,
     ExportRequest,
     OpenRequest,
@@ -190,6 +191,20 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
             raise HTTPException(422, "There is nothing to tidy in this deck.")
         changeset.save(session.workspace / "changes.json")
         return ChangeSetOut.of(changeset)
+
+    @app.get("/api/documents/{doc_id}/deck", response_model=DeckOut)
+    def deck_at(doc_id: str, version: int | None = None) -> DeckOut:
+        """The structure of one version, current by default.
+
+        Comparing two versions needs both of them drawn, and until now only the
+        current one could be. A before/after that reconstructs "before" by
+        subtracting the diff from "after" would be a second implementation of
+        the diff, and the two would eventually disagree about the thing they
+        exist to agree on.
+        """
+        session = _require(space, doc_id)
+        target = session.current if version is None else _version(session, version)
+        return DeckOut.of(inspect(target.path))
 
     @app.get("/api/documents/{doc_id}/history", response_model=list[VersionOut])
     def history(doc_id: str) -> list[VersionOut]:
