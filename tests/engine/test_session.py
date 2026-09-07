@@ -249,3 +249,65 @@ class TestExportGate:
 class TestAudit:
     def test_audit_runs_the_gate_on_the_current_version(self, session):
         assert session.audit().passed, "the corpus deck should pass cleanly"
+
+
+class TestProgress:
+    """Progress narration exists so a UI can say what is happening honestly.
+
+    A ten-minute apply behind a spinner is the shape of every AI tool that
+    asks to be trusted and gives no reason. These stages are the reason.
+    """
+
+    def test_reports_every_stage_of_a_successful_apply(self, session):
+        seen = []
+        cs = session.propose()
+        cs.add(cell_change(session))
+        cs.approve_all()
+        session.apply(on_progress=lambda stage, detail, **facts: seen.append(stage))
+
+        assert seen == ["applying", "applied", "verifying", "verified"]
+
+    def test_stages_carry_the_slides_they_touch(self, session):
+        facts = {}
+        cs = session.propose()
+        cs.add(cell_change(session))
+        cs.approve_all()
+        session.apply(
+            on_progress=lambda stage, detail, **kw: facts.setdefault(stage, kw)
+        )
+
+        assert facts["applying"]["slides"] == [3]
+        assert facts["applied"]["slides"] == [3]
+        assert facts["verified"]["version"] == 1
+
+    def test_a_refusal_is_announced_before_it_is_raised(self, session):
+        """The UI must be able to explain a refusal, not just show an error."""
+        seen = []
+        cs = session.propose()
+        change = cell_change(session)
+        change.target = "9999"  # no such shape
+        cs.add(change)
+        cs.approve_all()
+        with pytest.raises(SessionError):
+            session.apply(on_progress=lambda stage, detail, **kw: seen.append(stage))
+
+        assert seen[-1] == "refused"
+
+    def test_a_broken_listener_does_not_break_the_edit(self, session):
+        """The version is already on disk. Nobody watching is not a failure."""
+        def explode(*args, **kwargs):
+            raise RuntimeError("the client closed the tab")
+
+        cs = session.propose()
+        cs.add(cell_change(session))
+        cs.approve_all()
+        report = session.apply(on_progress=explode)
+
+        assert report.deliverable
+        assert session.current.number == 1
+
+    def test_no_listener_is_the_default_and_costs_nothing(self, session):
+        cs = session.propose()
+        cs.add(cell_change(session))
+        cs.approve_all()
+        assert session.apply().deliverable

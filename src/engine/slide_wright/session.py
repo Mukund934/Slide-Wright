@@ -27,6 +27,7 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from slide_wright.apply import ApplyError, ApplyResult, apply_changes
 from slide_wright.changeset import Change, ChangeSet, Status
@@ -39,6 +40,31 @@ from slide_wright.report import ChangeReport, RequestedChange, build
 
 class SessionError(Exception):
     """The session refused to proceed. Always preferable to a silent bad deck."""
+
+
+# Called with (stage, human-readable detail, **facts). Stages are:
+#   applying · applied · verifying · verified · blocked · refused
+Progress = Callable[..., None]
+
+
+def _emitter(on_progress: Progress | None) -> Progress:
+    """Wrap a progress callback so it cannot take the apply down with it.
+
+    The listener is a display concern -- an SSE stream whose client closed the
+    tab, most often. An edit that has already written a file must not fail
+    because nobody is watching it; the version would be on disk with the
+    session believing it never happened.
+    """
+    if on_progress is None:
+        return lambda *args, **kwargs: None
+
+    def emit(stage: str, detail: str = "", **facts) -> None:
+        try:
+            on_progress(stage, detail, **facts)
+        except Exception:  # noqa: BLE001 - a broken listener is not a broken edit
+            pass
+
+    return emit
 
 
 @dataclass
@@ -184,13 +210,21 @@ class Session:
 
     # ── apply / verify ───────────────────────────────────────────────────────
 
-    def apply(self, note: str = "") -> ChangeReport:
+    def apply(self, note: str = "", on_progress: Progress | None = None) -> ChangeReport:
         """Apply approved changes, verify the result, and commit a version.
 
         The new version is committed only if verification passes. A blocked
         result leaves the session on its previous version and the output on
         disk for inspection.
+
+        `on_progress` is called as each stage begins and ends. It exists because
+        applying and verifying a real deck takes minutes, and a caller with a
+        person waiting needs to say what is happening. Every stage reported is
+        one that actually occurs -- there is no interpolated percentage, because
+        the engine does not know how long a stage will take and a made-up number
+        is the specific dishonesty this product exists to avoid.
         """
+        emit = _emitter(on_progress)
         cs = self.require_changeset()
         if not cs.approved:
             raise SessionError("no approved changes; approve some first")
@@ -199,9 +233,12 @@ class Session:
         # a number whose file is still on disk, overwriting real history.
         number = self.next_number
         target = self.workspace / f"v{number:03d}-edited.pptx"
+        emit("applying", f"writing {len(cs.approved)} approved change(s)",
+             slides=sorted(cs.target_slides))
         try:
             result: ApplyResult = apply_changes(self.current.path, cs, target)
         except ApplyError as exc:
+            emit("refused", str(exc))
             raise SessionError(f"apply refused: {exc}") from exc
 
         # A change that could not be written is a failure, not a quiet no-op.
@@ -210,15 +247,21 @@ class Session:
         # outcome, because it looks like success.
         if result.failed:
             detail = "; ".join(f"{c.id}: {why}" for c, why in result.failed)
+            emit("refused", f"{len(result.failed)} change(s) could not be applied")
             raise SessionError(f"{len(result.failed)} change(s) could not be applied: {detail}")
         if not result.applied:
+            emit("refused", "nothing was written")
             raise SessionError("no changes were applied; refusing to commit a no-op version")
 
+        emit("applied", f"{len(result.applied)} change(s) written",
+             slides=sorted(cs.applied_slides))
+        emit("verifying", "comparing every part against the file you supplied")
         report = self.verify(self.current.path, target, cs)
         self.last_report = report
 
         if not report.deliverable:
             # Keep the artifact for inspection; do not advance the session.
+            emit("blocked", "; ".join(report.blocking_reasons))
             return report
 
         self.versions.append(
@@ -232,6 +275,7 @@ class Session:
         )
         self.next_number = number + 1
         self._commit_history()
+        emit("verified", f"version {number} committed", version=number)
         return report
 
     def verify(
