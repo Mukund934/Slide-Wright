@@ -142,17 +142,22 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
     # ── tidy ─────────────────────────────────────────────────────────────────
 
     @app.get("/api/documents/{doc_id}/tidy", response_model=TidyPlanOut)
-    def tidy_plan(doc_id: str) -> TidyPlanOut:
-        """What a tidy pass would change. Proposes nothing and writes nothing."""
+    def tidy_plan(doc_id: str, template: str = "") -> TidyPlanOut:
+        """What a tidy pass would change. Proposes nothing and writes nothing.
+
+        With no template the deck conforms to its own theme; with one, to the
+        house standard that template declares.
+        """
         session = _require(space, doc_id)
-        conformance, alignment = _plan_tidy(session)
+        conformance, alignment, profile = _plan_tidy(session, template)
         return TidyPlanOut(
             typefaces=len(conformance.changes),
             nudges=len(alignment.changes),
             tolerance_in=alignment.tolerance_emu / EMU_PER_INCH,
             worst_shift_in=alignment.worst_shift_emu / EMU_PER_INCH,
             skipped=[*conformance.skipped, *alignment.skipped],
-            conforms_to="the deck's own theme",
+            conforms_to=profile.source if template else "the deck's own theme",
+            fonts=sorted(profile.fonts),
         )
 
     @app.post("/api/documents/{doc_id}/tidy", response_model=ChangeSetOut)
@@ -169,7 +174,7 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
         by the same path as everything else.
         """
         session = _require(space, doc_id)
-        conformance, alignment = _plan_tidy(session)
+        conformance, alignment, _ = _plan_tidy(session, body.template)
 
         changeset = session.propose(f"tidy {session.source.name}")
 
@@ -459,13 +464,24 @@ def _read_sources(paths: list[str]) -> tuple[SourceSet, list[str]]:
     return sources, names
 
 
-def _plan_tidy(session: Session):
+def _plan_tidy(session: Session, template: str = ""):
     """Everything a tidy pass would correct, planned and nothing written.
 
-    The deck's own theme is the authority, not a supplied template. That is the
-    right default rather than a fallback: a deck assembled from several sources
-    has a visual system of its own, and the pasted-in slides are the ones that
-    depart from it.
+    With no template the deck's own theme is the authority. That is the right
+    default rather than a fallback: a deck assembled from several sources has a
+    visual system of its own, and the pasted-in slides are the ones that depart
+    from it.
+
+    With a template it becomes the house standard instead, which is the other
+    real workflow -- an inherited deck that has to end up looking like ours.
+    Both read the theme part rather than any slide, because the theme is what a
+    template *declares* and a slide may already have drifted from it.
+
+    Either way the profile comes from a file the user chose. The deck's own is
+    read from `session.source` rather than the workspace snapshot: the theme is
+    identical, but every change carries the profile's name as its citation, and
+    citing `v000-original.pptx` names an internal artifact nobody would
+    recognise.
 
     The tolerance is the planner's default, which is also what `tidy` and
     `align` use on the command line and what the audit reports against. If the
@@ -474,13 +490,39 @@ def _plan_tidy(session: Session):
     """
     deck = session.deck()
     name = session.source.name
-    # The profile is read from the file the user opened, not from the workspace
-    # snapshot. The theme is identical either way, but every change carries the
-    # source's name as its citation -- and citing `v000-original.pptx` names an
-    # internal artifact the user never chose and would not recognise.
-    conformance = plan_conformance(deck, read_profile(session.source), name)
+    authority = _template_path(template) if template else session.source
+    try:
+        profile = read_profile(authority)
+    except Exception as exc:  # noqa: BLE001 - a bad template must not 500
+        raise HTTPException(
+            422, f"{Path(authority).name} could not be read as a template: {exc}"
+        ) from exc
+
+    conformance = plan_conformance(deck, profile, name)
     alignment = plan_alignment(deck, DEFAULT_TOLERANCE_EMU, name)
-    return conformance, alignment
+    return conformance, alignment, profile
+
+
+def _template_path(raw: str) -> Path:
+    """Resolve a template path, refusing anything that is not one.
+
+    A `.potx` or a `.pptx`: PowerPoint's own distinction is whether the file
+    opens as a copy, and the theme part this reads is identical in both. Plenty
+    of house standards are circulated as an ordinary deck, so refusing `.pptx`
+    would refuse the common case.
+    """
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve()
+    if not path.is_file():
+        raise HTTPException(422, f"no file at {path}")
+    if path.suffix.lower() not in (".potx", ".pptx"):
+        raise HTTPException(
+            422,
+            f"{path.name} is not a PowerPoint template. A .potx or a .pptx "
+            "carries the theme this needs; nothing else does.",
+        )
+    return path
 
 
 def _guard(call):

@@ -368,7 +368,11 @@ class TidyPlanOut(BaseModel):
     tolerance_in: float
     worst_shift_in: float
     skipped: list[str] = Field(default_factory=list)
+    # Which authority is being conformed to, named. "the deck's own theme" and
+    # "House.potx" produce very different changes, and a panel showing only a
+    # count could not tell a reviewer which one they were about to approve.
     conforms_to: str
+    fonts: list[str] = Field(default_factory=list)
 
 
 # ── verification ─────────────────────────────────────────────────────────────
@@ -594,6 +598,10 @@ class TidyRequest(BaseModel):
     """
 
     locks: list[LockSpec] = Field(default_factory=list)
+    # A .potx or .pptx to conform to. Empty means the deck's own theme, which is
+    # the right default for a deck assembled from several sources — it already
+    # has a visual system, and the pasted-in slides are what departs from it.
+    template: str = ""
 
 
 class RevertRequest(BaseModel):

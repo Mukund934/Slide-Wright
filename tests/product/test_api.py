@@ -881,3 +881,87 @@ class TestRefresh:
         )
         assert response.status_code == 422
         assert "could not be read" in response.json()["detail"]
+
+
+class TestTemplateConformance:
+    """Conform an inherited deck to a house standard rather than to itself.
+
+    The other real workflow. With no template a deck's own theme is the
+    authority, which is right for something assembled from several sources; with
+    one, the standard it has to end up matching becomes the authority instead.
+    """
+
+    @pytest.fixture
+    def client(self, tmp_path, untidy_deck):
+        app = create_app(workspace=Workspace(), serve_client=False)
+        with TestClient(app) as test_client:
+            test_client.deck = _stage(untidy_deck, tmp_path)
+            yield test_client
+
+    def test_the_decks_own_theme_is_named_as_the_default(self, client):
+        document = open_document(client)
+        plan = client.get(f"/api/documents/{document['id']}/tidy").json()
+        assert plan["conforms_to"] == "the deck's own theme"
+
+    def test_a_template_becomes_the_authority_and_is_named(self, client, adversarial_deck):
+        """Naming it matters more than it looks.
+
+        "the deck's own theme" and "House.pptx" produce different changes, and a
+        reviewer approving two hundred typeface corrections needs to know which
+        standard they are approving.
+        """
+        document = open_document(client)
+        plan = client.get(
+            f"/api/documents/{document['id']}/tidy",
+            params={"template": str(adversarial_deck)},
+        ).json()
+
+        assert plan["conforms_to"] == adversarial_deck.name
+        assert plan["conforms_to"] != "the deck's own theme"
+
+    def test_the_template_fonts_are_reported(self, client, adversarial_deck):
+        document = open_document(client)
+        plan = client.get(
+            f"/api/documents/{document['id']}/tidy",
+            params={"template": str(adversarial_deck)},
+        ).json()
+        assert isinstance(plan["fonts"], list)
+
+    def test_every_change_cites_whichever_authority_produced_it(
+        self, client, adversarial_deck
+    ):
+        """A citation naming the wrong file is worse than none.
+
+        The reviewer would check the change against a standard that did not
+        produce it, and find it reasonable.
+        """
+        document = open_document(client)
+        body = client.post(
+            f"/api/documents/{document['id']}/tidy",
+            json={"template": str(adversarial_deck)},
+        ).json()
+
+        fonts = [c for c in body["changes"] if c["op"] == "set_font"]
+        assert fonts, "the untidy deck hardcodes typefaces and should be corrected"
+        for change in fonts:
+            assert change["citation"] == adversarial_deck.name
+
+    def test_a_template_that_is_not_a_deck_is_refused(self, client, tmp_path):
+        junk = tmp_path / "house.txt"
+        junk.write_text("brand guidelines", encoding="utf-8")
+        document = open_document(client)
+
+        response = client.get(
+            f"/api/documents/{document['id']}/tidy", params={"template": str(junk)}
+        )
+        assert response.status_code == 422
+        assert "not a PowerPoint template" in response.json()["detail"]
+
+    def test_a_missing_template_is_refused_by_name(self, client, tmp_path):
+        document = open_document(client)
+        response = client.get(
+            f"/api/documents/{document['id']}/tidy",
+            params={"template": str(tmp_path / "House.potx")},
+        )
+        assert response.status_code == 422
+        assert "no file at" in response.json()["detail"]
