@@ -243,7 +243,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 572 tests
+python -m pytest tests -q          # 589 tests
 ```
 
 Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
@@ -286,12 +286,40 @@ is opened where it sits and is never uploaded.
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
+It opens on the **audit** — what is wrong with this deck — because that is what
+someone does first with a deck they inherited. Findings are split before
+anything else:
+
+```
+SLIDE-WRIGHT CAN CORRECT THESE          Deterministic; content is locked
+  consistency · deck    266 of 266 runs name a typeface directly
+  layout · slide 8,9,13  6 shapes sit within 0.02in of an edge others share
+  → 266 runs re-linked · 6 shapes snapped, largest movement 0.017in of 0.02in
+    [ Propose 272 corrections ]   proposes only; you review each one
+
+FOR YOU TO DECIDE                        Slide-Wright will not touch these
+  narrative · 26 slides   26 slide(s) have no title
+```
+
+There is **no score**. One number would compress "no slide title makes a claim"
+and "266 runs hardcode a typeface" into a figure that means neither. And the
+split is the engine's answer, not the interface's: a rule carries a remedy only
+when a deterministic pass can actually correct it, so the UI cannot offer a fix
+the engine will not perform.
+
+Measured on a real 26-slide NASA deck: **272 corrections applied, 0 unexpected
+changes, and 0 of them changed what the deck says** — 272 of 272 deltas are
+formatting, every native table, chart, workbook and text run intact.
+
 Three properties it is built to hold, each asserted by a test:
 
 - **Nothing is written before you approve it.** Proposing leaves the file
   byte-identical; the change set is the contract you read first.
 - **There is no green state unless the engine said `deliverable`.** No "verified
   with warnings" invented in the interface.
+- **A tidy proposes; it never applies.** The CLI approves its own change set,
+  which is right when you typed the command. A button that did both would be the
+  one place mutation happens without a person saying yes.
 - **No progress bar.** The engine does not know how long a stage takes, so the
   apply narrates the stages that actually happen rather than interpolating a
   number.
@@ -333,9 +361,9 @@ src/product/web/            the workspace client — React, TypeScript, Motion
   api/                      typed service layer, one origin, no second base URL
   design/                   primitives; none may wear the attention colour
   motion/                   three durations, two curves, one exception
-  workspace/                filmstrip · canvas · change set · result · history
+  workspace/                filmstrip · canvas · audit · change set · result · history
 docs/                       architecture, 10 ADRs, guides
-tests/                      572 engine and API tests, plus 54 in the client
+tests/                      589 engine and API tests, plus 69 in the client
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
 ```
