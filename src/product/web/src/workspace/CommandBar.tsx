@@ -98,7 +98,13 @@ export function CommandBar({
         })}
       </div>
 
-      <div className="flex items-end gap-2">
+      {/* Capped, not stretched.
+          The bar spans the window because it is a footer; its contents must
+          not. At 1920 the field ran to 1,822px with Propose pinned at the far
+          edge, so the eye travelled the whole window between typing a sentence
+          and confirming it. A prompt is a line of prose and wants the measure
+          of one. */}
+      <div className="flex max-w-3xl items-end gap-2">
         <textarea
           value={instruction}
           onChange={(event) => setInstruction(event.target.value)}

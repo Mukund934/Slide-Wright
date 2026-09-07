@@ -69,14 +69,24 @@ export function OpenDeck({
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: DURATION.deliberate, ease: EASE_OUT }}
-        className="w-full max-w-xl"
+        // Fluid rather than fixed. At 576px the block was right on a laptop and
+        // adrift on a 1920 monitor, where it took 30% of the width and read as
+        // small again -- the same composition problem as before, arriving from
+        // the other direction. Width and type both scale with the viewport, so
+        // there is no width at which this is the wrong size and no breakpoint
+        // where it jumps.
+        className="w-full"
+        style={{ maxWidth: "clamp(28rem, 45vw, 44rem)" }}
       >
         <p className="text-2xs uppercase tracking-[0.18em] text-ink-faint">Slide-Wright</p>
 
         {/* The promise is the largest thing on the page, because it is the only
             claim the product makes and the whole reason to trust it with a file
             that matters. */}
-        <h1 className="mt-2 text-xl font-medium leading-snug tracking-[-0.01em] text-ink">
+        <h1
+          className="mt-2 font-medium leading-snug tracking-[-0.015em] text-ink"
+          style={{ fontSize: "clamp(1.25rem, 1rem + 1vw, 2.25rem)" }}
+        >
           Change what you asked.
           <br />
           Preserve everything else.{" "}
@@ -90,7 +100,7 @@ export function OpenDeck({
             the same. */}
         <div
           className={[
-            "mt-7 rounded-lg border p-4 transition-colors duration-[220ms]",
+            "mt-7 rounded-lg border p-4 transition-colors duration-[220ms] 2xl:mt-9 2xl:p-5",
             over ? "border-changed bg-changed-wash" : "border-line-strong bg-panel",
           ].join(" ")}
         >
@@ -148,7 +158,7 @@ export function OpenDeck({
  */
 function Assurances() {
   return (
-    <ul className="mt-7 space-y-1.5 border-t border-line pt-4">
+    <ul className="mt-7 space-y-1.5 border-t border-line pt-4 2xl:mt-9">
       {[
         ["Opened where it sits", "versions are kept in a folder beside it"],
         ["Nothing is uploaded", "no telemetry, no crash reports, no samples"],

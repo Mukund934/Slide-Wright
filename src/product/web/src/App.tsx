@@ -68,7 +68,7 @@ export default function App() {
       />
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-36 shrink-0 flex-col border-r border-line bg-panel lg:w-44 xl:w-56">
+        <aside className="flex w-36 shrink-0 flex-col border-r border-line bg-panel lg:w-44 xl:w-56 2xl:w-64">
           <Filmstrip
             slides={workspace.document.deck.slides}
             selected={workspace.selectedSlide}
@@ -81,7 +81,13 @@ export default function App() {
           />
         </aside>
 
-        {/* The canvas is what needs width, so the canvas is what goes — but
+        {/* Above 1536 the side panels take a step wider rather than the canvas
+            taking every extra pixel. At 1920 the review panel was 17% of the
+            window while the slide had 72% and was already capped by height —
+            so the extra width was going somewhere it could not be used, and
+            findings were scrolling that did not need to.
+
+            The canvas is what needs width, so the canvas is what goes — but
             later than it used to. At 1024 the threshold was costing the canvas
             to every window that was not close to full screen, including the
             ordinary half-of-a-laptop case. The measurement that settled it: at
@@ -96,7 +102,7 @@ export default function App() {
           <Stage workspace={workspace} />
         </main>
 
-        <aside className="flex min-w-0 flex-1 flex-col border-l border-line bg-panel md:w-64 md:flex-none lg:w-72 xl:w-80">
+        <aside className="flex min-w-0 flex-1 flex-col border-l border-line bg-panel md:w-64 md:flex-none lg:w-72 xl:w-80 2xl:w-96">
           {!workspace.comparison && <Tabs tab={tab} onChange={setTab} />}
 
           <div
