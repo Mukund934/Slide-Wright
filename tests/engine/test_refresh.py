@@ -329,3 +329,53 @@ class TestHowAFigureIsWrittenSurvivesTheRefresh:
         change = plan.to_changeset("deck.pptx").changes[0]
         assert change.after == "$125"
         assert change.op is Op.SET_TABLE_CELL
+
+
+class TestATableTheEngineCannotReadIsSaidSoOutLoud:
+    """It used to vanish from the plan: no update, no refusal, no note.
+
+    The user saw "0 figures to update" and read it as the deck agreeing with the
+    source, when the engine had never looked at that table at all. On a feature
+    whose entire job is telling you which figures are still right, silence and
+    agreement must never look the same.
+
+    Not a rare shape, either. `ShapeInfo` flattens a table into runs, so a cell
+    holding one bold word is two runs and the count stops dividing on the first
+    table anyone has emphasised anything in.
+    """
+
+    def _deck(self, cells, rows, cols):
+        shape = table_shape([[""]])  # replaced below; only the id and kind matter
+        shape.runs = [TextRun(text=c) for c in cells]
+        shape.table_rows, shape.table_cols = rows, cols
+        return DeckInfo(
+            slide_width=W, slide_height=H,
+            slides=[SlideInfo(number=1, part_name="s1", shapes=[shape])],
+        )
+
+    def test_a_cell_split_by_formatting_is_reported(self, source):
+        plan = plan_refresh(
+            self._deck(["Company", "EV/EBITDA", "Alpha Corp", "9.", "4x"], 2, 2), source
+        )
+        assert plan.unmatched, "a table nobody could read must not be silent"
+        assert "could not be read" in plan.unmatched[0][2]
+
+    def test_it_says_what_it_counted_so_the_user_can_recognise_it(self, source):
+        plan = plan_refresh(
+            self._deck(["Company", "EV/EBITDA", "Alpha Corp", "9.", "4x"], 2, 2), source
+        )
+        why = plan.unmatched[0][2]
+        assert "5 text run(s)" in why and "2x2" in why and "4 were expected" in why
+
+    def test_a_merged_cell_is_reported_too(self, source):
+        plan = plan_refresh(self._deck(["Company", "EV/EBITDA", "Alpha Corp"], 2, 2), source)
+        assert plan.unmatched
+
+    def test_a_header_with_no_rows_says_that_rather_than_nothing(self, source):
+        plan = plan_refresh(self._deck(["Company", "EV/EBITDA"], 1, 2), source)
+        assert "nothing to look up" in plan.unmatched[0][2]
+
+    def test_a_table_it_can_read_produces_no_such_note(self, source):
+        plan = plan_refresh(deck_with_table(), source)
+        assert not any("could not be read" in why for _, _, why in plan.unmatched)
+        assert plan.updates

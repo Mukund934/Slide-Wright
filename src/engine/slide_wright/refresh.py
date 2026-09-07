@@ -246,7 +246,30 @@ def plan_refresh(deck: DeckInfo, sources: SourceSet) -> RefreshPlan:
 def _match_table(slide_no: int, shape: ShapeInfo, sources: SourceSet, plan: RefreshPlan) -> None:
     """Match one deck table against whichever source table shares its labels."""
     grid = _grid(shape)
+    if not grid:
+        # A table whose cells could not be reconstructed used to vanish from the
+        # plan entirely -- no update, no refusal, no note. The user saw
+        # "0 figures to update" and read it as the deck agreeing with the
+        # source, when the engine had never looked at that table.
+        #
+        # Not a rare shape either. `ShapeInfo` flattens a table into runs, and a
+        # cell with one bold word is two runs, so the count stops dividing on
+        # the first table anyone has emphasised anything in.
+        expected = (shape.table_rows or 0) * (shape.table_cols or 0)
+        plan.unmatched.append((
+            slide_no, shape.name or f"table {shape.id}",
+            f"this table's cells could not be read: {len(shape.runs)} text run(s) "
+            f"across a {shape.table_rows}x{shape.table_cols} grid, where "
+            f"{expected} were expected. A cell split by formatting -- one bold "
+            f"word -- does that. Nothing here was checked against the source"
+        ))
+        return
     if len(grid) < 2:
+        plan.unmatched.append((
+            slide_no, shape.name or f"table {shape.id}",
+            "this table has a header and no rows under it, so there is nothing "
+            "to look up"
+        ))
         return
     header = grid[0]
 
