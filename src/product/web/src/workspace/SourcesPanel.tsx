@@ -101,7 +101,7 @@ export function SourcesPanel({
             placeholder="C:\Users\you\comps.xlsx"
             spellCheck={false}
             aria-label="Path to a .csv or .xlsx on this machine"
-            className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 py-1.5 text-ink placeholder:text-ink-faint focus:border-changed-dim focus:outline-none"
+            className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 py-1.5 text-ink placeholder:text-ink-faint focus:border-ink-faint"
           />
           <Button onClick={() => void attach()} busy={reading} disabled={!path.trim()}>
             Attach

@@ -403,7 +403,7 @@ function Authority({
             placeholder={TEMPLATE_PLACEHOLDER}
             spellCheck={false}
             aria-label="Path to a .potx or .pptx to conform to"
-            className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-panel px-2 py-1 text-ink placeholder:text-ink-faint focus:border-changed-dim focus:outline-none"
+            className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-panel px-2 py-1 text-ink placeholder:text-ink-faint focus:border-ink-faint"
           />
           <Button onClick={() => onTemplate(draft.trim())}>Use</Button>
           {template && (

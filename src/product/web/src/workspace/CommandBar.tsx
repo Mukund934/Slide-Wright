@@ -121,7 +121,7 @@ export function CommandBar({
               : undefined
           }
           aria-label="Describe the change you want"
-          className="min-h-8 flex-1 resize-none rounded-md border border-line-strong bg-raised px-2.5 py-1.5 text-xs text-ink placeholder:text-ink-faint focus:border-changed-dim focus:outline-none disabled:opacity-50"
+          className="min-h-8 flex-1 resize-none rounded-md border border-line-strong bg-raised px-2.5 py-1.5 text-xs text-ink placeholder:text-ink-faint focus:border-ink-faint disabled:opacity-50"
         />
         <Button
           tone="primary"

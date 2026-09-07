@@ -135,7 +135,7 @@ export function Export({ documentId, version }: { documentId: string; version: n
                   onKeyDown={(event) => event.key === "Enter" && void write()}
                   spellCheck={false}
                   autoFocus
-                  className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 py-1.5 text-ink focus:border-changed-dim focus:outline-none"
+                  className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-2 py-1.5 text-ink focus:border-ink-faint"
                 />
                 <Button tone="primary" onClick={() => void write()} busy={busy}>
                   Write

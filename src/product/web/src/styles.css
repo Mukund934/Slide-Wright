@@ -118,15 +118,27 @@
 
   /* One focus treatment, applied once. A keyboard user must always be able to
      see where they are; the reference makes this non-negotiable and so does
-     anyone driving a review with the keyboard. */
+     anyone driving a review with the keyboard.
+
+     Ink, not the attention colour. The rule at the top of this file says that
+     colour means "this changed" and nothing else may use it — and a focus ring
+     wearing it would put the changed colour on every control a keyboard user
+     passes through, which is most of them. Ink is the highest-contrast neutral
+     on this ground and unmistakable without spending the one reserved signal.
+
+     No border-radius here either: setting it changed the *shape* of whatever
+     was focused, so a rounded-lg panel squared off the moment you tabbed into
+     it. The outline follows the element's own radius on its own. */
   :focus-visible {
-    outline: 2px solid var(--color-changed);
+    outline: 2px solid var(--color-ink);
     outline-offset: 2px;
-    border-radius: var(--radius-sm);
   }
 
+  /* Neutral, not the attention colour. Selecting text is not a change, and on
+     the review panel — where changed things already wear that colour — a
+     selection in it would be genuinely ambiguous. */
   ::selection {
-    background: var(--color-changed-wash);
+    background: color-mix(in oklab, var(--color-ink), transparent 82%);
   }
 
   /* Scrollbars are furniture. They should be visible when used and invisible

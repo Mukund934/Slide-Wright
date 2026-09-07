@@ -83,6 +83,11 @@ export function OpenDeck({
           <span className="text-ink-faint">Prove it.</span>
         </h1>
 
+        {/* The drop highlight is the one place outside the workspace that wears
+            the attention colour, and it is a deliberate carve-out rather than a
+            lapse: this screen has no deck open, so it has no "changed" anything
+            for the colour to be confused with. Nowhere past this point may do
+            the same. */}
         <div
           className={[
             "mt-7 rounded-lg border p-4 transition-colors duration-[220ms]",
@@ -104,7 +109,7 @@ export function OpenDeck({
               placeholder="C:\Users\you\Documents\Pitchbook_v9.pptx"
               spellCheck={false}
               autoFocus
-              className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-3 py-2 text-ink placeholder:text-ink-faint focus:border-changed-dim focus:outline-none"
+              className="text-evidence min-w-0 flex-1 rounded-md border border-line-strong bg-raised px-3 py-2 text-ink placeholder:text-ink-faint focus:border-ink-faint"
             />
             <Button tone="primary" onClick={submit} busy={busy} disabled={!path.trim()}>
               Open

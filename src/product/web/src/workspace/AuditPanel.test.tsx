@@ -232,7 +232,8 @@ describe("which standard is being conformed to", () => {
     // changes. A reviewer approving 266 corrections needs to know which.
     mount(fixable, plan({ conforms_to: "House.potx", fonts: ["Calibri", "Georgia"] }));
     expect(await screen.findByText("House.potx")).toBeInTheDocument();
-    expect(screen.getByText(/Calibri, Georgia/)).toBeInTheDocument();
+    // Separated with the middot the rest of the app uses between facts.
+    expect(screen.getByText(/Calibri · Georgia/)).toBeInTheDocument();
   });
 
   it("defaults to the deck's own theme and offers a template", async () => {

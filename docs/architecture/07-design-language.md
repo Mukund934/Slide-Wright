@@ -26,6 +26,19 @@ means it came back false. Amber means a model proposed something and cited
 nothing. The moment a green pill means "nice" somewhere, it stops meaning
 "checked" everywhere.
 
+The rule is easier to state than to hold. Three places broke it before anyone
+noticed, all of them plausible at the time:
+
+| Broke it | Why it was wrong | Now |
+|---|---|---|
+| The focus ring | Put the changed colour on every control a keyboard user passes through, which is most of them | Ink — the highest-contrast neutral, unmistakable without spending the reserved signal |
+| `::selection` | On the review panel, changed rows already wear that colour; a selection in it is genuinely ambiguous | A neutral ink wash |
+| Input focus borders | Used the attention colour to mean "focused" | Neutral; the outline does the work |
+
+One carve-out stands, stated rather than assumed: the drop target on the
+first-run screen. That screen has no deck open, so it has no *changed* anything
+for the colour to be confused with. Nowhere past it may do the same.
+
 ## Surfaces
 
 Five levels, each a real surface rather than a shade to choose from: `ground`
@@ -88,6 +101,20 @@ you about itself; one that travels 4px is telling you it arrived.
 `prefers-reduced-motion` is honoured from the first commit rather than
 retrofitted, and every animation resolves to its correct final state instantly
 rather than being skipped.
+
+**Exit animations are not used for popovers, alerts or list rows.** That is a
+correctness rule, not a taste one. An `AnimatePresence` exit that failed to
+complete left the export panel mounted at `opacity: 0` with its input still in
+the tab order — a keyboard user could tab into a dialog that had been closed —
+and the same shape left a dismissed error alert in the tree, where zero opacity
+hides nothing at all from a screen reader.
+
+Both were invisible to the component tests, which pass in jsdom because jsdom
+completes the exit and the browser did not. The fix was to remove the animation
+rather than repair it: it was carrying no information, and a popover that simply
+goes is what every tool does and what the reader expects. Motion that does no
+work and costs correctness is not a trade worth making. Entrances stay, because
+they say *this arrived*.
 
 ## Progress is stages, never a percentage
 
