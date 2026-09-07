@@ -238,7 +238,7 @@ class TestExportGate:
         session.apply()
         # Simulate verification having failed on the last apply.
         session.last_report.fidelity.output_census.tables = 0
-        with pytest.raises(SessionError, match="failed verification"):
+        with pytest.raises(SessionError, match="was blocked"):
             session.export(tmp_path / "leak.pptx")
 
     def test_original_can_always_be_exported(self, session, tmp_path):
@@ -311,3 +311,168 @@ class TestProgress:
         cs.add(cell_change(session))
         cs.approve_all()
         assert session.apply().deliverable
+
+
+def a_moveable_shape(session: Session):
+    """A shape with a box of its own, so a MOVE has somewhere to land."""
+    for slide in session.deck().slides:
+        for shape in slide.shapes:
+            if (shape.x is not None and not shape.geometry_inherited
+                    and shape.kind not in ("chart", "table")):
+                return slide.number, shape
+    pytest.skip("fixture has no independently positioned shape")
+
+
+def nudge(session: Session, number: int, shape, dx: int, cid="m1") -> Change:
+    return Change(id=cid, op=Op.MOVE, slide=number, target=shape.id,
+                  before=(shape.x, shape.y), after=(shape.x + dx, shape.y))
+
+
+class TestAChangeSetDescribesOneVersion:
+    """Every `before` in a change set was read from a particular file.
+
+    The applier writes against whatever is current, so a set that outlives its
+    parent writes coordinates and replacements computed from a version nobody
+    is looking at any more — and the report calls it verified, because the
+    slides it touched are exactly the slides it said it would touch.
+
+    Measured before the check: propose against v000, apply (v001 committed, set
+    still live), add one more move to the same set and apply again. The shape
+    landed on `original + 200000` rather than `current + 200000`, discarding
+    v001's own edit in silence.
+    """
+
+    def test_a_committed_set_is_closed(self, session):
+        number, shape = a_moveable_shape(session)
+        cs = session.propose("nudge")
+        cs.add(nudge(session, number, shape, 100_000))
+        cs.approve_all()
+        session.apply("v1")
+        assert session.changeset is None
+
+    def test_reusing_one_is_refused_and_says_which_version(self, session):
+        number, shape = a_moveable_shape(session)
+        cs = session.propose("nudge")
+        cs.add(nudge(session, number, shape, 100_000))
+        cs.approve_all()
+        session.apply("v1")
+
+        session.changeset = cs            # as a caller holding a reference would
+        cs.add(nudge(session, number, shape, 200_000, cid="m2"))
+        cs.approve_all()
+        with pytest.raises(SessionError, match="v000-original"):
+            session.apply("again")
+
+    def test_a_blocked_set_is_kept(self, session, monkeypatch):
+        """The user's work, and they may want to adjust it rather than redo it."""
+        cs = session.propose("edit")
+        cs.add(cell_change(session))
+        cs.approve_all()
+        monkeypatch.setattr(
+            "slide_wright.report.ChangeReport.deliverable", property(lambda self: False)
+        )
+        session.apply("blocked")
+        assert session.changeset is cs
+
+    def test_proposing_again_clears_a_blocked_verdict(self, session, monkeypatch):
+        """A blocked apply never advances the session, so the current version
+        passed verification — but the standing verdict went on refusing to let
+        it out, with no way forward but a rollback nobody would think of."""
+        cs = session.propose("edit")
+        cs.add(cell_change(session))
+        cs.approve_all()
+        monkeypatch.setattr(
+            "slide_wright.report.ChangeReport.deliverable", property(lambda self: False)
+        )
+        session.apply("blocked")
+        monkeypatch.undo()
+
+        session.propose("start over")
+        assert session.last_report is None
+
+
+class TestTwoSessionsOverOneWorkspace:
+    """Version numbers are handed out from a session's own view of history.
+
+    Two sessions on one workspace both hand out the same number, write the same
+    filename, and the later write wins. Measured: each committed "version 1",
+    each believed it held its own edit, and the file on disk was one of them.
+    Neither was told, and a third session reading the workspace saw a history
+    that described the loser's work and a file containing the winner's.
+
+    Loopback and local is not the same as single-user: a CLI run beside the app,
+    or two browser tabs, is the ordinary case.
+    """
+
+    def _second(self, session, adversarial_deck):
+        return Session.open(adversarial_deck, workspace=session.workspace)
+
+    def test_the_second_session_is_refused_not_silently_merged(
+        self, session, adversarial_deck
+    ):
+        other = self._second(session, adversarial_deck)
+        number, shape = a_moveable_shape(session)
+
+        cs = session.propose("first")
+        cs.add(nudge(session, number, shape, 100_000))
+        cs.approve_all()
+        session.apply("first")
+
+        cs2 = other.propose("second")
+        cs2.add(nudge(other, number, shape, 500_000))
+        cs2.approve_all()
+        with pytest.raises(SessionError, match="changed since this session opened it"):
+            other.apply("second")
+
+    def test_the_first_session_s_work_survives(self, session, adversarial_deck):
+        other = self._second(session, adversarial_deck)
+        number, shape = a_moveable_shape(session)
+
+        cs = session.propose("first")
+        cs.add(nudge(session, number, shape, 100_000))
+        cs.approve_all()
+        session.apply("first")
+
+        cs2 = other.propose("second")
+        cs2.add(nudge(other, number, shape, 500_000))
+        cs2.approve_all()
+        with pytest.raises(SessionError):
+            other.apply("second")
+
+        reopened = Session.open(adversarial_deck, workspace=session.workspace)
+        landed = next(s for s in inspect(reopened.current.path).slides[number - 1].shapes
+                      if s.id == shape.id)
+        assert landed.x == shape.x + 100_000
+
+    def test_rollback_is_guarded_too(self, session, adversarial_deck):
+        """It rewrites history, so it can discard another session's versions
+        just as an apply can overwrite them."""
+        other = self._second(session, adversarial_deck)
+        number, shape = a_moveable_shape(session)
+
+        cs = session.propose("first")
+        cs.add(nudge(session, number, shape, 100_000))
+        cs.approve_all()
+        session.apply("first")
+
+        with pytest.raises(SessionError, match="changed since this session opened it"):
+            other.rollback(0)
+
+    def test_two_sessions_that_agree_are_left_alone(self, adversarial_deck, tmp_path):
+        """The check must not fire on a state both sides actually share.
+
+        Two sessions opening the same fresh workspace both write version 0.
+        Fingerprinting the file's bytes would have them differ by a second on
+        `created_at` and refuse each other over nothing.
+        """
+        ws = tmp_path / "shared"
+        first = Session.open(adversarial_deck, workspace=ws)
+        second = Session.open(adversarial_deck, workspace=ws)
+        number, shape = a_moveable_shape(second)
+
+        cs = second.propose("only edit")
+        cs.add(nudge(second, number, shape, 100_000))
+        cs.approve_all()
+        second.apply("fine")
+        assert [v.number for v in second.versions] == [0, 1]
+        assert first.current.number == 0

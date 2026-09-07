@@ -324,6 +324,40 @@ class TestApplyStream:
         assert result["deliverable"] is True
 
     def test_a_refusal_arrives_as_an_error_event_not_a_dropped_stream(self, client):
+        """A stream that just stops is indistinguishable from a lost connection.
+
+        The refusal has to arrive *as an event*, so a client can tell "the
+        engine said no" from "the network went away" -- one of those is worth
+        retrying and the other never is.
+        """
+        document = open_document(client)
+        slide, _ = table_target(document)
+        # A change set that exists but holds nothing approvable: the propose is
+        # rejected, and the empty set is what the apply then refuses.
+        client.post(
+            f"/api/documents/{document['id']}/propose",
+            json={"sets": [{"slide": slide, "target": "9999",
+                            "op": "set_text", "after": "x"}]},
+        )
+        client.post(f"/api/documents/{document['id']}/review", json={"approve_all": True})
+
+        with client.stream(
+            "POST", f"/api/documents/{document['id']}/apply/stream", json={}
+        ) as response:
+            assert response.status_code == 200
+            events = _parse_sse("".join(response.iter_text()))
+
+        assert events[-1][0] == "error"
+        assert events[-1][1]["message"]
+
+    def test_applying_twice_needs_a_new_proposal(self, client):
+        """A change set describes the version it was built against.
+
+        Once applied it describes the *previous* version, and every `before` in
+        it was read from a file that is no longer current. Reusing it wrote
+        coordinates computed against the wrong version and still reported
+        VERIFIED, because the slide was in the change set.
+        """
         document = open_document(client)
         slide, target = table_target(document)
         client.post(
@@ -331,17 +365,12 @@ class TestApplyStream:
             json={"sets": [{"slide": slide, "target": target,
                             "op": "set_table_cell", "after": "11.8x"}]},
         )
-        # Approved, then applied once; the second apply has nothing left to do.
         client.post(f"/api/documents/{document['id']}/review", json={"approve_all": True})
-        client.post(f"/api/documents/{document['id']}/apply", json={})
+        assert client.post(f"/api/documents/{document['id']}/apply", json={}).status_code == 200
 
-        with client.stream(
-            "POST", f"/api/documents/{document['id']}/apply/stream", json={}
-        ) as response:
-            events = _parse_sse("".join(response.iter_text()))
-
-        assert events[-1][0] == "error"
-        assert events[-1][1]["message"]
+        again = client.post(f"/api/documents/{document['id']}/apply", json={})
+        assert again.status_code == 422
+        assert "proposed" in again.json()["detail"]
 
 
 class TestHistoryAndRevert:
@@ -1048,7 +1077,7 @@ class TestExportRefusesTheSideDoor:
 
         response = client.post(f"/api/documents/{document['id']}/export", json={})
         assert response.status_code == 422
-        assert "failed verification" in response.json()["detail"]
+        assert "blocked" in response.json()["detail"]
 
 
 class TestAWorkspaceThatWentAway:

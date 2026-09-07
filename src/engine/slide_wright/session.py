@@ -93,6 +93,13 @@ class Session:
     last_report: ChangeReport | None = None
     next_number: int = 1
 
+    # What history.json said the last time this session read or wrote it. A
+    # second session over the same workspace hands out the same version number,
+    # writes the same filename, and the later write wins -- measured: two
+    # sessions each committed "version 1", both believed they held their own
+    # edit, and the file on disk was one of them. Neither was told.
+    _history_seen: tuple | None = field(default=None, repr=False)
+
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     @classmethod
@@ -161,6 +168,46 @@ class Session:
         self.next_number = max(
             saved.get("next_number", 0), max(v.number for v in versions) + 1
         )
+        self._history_seen = self._fingerprint()
+
+    def _fingerprint(self) -> tuple | None:
+        """What the workspace holds, ignoring anything two sessions could
+        legitimately disagree about.
+
+        Numbers and filenames only -- not timestamps or notes. Two sessions
+        opening the same fresh workspace both write version 0 and would differ
+        by the second on `created_at`, and refusing on that would be a false
+        alarm about a state they actually agree on.
+        """
+        if not self._history_file.is_file():
+            return None
+        try:
+            saved = json.loads(self._history_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return (
+            saved.get("next_number"),
+            tuple((v.get("number"), v.get("file")) for v in saved.get("versions", [])),
+        )
+
+    def _assert_workspace_unmoved(self) -> None:
+        """Refuse to write over a version another session created.
+
+        This narrows the race rather than eliminating it: two processes could
+        still pass this check within the same instant and both write. It is
+        checked immediately before committing, which is the last moment the
+        answer is still useful, and it catches the case that actually happens --
+        two long-lived sessions on one workspace, a CLI run beside the app.
+        """
+        current = self._fingerprint()
+        if current == self._history_seen:
+            return
+        raise SessionError(
+            "the workspace changed since this session opened it -- another "
+            "session or a CLI run has written to it. Reopen the deck to "
+            "continue; committing now would overwrite that work without "
+            "either side being told."
+        )
 
     def _commit_history(self) -> None:
         self._history_file.write_text(
@@ -181,6 +228,7 @@ class Session:
             ),
             encoding="utf-8",
         )
+        self._history_seen = self._fingerprint()
 
     # ── inspection ───────────────────────────────────────────────────────────
 
@@ -201,6 +249,11 @@ class Session:
     def propose(self, instruction: str = "") -> ChangeSet:
         """Start a change set. Changes are added by a planner, then reviewed."""
         self.changeset = ChangeSet(deck=str(self.current.path), instruction=instruction)
+        # Starting a new set abandons whatever the last one was blocked on. Left
+        # standing, that verdict went on refusing every export -- of a version
+        # that had itself passed verification, because a blocked apply never
+        # advances the session.
+        self.last_report = None
         return self.changeset
 
     def require_changeset(self) -> ChangeSet:
@@ -228,6 +281,25 @@ class Session:
         cs = self.require_changeset()
         if not cs.approved:
             raise SessionError("no approved changes; approve some first")
+
+        # A change set describes one version. Every change carries a `before`
+        # read from that version, and the applier writes against whatever is
+        # current -- so a set that outlived its parent writes coordinates and
+        # replacements computed from a file nobody is looking at any more.
+        #
+        # Measured: propose against v000, apply (v001 committed, set still
+        # live), add one more move to the same set and apply again. The shape
+        # went to `original + 200000` rather than `current + 200000`, silently
+        # discarding v001's own edit -- and the report said VERIFIED, because
+        # the slide was in the change set and every part was accounted for.
+        if Path(cs.deck).resolve() != self.current.path.resolve():
+            raise SessionError(
+                f"this change set was built against {Path(cs.deck).name} and the "
+                f"session is on {self.current.path.name}. Propose again: its "
+                "changes describe a version that is no longer current."
+            )
+
+        self._assert_workspace_unmoved()
 
         # Never derived from len(versions): after a rollback that would reuse
         # a number whose file is still on disk, overwriting real history.
@@ -274,7 +346,15 @@ class Session:
             )
         )
         self.next_number = number + 1
+        self._assert_workspace_unmoved()
         self._commit_history()
+
+        # Closed on commit, not on a blocked result. A blocked set is still the
+        # user's work and they may want to adjust it; a committed one describes
+        # the previous version and is refused above if it is used again. Saying
+        # so here is clearer than letting them find out at the next apply.
+        self.changeset = None
+
         emit("verified", f"version {number} committed", version=number)
         return report
 
@@ -305,6 +385,9 @@ class Session:
         if index is None:
             have = ", ".join(str(v.number) for v in self.versions)
             raise SessionError(f"no version {to}; have {have}")
+        # Rewrites history, so it can discard another session's versions just
+        # as an apply can overwrite them.
+        self._assert_workspace_unmoved()
         # Discarded artifacts stay on disk. They are evidence, they cost
         # nothing, and their numbers will never be handed out again.
         self.versions = self.versions[: index + 1]
@@ -321,8 +404,10 @@ class Session:
         """
         if self.last_report is not None and not self.last_report.deliverable:
             raise SessionError(
-                "current state failed verification and cannot be exported: "
-                + "; ".join(self.last_report.blocking_reasons)
+                "the last apply was blocked and its result must not leave the "
+                "session: " + "; ".join(self.last_report.blocking_reasons)
+                + f". Version {self.current.number} is still intact -- propose "
+                "again, or roll back, to export it."
             )
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
