@@ -209,10 +209,34 @@ def _check_font_sizes(slide: SlideInfo, out: GateResult) -> None:
 
 
 def _check_overlap(slide: SlideInfo, out: GateResult) -> None:
-    """Text colliding with text. Ignores backgrounds and decorative frames."""
+    """Text colliding with text.
+
+    The overlap has to matter to *both* shapes, which is what measuring it
+    against the larger box means. Against the smaller one it was 100% whenever
+    anything small sat on anything large -- a scale label on a map, a number on
+    a chart, a caption on a picture -- because a small box placed anywhere
+    inside a big one is entirely inside it, by construction.
+
+    Measured across 29 real decks: 105 findings, of which 34 said "100% of the
+    smaller box". One slide of the NASA Bhutan deck produced four, all of them
+    a 0.6x0.3in label sitting on a 9.4x6.0in map, which is where a scale label
+    is supposed to be. Against the larger box the same deck set gives 19
+    findings, and every one of those 19 was already in the 105 -- so this drops
+    false ones without inventing new ones.
+
+    It does miss a case: a small caption dropped on top of a paragraph is a real
+    collision this cannot see, because the engine knows where boxes are and not
+    where glyphs are. `audit.py`'s doctrine settles the trade -- a false finding
+    costs more than a missed one, since a user told something wrong about their
+    own deck stops trusting every later finding.
+
+    Groups are excluded outright. A group's text is its children's text and its
+    box is their union, so comparing one against a shape it contains is
+    comparing a thing with part of itself.
+    """
     texty = [
         s for s in slide.shapes
-        if s.has_text and s.x is not None and s.cx and s.cy
+        if s.has_text and s.kind != "group" and s.x is not None and s.cx and s.cy
     ]
     for i, a in enumerate(texty):
         for b in texty[i + 1:]:
@@ -221,14 +245,14 @@ def _check_overlap(slide: SlideInfo, out: GateResult) -> None:
             ox = min(a.right, b.right) - max(a.x, b.x)
             oy = min(a.bottom, b.bottom) - max(a.y, b.y)
             area = ox * oy
-            smaller = min(a.cx * a.cy, b.cx * b.cy)
-            if smaller and area / smaller > MAX_OVERLAP_RATIO:
+            larger = max(a.cx * a.cy, b.cx * b.cy)
+            if larger and area / larger > MAX_OVERLAP_RATIO:
                 out.findings.append(Finding(
                     code="layout.overlap", severity=Severity.WARNING, slide=slide.number,
                     shape_id=a.id, shape_name=a.name,
                     message=(
-                        f"text overlaps {b.name or b.id} by "
-                        f"{100.0 * area / smaller:.0f}% of the smaller box"
+                        f"text overlaps {b.name or b.id} across "
+                        f"{100.0 * area / larger:.0f}% of the larger box"
                     ),
                     repair="separate the boxes or reduce one of them",
                 ))

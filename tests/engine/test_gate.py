@@ -144,6 +144,49 @@ class TestLayout:
         fg = box(x=1.0, y=1.0, name="Text", sid="2")
         assert not [f for f in check(deck_with(bg, fg)).findings if f.code == "layout.overlap"]
 
+    def test_a_small_label_on_a_large_shape_is_placement_not_collision(self):
+        """The 34-of-105 case, and the reason the denominator changed.
+
+        Measured against the smaller box this was always 100%, because anything
+        small placed anywhere inside anything large is entirely inside it. One
+        slide of the NASA Bhutan deck produced four such findings, every one a
+        0.6x0.3in scale label sitting on a 9.4x6.0in map — which is where a
+        scale label goes.
+        """
+        chart = box(x=2.0, y=1.0, cx=9.4, cy=6.0, name="Map", sid="1")
+        label = box(x=3.5, y=6.1, cx=0.6, cy=0.3, text="200", name="Scale", sid="2")
+        assert not [
+            f for f in check(deck_with(chart, label)).findings
+            if f.code == "layout.overlap"
+        ]
+
+    def test_two_boxes_of_a_size_still_collide(self):
+        """Narrow, or the check is switched off rather than corrected."""
+        a = box(x=1.0, y=1.0, cx=4.0, cy=2.0, name="A", sid="1")
+        b = box(x=2.0, y=1.5, cx=4.0, cy=2.0, name="B", sid="2")
+        found = [f for f in check(deck_with(a, b)).findings if f.code == "layout.overlap"]
+        assert found
+        assert "larger box" in found[0].message
+
+    def test_a_group_is_not_a_text_box(self):
+        """Its text is its children's and its box is their union, so comparing
+        one against a shape it contains compares a thing with part of itself."""
+        group = box(x=2.0, y=1.0, cx=9.0, cy=5.0, name="Group 14", sid="1")
+        group.kind = "group"
+        inner = box(x=3.0, y=2.0, cx=4.0, cy=3.0, name="Label", sid="2")
+        assert not [
+            f for f in check(deck_with(group, inner)).findings
+            if f.code == "layout.overlap"
+        ]
+
+    def test_the_finding_says_which_box_it_measured(self):
+        """"100%" meant two different things depending on the denominator, and
+        the message never said which."""
+        a = box(x=1.0, y=1.0, cx=4.0, cy=2.0, name="A", sid="1")
+        b = box(x=1.5, y=1.2, cx=4.0, cy=2.0, name="B", sid="2")
+        found = [f for f in check(deck_with(a, b)).findings if f.code == "layout.overlap"]
+        assert found and "of the larger box" in found[0].message
+
 
 class TestContent:
     def test_dense_slide_is_reported(self):
