@@ -6,6 +6,7 @@ touches untrusted bytes, so it is the product's hostile boundary.
 
 from __future__ import annotations
 
+import shutil
 import zipfile
 
 import pytest
@@ -99,3 +100,62 @@ class TestSafetyGuards:
                 f.writestr(f"p/{i}.xml", "<x/>")
         with pytest.raises(UnsafePackageError, match="too many parts"):
             Package.open(z)
+
+
+class TestTheArchiveIsOpenedOnce:
+    """Every read used to open the file again.
+
+    Opening a zip means parsing its whole central directory, so on a 340-part
+    deck that is 340 entries re-read per part read. Measured: `inspect` on a
+    55 MB deck did 358 reads and spent 0.81 of its 0.96 seconds doing nothing
+    but re-reading the same directory. `diff` spent 1.61 of 1.91.
+
+    After: 0.16s and 0.31s. The whole test suite went from 51s to 28s.
+    """
+
+    def test_reading_many_parts_opens_the_file_once(self, adversarial_deck, monkeypatch):
+        opened = []
+        real = zipfile.ZipFile
+
+        def counting(*args, **kwargs):
+            opened.append(args[0] if args else None)
+            return real(*args, **kwargs)
+
+        pkg = Package.open(adversarial_deck)
+        monkeypatch.setattr(zipfile, "ZipFile", counting)
+        for name in list(pkg.parts)[:12]:
+            pkg.read(name)
+        assert len(opened) <= 1, f"opened the archive {len(opened)} times for 12 reads"
+
+    def test_closing_releases_the_file(self, adversarial_deck, tmp_path):
+        """A handle held past the last use makes the file undeletable on
+        Windows, which turns a performance fix into an rmtree failure."""
+        copy = tmp_path / "deck.pptx"
+        shutil.copy(adversarial_deck, copy)
+        pkg = Package.open(copy)
+        pkg.read(next(iter(pkg.parts)))
+        pkg.close()
+        copy.unlink()  # raises PermissionError on Windows if the handle is held
+        assert not copy.exists()
+
+    def test_closing_twice_is_fine(self, adversarial_deck):
+        pkg = Package.open(adversarial_deck)
+        pkg.read(next(iter(pkg.parts)))
+        pkg.close()
+        pkg.close()
+
+    def test_it_reopens_if_read_again(self, adversarial_deck):
+        """Closing is a release, not an invalidation."""
+        pkg = Package.open(adversarial_deck)
+        name = next(iter(pkg.parts))
+        first = pkg.read(name)
+        pkg.close()
+        assert pkg.read(name) == first
+
+    def test_it_works_as_a_context_manager(self, adversarial_deck, tmp_path):
+        copy = tmp_path / "deck.pptx"
+        shutil.copy(adversarial_deck, copy)
+        with Package.open(copy) as pkg:
+            assert pkg.read(next(iter(pkg.parts)))
+        copy.unlink()
+        assert not copy.exists()
