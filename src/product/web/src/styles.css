@@ -1,0 +1,168 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Slide-Wright's visual language.
+
+   One rule governs everything below, and it comes from the product rather than
+   from taste: the interface has exactly ONE attention colour, and it means
+   "this changed". Filmstrip marks, canvas outlines and change-set rows all use
+   it; nothing else in the application is permitted to. That is what makes
+   "fifty-eight slides untouched" visible at a glance instead of countable.
+
+   Two consequences follow, and both are deliberate constraints:
+
+     · Status colours (verified, blocked, review) are reserved for verdicts and
+       never used for emphasis. A green button would spend the colour that has
+       to mean "the engine checked this".
+     · The canvas is paper. Everything around it recedes, so the deck reads as
+       the subject and the tool reads as the frame.
+
+   Typography is a system stack. Not an aesthetic choice: ADR-0008 requires the
+   client to load with the network unplugged, which rules out a font CDN, and
+   bundling a webfont to imitate one the OS already has is weight for nothing.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* ── surfaces ───────────────────────────────────────────────────────────── */
+  /* Warm graphite rather than black, so white paper reads as paper and not as
+     a light leak. Each step is a real surface level, not a shade to pick from. */
+  --color-ground: oklch(19.5% 0.006 264);   /* the room behind everything */
+  --color-panel: oklch(23.5% 0.006 264);    /* filmstrip, change set */
+  --color-raised: oklch(27.5% 0.007 264);   /* cards, inputs, hovered rows */
+  --color-line: oklch(33% 0.008 264);       /* borders, dividers */
+  --color-line-strong: oklch(42% 0.009 264);
+
+  /* ── ink ────────────────────────────────────────────────────────────────── */
+  --color-ink: oklch(96% 0.003 264);        /* primary text */
+  --color-ink-muted: oklch(74% 0.006 264);  /* secondary */
+  --color-ink-faint: oklch(58% 0.007 264);  /* tertiary, labels, counts */
+
+  /* ── the attention colour ───────────────────────────────────────────────── */
+  /* Reserved. It means "this changed" and nothing else, anywhere. */
+  --color-changed: oklch(72% 0.155 62);
+  --color-changed-dim: oklch(48% 0.09 62);
+  --color-changed-wash: oklch(72% 0.155 62 / 0.12);
+
+  /* ── verdicts ───────────────────────────────────────────────────────────── */
+  /* Spent only on what the engine actually determined. */
+  --color-verified: oklch(74% 0.13 158);
+  --color-verified-wash: oklch(74% 0.13 158 / 0.12);
+  --color-blocked: oklch(66% 0.19 22);
+  --color-blocked-wash: oklch(66% 0.19 22 / 0.12);
+  --color-review: oklch(78% 0.13 88);
+  --color-review-wash: oklch(78% 0.13 88 / 0.12);
+
+  /* ── paper ──────────────────────────────────────────────────────────────── */
+  --color-paper: oklch(99% 0 0);
+  --color-paper-ink: oklch(22% 0.005 264);
+  --color-paper-line: oklch(88% 0.004 264);
+
+  /* ── type ───────────────────────────────────────────────────────────────── */
+  --font-sans: "Segoe UI Variable Display", "Segoe UI", -apple-system,
+    BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  /* Evidence is set in mono: part names, ids, counts, coordinates. Anything the
+     user might compare character by character. */
+  --font-mono: "Cascadia Code", "SF Mono", "JetBrains Mono", ui-monospace,
+    "Consolas", monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1.45;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.55;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.6;
+
+  /* ── motion ─────────────────────────────────────────────────────────────── */
+  /* Three durations. More than three is not a language, it is a pile. */
+  --duration-fast: 120ms;      /* state feedback: hover, focus, press */
+  --duration-normal: 220ms;    /* reveal and dismiss: panels, rows */
+  --duration-deliberate: 420ms; /* carrying the eye to what changed */
+
+  /* Decisive in, gentler out. Nothing bounces: a bounce implies overshoot, and
+     nothing in this product overshoots. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+}
+
+/* ── base ─────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Tabular figures everywhere. Counts are the product's evidence, and
+       evidence that reflows as it updates reads as an animation. */
+    font-variant-numeric: tabular-nums;
+    overscroll-behavior: none;
+  }
+
+  /* One focus treatment, applied once. A keyboard user must always be able to
+     see where they are; the reference makes this non-negotiable and so does
+     anyone driving a review with the keyboard. */
+  :focus-visible {
+    outline: 2px solid var(--color-changed);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  ::selection {
+    background: var(--color-changed-wash);
+  }
+
+  /* Scrollbars are furniture. They should be visible when used and invisible
+     otherwise -- a 60-slide filmstrip is mostly scrollbar if they are not. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+}
+
+/* ── reduced motion ───────────────────────────────────────────────────────── */
+/* Present from the first commit, not retrofitted. Every animation in this app
+   is either feedback or continuity; with motion off, both must still resolve to
+   the correct final state instantly rather than being skipped. */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer utilities {
+  /* The changed-region outline. Defined once so the filmstrip mark, the canvas
+     outline and the change-set row cannot drift apart -- they are one idea. */
+  .ring-changed {
+    box-shadow: 0 0 0 1.5px var(--color-changed);
+  }
+
+  .text-evidence {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    letter-spacing: -0.01em;
+  }
+}
