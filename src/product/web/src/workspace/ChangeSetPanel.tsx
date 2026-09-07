@@ -54,15 +54,7 @@ export function ChangeSetPanel({
 
   return (
     <>
-      <PanelHeading
-        trailing={
-          <span className="text-evidence text-[--color-ink-faint]">
-            {changeset.approved_count}/{changes.length} approved
-          </span>
-        }
-      >
-        Changes
-      </PanelHeading>
+      <PanelHeading trailing={<Tally changeset={changeset} />}>Changes</PanelHeading>
 
       {changeset.locks.length > 0 && <Locks changeset={changeset} />}
 
@@ -87,7 +79,7 @@ export function ChangeSetPanel({
       </motion.ul>
 
       {undecided.length > 0 && (
-        <div className="flex shrink-0 items-center gap-2 border-t border-[--color-line] px-3 py-2">
+        <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-2">
           <Button
             onClick={() => onApproveAll(false)}
             disabled={busy || undecided.length === needsReview}
@@ -105,10 +97,38 @@ export function ChangeSetPanel({
   );
 }
 
+/**
+ * The count in the header, phrased for the stage the set is actually at.
+ *
+ * "0/2 approved" is true after an apply and reads as a failure: the approved
+ * change became an applied one, and the rejected one was never going to be
+ * approved. Counting toward a total that includes changes a lock refused makes
+ * the reviewer look like they are behind on work that does not exist.
+ */
+function Tally({ changeset }: { changeset: ChangeSet }) {
+  const { applied_count: applied, approved_count: approved } = changeset;
+  const decidable = changeset.changes.filter((c) => c.status !== "rejected").length;
+
+  if (applied > 0) {
+    return (
+      <span className="text-evidence text-ink-faint">
+        {applied} applied
+        {changeset.rejected_count > 0 && ` · ${changeset.rejected_count} blocked`}
+      </span>
+    );
+  }
+  return (
+    <span className="text-evidence text-ink-faint">
+      {approved}/{decidable} approved
+      {changeset.rejected_count > 0 && ` · ${changeset.rejected_count} blocked`}
+    </span>
+  );
+}
+
 function Locks({ changeset }: { changeset: ChangeSet }) {
   return (
-    <div className="shrink-0 border-b border-[--color-line] px-3 py-2">
-      <p className="mb-1 text-2xs uppercase tracking-[0.08em] text-[--color-ink-faint]">
+    <div className="shrink-0 border-b border-line px-3 py-2">
+      <p className="mb-1 text-2xs uppercase tracking-[0.08em] text-ink-faint">
         Protected
       </p>
       <ul className="flex flex-wrap gap-1">
@@ -148,8 +168,8 @@ function ChangeRow({
       animate="shown"
       exit="gone"
       className={[
-        "group border-b border-[--color-line] px-3 py-2 last:border-b-0",
-        "transition-colors duration-[--duration-fast]",
+        "group border-b border-line px-3 py-2 last:border-b-0",
+        "transition-colors duration-[120ms]",
         change.status === "rejected" ? "opacity-45" : "",
         "hover:bg-[color-mix(in_oklab,var(--color-panel),white_3%)]",
       ].join(" ")}
@@ -161,12 +181,18 @@ function ChangeRow({
         // The whole row is the jump target: "click a change, land on the object"
         // is the interaction that makes a change set feel like a map rather
         // than a log.
+        //
+        // The label says so. Without it the accessible name is just the
+        // change's description, which reads as a static line of text -- a
+        // screen-reader user is told what changed and not that this is how
+        // they get to it.
+        aria-label={`Go to slide ${change.slide}: ${change.description}`}
         title={`Go to slide ${change.slide}`}
       >
-        <span className="text-evidence shrink-0 text-[--color-ink-faint]">
+        <span className="text-evidence shrink-0 text-ink-faint">
           {change.slide}
         </span>
-        <span className="flex-1 text-xs leading-snug text-[--color-ink]">
+        <span className="flex-1 text-xs leading-snug text-ink">
           {change.description}
         </span>
         <StatusMark change={change} />
@@ -177,13 +203,13 @@ function ChangeRow({
       </div>
 
       {change.rationale && (
-        <p className="mt-1 pl-6 text-2xs leading-relaxed text-[--color-ink-faint]">
+        <p className="mt-1 pl-6 text-2xs leading-relaxed text-ink-faint">
           {change.rationale}
         </p>
       )}
 
       {change.impact && (
-        <p className="mt-1 pl-6 text-2xs leading-relaxed text-[--color-review]">
+        <p className="mt-1 pl-6 text-2xs leading-relaxed text-review">
           may also affect: {change.impact}
         </p>
       )}
@@ -192,7 +218,7 @@ function ChangeRow({
         // Actions appear on hover or keyboard focus. Forty rows each carrying
         // two permanently visible buttons is a wall; forty rows that reveal
         // them where the pointer is, is a list.
-        <div className="mt-1.5 flex gap-1.5 pl-6 opacity-0 transition-opacity duration-[--duration-fast] focus-within:opacity-100 group-hover:opacity-100">
+        <div className="mt-1.5 flex gap-1.5 pl-6 opacity-0 transition-opacity duration-[120ms] focus-within:opacity-100 group-hover:opacity-100">
           <Button tone="primary" onClick={() => onApprove(change.id)} disabled={busy}>
             Approve
           </Button>

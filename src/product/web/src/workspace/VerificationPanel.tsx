@@ -40,7 +40,10 @@ export function VerificationPanel({
       variants={enter}
       initial="hidden"
       animate="shown"
-      className="shrink-0 border-t border-[--color-line]"
+      // Capped and scrollable. The census grows with the deck, and an
+      // uncapped panel pushed the last rows off the bottom of the window --
+      // the rows that say whether anything was lost.
+      className="flex max-h-[48%] shrink-0 flex-col overflow-hidden border-t border-line"
       aria-live="polite"
     >
       <PanelHeading
@@ -53,14 +56,14 @@ export function VerificationPanel({
         {blocked ? "Blocked" : "Result"}
       </PanelHeading>
 
-      <div className="px-3 py-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
         {blocked ? (
           <Blocked verification={verification} onGoToSlide={onGoToSlide} />
         ) : (
           <Delivered verification={verification} />
         )}
 
-        <div className="mt-2 border-t border-[--color-line] pt-2">
+        <div className="mt-2 border-t border-line pt-2">
           {verification.census.map((row) => (
             <Stat
               key={row.label}
@@ -78,23 +81,23 @@ export function VerificationPanel({
 function Delivered({ verification }: { verification: Verification }) {
   return (
     <>
-      <p className="text-xs leading-relaxed text-[--color-ink]">
+      <p className="text-xs leading-relaxed text-ink">
         <strong className="font-medium">
           {verification.identical_parts} of {verification.total_parts}
         </strong>{" "}
         package parts are byte-for-byte identical to the file you supplied
-        <span className="text-[--color-ink-faint]">
+        <span className="text-ink-faint">
           {" "}
           ({verification.fidelity_score.toFixed(2)}%)
         </span>
         .
       </p>
-      <p className="mt-1 text-xs text-[--color-ink-muted]">
+      <p className="mt-1 text-xs text-ink-muted">
         {verification.untouched_slides} slide
         {verification.untouched_slides === 1 ? "" : "s"} untouched ·{" "}
         {verification.requested.length} requested change
         {verification.requested.length === 1 ? "" : "s"} applied ·{" "}
-        <span className="text-[--color-verified]">0 unexpected</span>
+        <span className="text-verified">0 unexpected</span>
       </p>
     </>
   );
@@ -117,13 +120,13 @@ function Blocked({
 }) {
   return (
     <>
-      <p className="text-xs leading-relaxed text-[--color-ink]">
+      <p className="text-xs leading-relaxed text-ink">
         Slide-Wright checked the result and found changes it cannot account for,
         so it did not deliver the deck. Your original is untouched.
       </p>
       <ul className="mt-2 space-y-1">
         {verification.blocking_reasons.map((reason) => (
-          <li key={reason} className="flex gap-1.5 text-xs text-[--color-blocked]">
+          <li key={reason} className="flex gap-1.5 text-xs text-blocked">
             <span aria-hidden>·</span>
             <span className="leading-relaxed">{reason}</span>
           </li>
@@ -131,13 +134,13 @@ function Blocked({
       </ul>
       {verification.unrequested_slides.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-2xs text-[--color-ink-faint]">Inspect:</span>
+          <span className="text-2xs text-ink-faint">Inspect:</span>
           {verification.unrequested_slides.map((n) => (
             <button
               key={n}
               type="button"
               onClick={() => onGoToSlide(n)}
-              className="rounded-[--radius-sm] bg-[--color-blocked-wash] px-1.5 py-0.5 text-evidence text-[--color-blocked] transition-colors duration-[--duration-fast] hover:brightness-125"
+              className="rounded-sm bg-blocked-wash px-1.5 py-0.5 text-evidence text-blocked transition-colors duration-[120ms] hover:brightness-125"
             >
               slide {n}
             </button>
@@ -168,7 +171,7 @@ const STAGE_COPY: Record<string, string> = {
 function Progress({ progress }: { progress: ApplyProgress[] }) {
   return (
     <section
-      className="shrink-0 border-t border-[--color-line] px-3 py-3"
+      className="shrink-0 border-t border-line px-3 py-3"
       aria-live="polite"
       aria-busy
     >
@@ -188,13 +191,13 @@ function Progress({ progress }: { progress: ApplyProgress[] }) {
                 aria-hidden
                 className={[
                   "mt-1.5 size-1.5 shrink-0 rounded-full",
-                  current ? "bg-[--color-changed]" : "bg-[--color-line-strong]",
+                  current ? "bg-changed" : "bg-line-strong",
                 ].join(" ")}
               />
-              <span className={current ? "text-[--color-ink]" : "text-[--color-ink-faint]"}>
+              <span className={current ? "text-ink" : "text-ink-faint"}>
                 {STAGE_COPY[stage.stage] ?? stage.detail}
                 {stage.slides?.length ? (
-                  <span className="text-[--color-ink-faint]">
+                  <span className="text-ink-faint">
                     {" "}
                     · slide{stage.slides.length === 1 ? "" : "s"} {stage.slides.join(", ")}
                   </span>
@@ -204,10 +207,10 @@ function Progress({ progress }: { progress: ApplyProgress[] }) {
           );
         })}
         {progress.length === 0 && (
-          <li className="text-xs text-[--color-ink-faint]">Starting…</li>
+          <li className="text-xs text-ink-faint">Starting…</li>
         )}
       </ol>
-      <p className="mt-2 text-2xs leading-relaxed text-[--color-ink-faint]">
+      <p className="mt-2 text-2xs leading-relaxed text-ink-faint">
         A large deck takes minutes. Nothing is delivered until verification passes.
       </p>
     </section>
