@@ -13,10 +13,11 @@ Engineering documentation, safe to share. Strategy, pricing, customer research a
 | [04-infrastructure-and-data](architecture/04-infrastructure-and-data.md) | Backend choice, data model, what is deliberately absent |
 | [05-security](architecture/05-security.md) | Tenant isolation, OOXML threats, provider exposure |
 | [06-ux-architecture](architecture/06-ux-architecture.md) | The deck is the interface |
+| [07-design-language](architecture/07-design-language.md) | One attention colour, and it means *this changed* |
 
 ## Decisions
 
-[ADR index](decisions/README.md) — nine accepted records. Start with [ADR-0002](decisions/0002-editing-before-generation.md) (editing before generation), [ADR-0006](decisions/0006-force-native-charts-and-tables.md) (the defect that must never reach a customer) and [ADR-0008](decisions/0008-local-first-deployment.md) (the document does not leave the machine).
+[ADR index](decisions/README.md) — ten accepted records. Start with [ADR-0002](decisions/0002-editing-before-generation.md) (editing before generation), [ADR-0006](decisions/0006-force-native-charts-and-tables.md) (the defect that must never reach a customer) and [ADR-0008](decisions/0008-local-first-deployment.md) (the document does not leave the machine).
 
 ## Guides
 

@@ -243,7 +243,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 366 tests
+python -m pytest tests -q          # 572 tests
 ```
 
 Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
@@ -255,6 +255,55 @@ slide-wright edit deck.pptx --instruct "change the Alpha Corp multiple to 11.8x"
 ```
 
 Development runs at zero cost by design. Every model call is recorded — provider, model, tokens, latency, and what it *would* cost at published paid rates — so the free-tier constraint stays measurable rather than assumed.
+
+## The workspace
+
+The same loop, with the deck on screen. It runs entirely on your machine
+(ADR-0008, ADR-0010): loopback only, no accounts, no storage, no telemetry, and
+no flag that would let it listen anywhere else.
+
+```bash
+pip install -e "src/product/api"
+npm --prefix src/product/web install && npm --prefix src/product/web run build
+python -m slide_wright_api
+```
+
+That opens `http://127.0.0.1:8787`. Point it at a `.pptx` **by path** — the deck
+is opened where it sits and is never uploaded.
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│  Pitchbook_v9.pptx                    .slidewright/Pitchbook_v9   engine │
+├────────────┬─────────────────────────────────────────────┬───────────────┤
+│  FILMSTRIP │              SLIDE CANVAS                   │   CHANGE SET  │
+│   1  ○     │      ┌─────────────────────────────┐        │  1 applied    │
+│  12  ●←    │      │  slide 12, changed region   │        │  1 blocked    │
+│  34  ●     │      │  outlined, nothing else     │        │               │
+│  60  ○     │      └─────────────────────────────┘        │  RESULT  ✓    │
+│  58 of 60 untouched                                      │  125/126 parts│
+├────────────┴─────────────────────────────────────────────┴───────────────┤
+│  Scope: slide 12   Protect: numbers wording layout   ▸ What should change?│
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+Three properties it is built to hold, each asserted by a test:
+
+- **Nothing is written before you approve it.** Proposing leaves the file
+  byte-identical; the change set is the contract you read first.
+- **There is no green state unless the engine said `deliverable`.** No "verified
+  with warnings" invented in the interface.
+- **No progress bar.** The engine does not know how long a stage takes, so the
+  apply narrates the stages that actually happen rather than interpolating a
+  number.
+
+One thing that leaves the machine, stated plainly: if you configure a model key
+and *describe* a change in prose, a structural summary of the whole deck — every
+slide title, and the first 70 characters of every text object — goes to that
+provider. Editing objects directly, auditing, verifying and reverting send
+nothing, and with no key configured nothing is sent at all.
+
+Develop against it with `npm --prefix src/product/web run dev` (port 5173,
+proxying `/api` to the engine).
 
 ## Repository layout
 
@@ -276,24 +325,36 @@ src/engine/slide_wright/    the engine — deterministic, no model calls
   planner.py                instruction -> validated change set
   llm/                      provider abstraction, Gemini, budgets, usage ledger
   corpus/                   deck profiler and adversarial generator
-docs/                       architecture, 7 ADRs, guides
-tests/                      366 tests, including regressions from real decks
+src/product/api/            the local HTTP surface (ADR-0010)
+  contracts.py              wire types; the client never touches engine classes
+  workspace.py              open documents; derives `before` from the deck
+  app.py                    the loop as routes, plus SSE progress
+src/product/web/            the workspace client — React, TypeScript, Motion
+  api/                      typed service layer, one origin, no second base URL
+  design/                   primitives; none may wear the attention colour
+  motion/                   three durations, two curves, one exception
+  workspace/                filmstrip · canvas · change set · result · history
+docs/                       architecture, 10 ADRs, guides
+tests/                      572 engine and API tests, plus 54 in the client
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
 ```
 
 ## Status
 
-**Phase 1 complete. Phase 2 deliberately not started.**
+**Phase 1 complete. The local product surface is built. The hosted one is still gated.**
 
 | Phase | State |
 |---|---|
 | 0 — Validation | Technical gates **passed**. Demand gate **not run** — needs practitioner conversations. |
 | 1 — Core engine | **Complete.** Exit condition met: 11/11 eligible real decks edited and verified. |
-| 2 — MVP (backend, web) | **Gated on a paying customer.** Not started, on purpose. |
+| 2 — Local workspace | **Built.** API and client over the existing engine, loopback only. |
+| 2 — Hosted MVP (accounts, storage, tenancy) | **Gated on a paying customer.** Not started, on purpose. |
 | 3 — Engine capabilities | Audit, citations, refresh and brand conformance **built**; the customer-facing half stays gated. |
 
-There is no web application, no database and no account system, because no customer has yet said they want one. The roadmap gates that work on evidence rather than on readiness, and the evidence does not exist yet.
+That split is the point, and it is worth being precise about. ADR-0008 makes local execution the *primary* delivery model, because the documents this engine exists to edit are commonly blocked from upload before a vendor is ever evaluated. Building the local workspace is therefore building the product, not building ahead of the gate.
+
+What remains gated is everything that only a hosted product needs: **no accounts, no database, no cloud storage, no tenancy, no billing, no telemetry.** None of it is written, because no customer has yet said they want it. The roadmap gates that work on evidence rather than on readiness, and the evidence still does not exist.
 
 Phase 3's *engine* capabilities were built ahead of that gate because each is deterministic, testable offline, and useful whatever the eventual delivery surface turns out to be. Brand conformance currently **reports** drift; correcting it automatically is the next increment, and is worth building only once someone asks for it.
 
@@ -304,6 +365,7 @@ Phase 3's *engine* capabilities were built ahead of that gate because each is de
 - **Per-deck model cost is barely measured.** The usage ledger records every call, but only a handful of real edits have run through it — not enough to price a deck.
 - **Licensed fonts not installed locally are unproven.**
 - **The round-trip engine ingests only 2 of 21 fixtures** measured. It is the secondary path; the in-place applier handles every deck in the corpus.
+- **The workspace canvas is a structural view, not a render.** Objects are drawn at the exact position and size the file specifies, which is what makes "nothing else moved" checkable. Fills, effects, picture content, text colour and PowerPoint's line breaking are not reproduced, so it cannot tell you whether a slide *looks* good — only where things are.
 
 ## What this project has learned the hard way
 
