@@ -669,3 +669,82 @@ class TestAnEditKeepsTheFormattingItDidNotAskAbout:
             ("15%", True),
             (" in FY25", False),
         ], "the emphasis on the figure must survive an edit that never named it"
+
+
+class TestACellSplitAcrossRunsIsStillOneValue:
+    """Where the figures live, and where a wrong one arrives with a citation.
+
+    A cell's value is one thing to a reader and often several runs to OOXML:
+    part of a number gets bolded, or a language boundary falls inside it, and
+    "1,234" is stored as "1,2" + "34". Replacing it used to write the new value
+    into the first run and leave the rest, so a refresh cited to a spreadsheet
+    coordinate produced 1,98734 and reported it applied.
+    """
+
+    def _deck_with_a_split_cell(self, tmp_path, pieces=(("1,2", False), ("34", True))):
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        path = tmp_path / "split-cell.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        table = slide.shapes.add_table(
+            2, 2, Inches(1), Inches(1), Inches(6), Inches(1.5)
+        ).table
+        table.cell(0, 0).text = "Metric"
+        table.cell(0, 1).text = "FY25"
+        table.cell(1, 0).text = "Revenue"
+        paragraph = table.cell(1, 1).text_frame.paragraphs[0]
+        paragraph.text = ""
+        for text, bold in pieces:
+            run = paragraph.add_run()
+            run.text = text
+            run.font.bold = bold
+            run.font.size = Pt(14)
+        prs.save(str(path))
+        return path
+
+    def _table(self, deck):
+        return next(s for s in inspect(deck).slides[0].shapes if s.kind == "table")
+
+    def test_replacing_a_split_figure_leaves_one_figure(self, tmp_path):
+        src = self._deck_with_a_split_cell(tmp_path)
+        table = self._table(src)
+        assert table.cell(1, 1) == "1,234"
+
+        out = tmp_path / "o.pptx"
+        cs = approved(src, Change(
+            id="c1", op=Op.SET_TABLE_CELL, slide=1, target=f"{table.id}/r1/c1",
+            before="1,234", after="1,987", citation="q3.xlsx!B2",
+        ))
+        result = apply_changes(src, cs, out)
+        assert not result.failed, result.failed
+        assert self._table(out).cell(1, 1) == "1,987", (
+            "the old value's tail must not survive alongside the new one"
+        )
+
+    def test_a_wrong_before_is_refused_rather_than_written_anywhere(self, tmp_path):
+        """The safety half: a stale `before` must not become a blind write."""
+        src = self._deck_with_a_split_cell(tmp_path)
+        table = self._table(src)
+        out = tmp_path / "o.pptx"
+        cs = approved(src, Change(
+            id="c1", op=Op.SET_TABLE_CELL, slide=1, target=f"{table.id}/r1/c1",
+            before="9,999", after="1,987",
+        ))
+        result = apply_changes(src, cs, out)
+        assert len(result.failed) == 1
+        assert "9,999" in str(result.failed[0][1]), "the refusal must name the value it looked for"
+        assert self._table(out).cell(1, 1) == "1,234", "the cell must be untouched"
+
+    def test_a_cell_with_no_before_is_set_outright(self, tmp_path):
+        """`before=None` means "this cell now says X" — the whole cell is the target."""
+        src = self._deck_with_a_split_cell(tmp_path)
+        table = self._table(src)
+        out = tmp_path / "o.pptx"
+        cs = approved(src, Change(
+            id="c1", op=Op.SET_TABLE_CELL, slide=1, target=f"{table.id}/r1/c1",
+            before=None, after="n/a",
+        ))
+        assert not apply_changes(src, cs, out).failed
+        assert self._table(out).cell(1, 1) == "n/a"

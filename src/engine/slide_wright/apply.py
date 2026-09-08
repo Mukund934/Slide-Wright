@@ -370,16 +370,44 @@ def _set_table_cell(shape, change: Change) -> bool:
         return False
 
     cell = cells[col_idx]
-    for t in cell.findall(".//a:t", NS):
-        if change.before is None or t.text == str(change.before):
-            t.text = str(change.after)
-            return True
-    # Empty cell: write into the first run if one exists.
-    first = cell.find(".//a:t", NS)
-    if first is not None:
-        first.text = str(change.after)
+    slots = cell.findall(".//a:t", NS)
+    if not slots:
+        return False
+
+    after = str(change.after)
+    before = None if change.before is None else str(change.before)
+
+    if before:
+        # 1. One run holds exactly the value being replaced.
+        for t in slots:
+            if t.text == before:
+                t.text = after
+                return True
+        # 2. The value is split across runs, which is ordinary in a real deck:
+        #    part of a figure gets bolded, or a language run boundary falls
+        #    inside it, and "1,234" is stored as "1,2" + "34".
+        #
+        #    This used to fall through to the empty-cell branch below and write
+        #    the new value into the *first* run while leaving the rest in place:
+        #    replacing 1,234 with 1,987 produced **1,98734**. Applied, verified,
+        #    cited to a spreadsheet coordinate, and wrong -- in the one place the
+        #    product exists to be trusted about.
+        return _replace_within(cell.findall(".//a:r", NS), before, after)
+
+    if before is None:
+        # No value to match: the change is "this cell now says X". Blanking the
+        # trailing runs is right here, because the whole cell is the target.
+        slots[0].text = after
+        for t in slots[1:]:
+            t.text = ""
         return True
-    return False
+
+    # `before` was the empty string. If the cell really is empty, write into it;
+    # if it is not, the caller is wrong about the cell and must be told so.
+    if "".join(t.text or "" for t in slots):
+        return False
+    slots[0].text = after
+    return True
 
 
 def _table_size(shape) -> tuple[int, int] | None:
