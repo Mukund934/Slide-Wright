@@ -104,6 +104,15 @@ export default function App() {
         </main>
 
         <aside className="flex min-w-0 flex-1 flex-col border-l border-line bg-panel md:w-64 md:flex-none lg:w-72 xl:w-80 2xl:w-96">
+          {/* Below the breakpoint the canvas is gone, and a canvas that
+              disappears without a word is not a smaller interface, it is a
+              broken one: the reader is left with a filmstrip, a review panel,
+              and no slide, and nothing to tell them whether that is the design
+              or a fault. One line costs no horizontal space, which is the thing
+              actually in short supply here. */}
+          <p className="border-b border-line px-3 py-1.5 text-2xs leading-relaxed text-ink-faint md:hidden">
+            The slide view needs a wider window. Everything else still works.
+          </p>
           {!workspace.comparison && <Tabs tab={tab} onChange={setTab} />}
           {!workspace.comparison && (
             <ProtectedList locks={workspace.locks} onUnlock={workspace.unlock} />
