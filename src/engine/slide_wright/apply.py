@@ -285,11 +285,14 @@ def _set_text(shape, before: str, after: str) -> bool:
 
     Tried narrowest-first, because a narrower match means fewer bytes touched:
       1. one run holds it exactly            — two-character edits land here
-      2. one paragraph holds it              — collapse into that paragraph
-      3. the whole shape holds it            — collapse into the first run
+      2. one paragraph holds it              — write back across that paragraph
+      3. the whole shape holds it            — write back across every paragraph
 
     Steps 2 and 3 lose intra-run formatting inside the matched span, which is
-    unavoidable when replacing text that spans differently formatted runs.
+    unavoidable when replacing text that spans differently formatted runs. They
+    lose nothing outside it: a run the span does not reach keeps its own text
+    and its own formatting, which is what makes the promise checkable at run
+    granularity rather than only at slide granularity.
     """
     # 1. Exact single-run match: the narrowest possible edit.
     for run in shape.findall(".//a:r", NS):
@@ -311,20 +314,46 @@ def _set_text(shape, before: str, after: str) -> bool:
 
 
 def _replace_within(runs, before: str, after: str) -> bool:
-    """Replace `before` across a run sequence, writing the result into the first."""
+    """Replace `before` across a run sequence, touching only the runs it covers.
+
+    The span is located in the joined text and then written back run by run, so
+    a run that lies wholly outside it keeps its text *and its formatting*. The
+    run holding the start of the span keeps its prefix and receives `after`; the
+    run holding the end keeps its suffix; runs entirely inside are emptied.
+
+    This used to write the whole joined string into the first run and blank
+    every other one, which is correct about the text and destroys everything
+    else. Editing two words at the front of a paragraph unbolded the figure at
+    the back of it, and an edit spanning two bullets collapsed the third —
+    reported applied, with the text identical, so a content diff saw nothing.
+    Formatting is still lost *inside* the span, which is unavoidable when the
+    replacement crosses runs that are formatted differently; the docstring above
+    `_set_text` has always said that, and now it is true.
+    """
     texts = [(r, r.find("a:t", NS)) for r in runs]
     texts = [(r, t) for r, t in texts if t is not None]
     if not texts:
         return False
 
     joined = "".join(t.text or "" for _, t in texts)
-    if not before or before not in joined:
+    start = joined.find(before) if before else -1
+    if start < 0:
         return False
+    end = start + len(before)
 
-    replaced = joined.replace(before, after, 1)
-    for index, (_, t) in enumerate(texts):
-        t.text = replaced if index == 0 else ""
-    return True
+    offset = 0
+    written = False
+    for _, t in texts:
+        text = t.text or ""
+        run_start, run_end = offset, offset + len(text)
+        offset = run_end
+        if run_end <= start or run_start >= end:
+            continue
+        head = text[: start - run_start] if run_start < start else ""
+        tail = text[end - run_start :] if run_end > end else ""
+        t.text = head + after + tail if not written else head + tail
+        written = True
+    return written
 
 
 def _set_table_cell(shape, change: Change) -> bool:

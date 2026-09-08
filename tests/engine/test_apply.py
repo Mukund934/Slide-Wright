@@ -546,3 +546,126 @@ class TestTwoWritesAtOnceDoNotCollide:
         _write_package(adversarial_deck, tmp_path / "out.pptx", {})
         assert not list(tmp_path.glob("*.partial"))
         assert not list(tmp_path.glob(".*"))
+
+
+class TestAnEditKeepsTheFormattingItDidNotAskAbout:
+    """The promise, at run granularity.
+
+    "Change what I asked, preserve everything else" is checkable inside a single
+    paragraph, and that is where it was failing. Replacing two words at the
+    front of a sentence used to write the whole joined string into the first run
+    and blank the rest, so the bold on a figure three words later disappeared —
+    applied, verified, and invisible to a content diff because the text was
+    identical.
+    """
+
+    A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+
+    def _paragraph(self, *runs: tuple[str, str]):
+        from lxml import etree
+
+        body = "".join(
+            f'<a:r><a:rPr {attrs}/><a:t>{text}</a:t></a:r>' for text, attrs in runs
+        )
+        return etree.fromstring(
+            '<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+            ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            f"<a:p>{body}</a:p></p:sp>"
+        )
+
+    def _runs(self, shape):
+        return [
+            (r.find(f"{self.A}t").text or "", r.find(f"{self.A}rPr").get("b"))
+            for r in shape.findall(f".//{self.A}r")
+        ]
+
+    def test_a_bold_figure_survives_an_edit_to_the_words_before_it(self):
+        from slide_wright.apply import _set_text
+
+        shape = self._paragraph(
+            ("Revenue grew ", 'b="0"'), ("15%", 'b="1"'), (" in FY25", 'b="0"')
+        )
+        assert _set_text(shape, "Revenue grew", "Revenue increased")
+        assert self._runs(shape) == [
+            ("Revenue increased ", "0"),
+            ("15%", "1"),
+            (" in FY25", "0"),
+        ], "the bold run was neither emptied nor merged into its neighbour"
+
+    def test_a_run_after_the_span_keeps_its_own_text(self):
+        from slide_wright.apply import _set_text
+
+        shape = self._paragraph(("As at ", 'b="0"'), ("Q3", 'b="1"'), (" close", 'b="0"'))
+        assert _set_text(shape, "As at Q3", "As at Q4")
+        assert self._runs(shape) == [("As at Q4", "0"), ("", "1"), (" close", "0")], (
+            "only the runs the span covers may change"
+        )
+
+    def test_a_span_ending_mid_run_keeps_the_remainder(self):
+        from slide_wright.apply import _set_text
+
+        shape = self._paragraph(("Fees ", 'b="0"'), ("rose sharply", 'b="1"'))
+        assert _set_text(shape, "Fees rose", "Fees fell")
+        assert self._runs(shape) == [("Fees fell", "0"), (" sharply", "1")], (
+            "the tail beyond the span keeps its own formatting"
+        )
+
+    def test_an_edit_spanning_two_bullets_leaves_the_third_alone(self, tmp_path):
+        """The visible version: text collapsing out of the paragraphs it lived in."""
+        from lxml import etree
+
+        from slide_wright.apply import _set_text
+
+        paras = "".join(
+            f'<a:p><a:r><a:rPr/><a:t>{t}</a:t></a:r></a:p>'
+            for t in ("Margin held at 42%", "Headcount fell to 310", "Cash runway 18 months")
+        )
+        shape = etree.fromstring(
+            '<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+            f' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">{paras}</p:sp>'
+        )
+        assert _set_text(shape, "42%Headcount fell", "42%Headcount rose")
+        third = shape.findall(f"{self.A}p")[2]
+        assert third.find(f".//{self.A}t").text == "Cash runway 18 months", (
+            "a bullet the span never reached must still hold its own text"
+        )
+
+    def test_it_holds_through_save_and_reload(self, tmp_path):
+        """End to end on a real package, because XML in memory is not a deck.
+
+        Built here rather than taken from the corpus: the adversarial deck has
+        no shape carrying two differently formatted runs in one paragraph, which
+        is exactly the arrangement this defect needed. That absence is why every
+        existing narrowness test passed while the promise was broken.
+        """
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        src = tmp_path / "mixed.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        frame = slide.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(8), Inches(2)
+        ).text_frame
+        for text, bold in (("Revenue grew ", False), ("15%", True), (" in FY25", False)):
+            run = frame.paragraphs[0].add_run()
+            run.text = text
+            run.font.bold = bold
+            run.font.size = Pt(18)
+        prs.save(str(src))
+
+        shape = next(s for s in inspect(src).slides[0].shapes if s.text.strip())
+        out = tmp_path / "o.pptx"
+        cs = approved(src, Change(
+            id="c1", op=Op.SET_TEXT, slide=1, target=shape.id,
+            before="Revenue grew", after="Revenue increased",
+        ))
+        result = apply_changes(src, cs, out)
+        assert not result.failed, result.failed
+
+        after = next(s for s in inspect(out).slides[0].shapes if s.text.strip())
+        assert [(r.text, r.bold) for r in after.runs] == [
+            ("Revenue increased ", False),
+            ("15%", True),
+            (" in FY25", False),
+        ], "the emphasis on the figure must survive an edit that never named it"
