@@ -963,3 +963,63 @@ class TestARunTargetMeansWhatItMeantWhenApproved:
         assert [(r.text, r.size_pt) for r in shape.runs] == [
             ("X", 18.0), ("CCC", 18.0), ("DDD", 9.0), ("EEE", 18.0)
         ]
+
+
+class TestAFormattingLockSurvivesATextEdit:
+    """The guarantee, rather than the mechanism that happened to break it.
+
+    `formatting` means *"fix the words, leave my styling exactly as it is"*. It
+    is expressed as a refusal of SET_FONT, SET_COLOR and SET_FONT_SIZE, which is
+    correct about what the user can ask for and says nothing about what the
+    applier does on its way through. A text edit is permitted under this lock by
+    design -- fixing words is the whole point of holding it -- and the applier
+    used to strip the styling of every run it joined while doing so.
+
+    So the lock could be held, honoured by the change set, reported as honoured,
+    and the styling gone anyway. A guarantee is only worth what the writer does,
+    not what the gate refuses.
+    """
+
+    def test_the_styling_is_still_there_afterwards(self, tmp_path):
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        from slide_wright.changeset import Lock
+
+        src = tmp_path / "locked.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        frame = slide.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(8), Inches(2)
+        ).text_frame
+        for text, bold, size in (
+            ("Our margin held at ", False, 18),
+            ("42%", True, 24),
+            (" through the quarter", False, 18),
+        ):
+            run = frame.paragraphs[0].add_run()
+            run.text = text
+            run.font.bold = bold
+            run.font.size = Pt(size)
+        prs.save(str(src))
+
+        shape = next(s for s in inspect(src).slides[0].shapes if s.text.strip())
+        styling = [(r.bold, r.size_pt) for r in shape.runs]
+
+        cs = ChangeSet(deck=str(src))
+        cs.lock("formatting", reason="leave my styling exactly as it is")
+        cs.add(Change(
+            id="c1", op=Op.SET_TEXT, slide=1, target=shape.id,
+            before="Our margin held at", after="Our margin improved to",
+        ))
+        cs.approve_all()
+
+        out = tmp_path / "o.pptx"
+        result = apply_changes(src, cs, out)
+        assert not result.failed, result.failed
+
+        after = next(s for s in inspect(out).slides[0].shapes if s.text.strip())
+        assert [(r.bold, r.size_pt) for r in after.runs] == styling, (
+            "a formatting lock has to survive the edit it was held across"
+        )
+        assert "42%" in after.text
