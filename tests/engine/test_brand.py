@@ -7,8 +7,13 @@ common font is "the brand" would ratify the drift it exists to catch.
 
 from __future__ import annotations
 
+import zipfile
+
+import pytest
+
 from slide_wright.brand import (
     BrandProfile,
+    TemplateError,
     check_conformance,
     compare_profiles,
     dominant_fonts,
@@ -300,3 +305,73 @@ def _deck_with_fonts(fonts: list, texts: list[str] | None = None,
     )
     return DeckInfo(slides=[SlideInfo(number=1, part_name="ppt/slides/slide1.xml",
                                       shapes=[shape])])
+
+
+class TestATemplateThatCannotBeRead:
+    """A damaged theme raised lxml's own `XMLSyntaxError`.
+
+    The API wrapped it; the CLI did not, so it escaped `main()` and printed a
+    traceback at whoever ran the command. A message that depends on which
+    surface you came through is not a message, so the error is typed where it
+    is raised and both surfaces get the same sentence.
+    """
+
+    def _rebuild(self, deck, out, replace=None, drop=()):
+        with zipfile.ZipFile(deck) as zin, zipfile.ZipFile(out, "w") as zout:
+            for info in zin.infolist():
+                if any(info.filename.startswith(d) for d in drop):
+                    continue
+                data = zin.read(info.filename)
+                if replace and info.filename.startswith(replace[0]):
+                    data = replace[1]
+                zout.writestr(info.filename, data)
+        return out
+
+    def test_a_theme_that_will_not_parse_is_refused_by_name(
+        self, adversarial_deck, tmp_path
+    ):
+        broken = self._rebuild(adversarial_deck, tmp_path / "bad.pptx",
+                               replace=("ppt/theme/theme", b"nope"))
+        with pytest.raises(TemplateError, match="bad.pptx"):
+            read_profile(broken)
+
+    def test_the_refusal_names_the_part_and_the_reason(self, adversarial_deck, tmp_path):
+        broken = self._rebuild(adversarial_deck, tmp_path / "bad.pptx",
+                               replace=("ppt/theme/theme", b"nope"))
+        with pytest.raises(TemplateError) as caught:
+            read_profile(broken)
+        assert "ppt/theme/theme" in str(caught.value)
+
+    def test_it_is_a_ValueError_so_the_cli_already_handles_it(self):
+        """Every CLI command taking a template turns a `ValueError` into a
+        one-line `error:`. Inheriting is what makes this reach a person."""
+        assert issubclass(TemplateError, ValueError)
+
+    def test_no_theme_at_all_is_not_an_error(self, adversarial_deck, tmp_path):
+        """A different situation, and only one of them is broken. An empty
+        profile is honest, and `plan_conformance` says the template declares
+        nothing to conform to rather than reporting zero corrections as if the
+        deck already matched."""
+        bare = self._rebuild(adversarial_deck, tmp_path / "bare.pptx",
+                             drop=("ppt/theme/",))
+        profile = read_profile(bare)
+        assert profile.fonts == set()
+
+    def test_and_the_plan_says_so_rather_than_reporting_nothing(
+        self, adversarial_deck, tmp_path
+    ):
+        bare = self._rebuild(adversarial_deck, tmp_path / "bare.pptx",
+                             drop=("ppt/theme/",))
+        plan = plan_conformance(inspect(adversarial_deck), read_profile(bare))
+        assert not plan.changes
+        assert any("nothing" in s or "no fonts" in s for s in plan.skipped)
+
+    def test_one_unreadable_layout_does_not_condemn_the_template(
+        self, adversarial_deck, tmp_path
+    ):
+        """The fonts and palette come from the theme, which is what conformance
+        uses. A layout that will not parse costs its name from a list."""
+        odd = self._rebuild(adversarial_deck, tmp_path / "odd.pptx",
+                            replace=("ppt/slideLayouts/slideLayout1.xml", b"nope"))
+        profile = read_profile(odd)
+        assert profile.minor_font

@@ -142,9 +142,18 @@ def cmd_refresh(args) -> int:
 
 
 def cmd_brand(args) -> int:
-    from slide_wright.brand import check_conformance, plan_conformance, read_profile
+    from slide_wright.brand import (
+        TemplateError,
+        check_conformance,
+        plan_conformance,
+        read_profile,
+    )
 
-    profile = read_profile(args.template)
+    try:
+        profile = read_profile(args.template)
+    except (TemplateError, UnsafePackageError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
     if args.deck is None:
         print(profile.render())
         return EXIT_OK
@@ -408,7 +417,7 @@ def cmd_tidy(args) -> int:
     ones that depart from it.
     """
     from slide_wright.audit import audit as audit_deck
-    from slide_wright.brand import plan_conformance, read_profile
+    from slide_wright.brand import TemplateError, plan_conformance, read_profile
     from slide_wright.diff import diff as deck_diff
     from slide_wright.inspect import EMU_PER_INCH
     from slide_wright.layout import plan_alignment
@@ -432,7 +441,15 @@ def cmd_tidy(args) -> int:
                   f"{observation.message}")
         print()
 
-    profile = read_profile(args.template or args.deck)
+    try:
+        profile = read_profile(args.template or args.deck)
+    except (TemplateError, UnsafePackageError) as exc:
+        # A damaged template used to raise lxml's own error straight out of
+        # `main()`, which prints a traceback at whoever ran the command. The
+        # API had wrapped it and the CLI had not, so the message you got
+        # depended on which surface you came through -- which is not a message.
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
     conformance = plan_conformance(deck, profile, name)
     alignment = plan_alignment(deck, int(round(args.tolerance * EMU_PER_INCH)), name)
 

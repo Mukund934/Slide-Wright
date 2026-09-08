@@ -123,18 +123,41 @@ class ConformanceReport:
         return "\n".join(lines)
 
 
+class TemplateError(ValueError):
+    """A template could not be read. Names the file and says why.
+
+    A `ValueError` on purpose: every CLI command that takes a template already
+    turns one of those into a one-line `error:`, and the raw `XMLSyntaxError`
+    this replaces escaped `main()` entirely and printed a traceback at a person.
+    The API had wrapped it; the CLI had not, and a message that depends on which
+    surface you came through is not a message.
+    """
+
+
 def read_profile(template: str | Package) -> BrandProfile:
     """Extract the visual system from a .potx or .pptx.
 
     Reads the theme part directly rather than any slide, because the theme is
     what the template *declares* — a slide may already have drifted from it.
+
+    A template whose theme will not parse is refused by name. A template with no
+    theme at all is *not* an error: it yields an empty profile, and
+    `plan_conformance` says "the template declares no fonts or palette to
+    conform to" rather than reporting zero corrections as if the deck already
+    matched. Those are different situations and only one of them is broken.
     """
     pkg = template if isinstance(template, Package) else Package.open(template)
     profile = BrandProfile(source=pkg.path.name)
 
     theme_part = next((n for n in pkg.parts if n.startswith("ppt/theme/theme")), None)
     if theme_part:
-        root = etree.fromstring(pkg.read(theme_part))
+        try:
+            root = etree.fromstring(pkg.read(theme_part))
+        except etree.XMLSyntaxError as exc:
+            raise TemplateError(
+                f"{pkg.path.name} has a theme that cannot be read "
+                f"({theme_part}): {exc}"
+            ) from None
         for tag, attr in (("majorFont", "major_font"), ("minorFont", "minor_font")):
             el = root.find(f".//a:{tag}/a:latin", NS)
             if el is not None:
@@ -151,7 +174,13 @@ def read_profile(template: str | Package) -> BrandProfile:
     for name in sorted(n for n in pkg.parts if n.startswith("ppt/slideLayouts/slideLayout")):
         if not name.endswith(".xml"):
             continue
-        root = etree.fromstring(pkg.read(name))
+        try:
+            root = etree.fromstring(pkg.read(name))
+        except etree.XMLSyntaxError:
+            # One unreadable layout is not a broken template -- the fonts and
+            # palette are what conformance uses, and they came from the theme.
+            # Its name is simply not available to list.
+            continue
         el = root.find(".//p:cSld", NS)
         if el is not None and el.get("name"):
             profile.layout_names.append(el.get("name"))
