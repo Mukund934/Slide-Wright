@@ -89,13 +89,39 @@ class TestLocks:
         numeric = s.add(change(before="Revenue 4.2M", after="Revenue 5.8M"))
         assert numeric.status is Status.REJECTED
 
-    def test_numbers_lock_permits_pure_text_edits(self):
+    def test_numbers_lock_permits_a_text_edit_with_no_figure_on_either_side(self):
         s = cs()
         s.lock("numbers")
-        textual = s.add(change(before="Our strategy", after="Our 2026 strategy"))
-        # The replacement has a digit but the original does not; the lock
-        # protects existing figures from being rewritten.
+        textual = s.add(change(before="Our strategy", after="Our approach"))
         assert textual.status is Status.PROPOSED
+
+    def test_numbers_lock_refuses_a_figure_that_was_not_there_before(self):
+        """It used to read the old text only, which let a figure be invented.
+
+        The lock was written as "protect existing figures from being rewritten",
+        so a change whose replacement carried a digit and whose original did not
+        went straight through:
+
+            "Revenue grew strongly" -> "Revenue grew 15%"
+            a cell reading "n/a"    -> "11.8x"
+
+        under a lock whose own reason string is *"polish it, but do not touch a
+        single figure"*. A model inventing a multiple and a reviewer trusting the
+        lock is the failure this product exists to refuse.
+
+        This does refuse edits it used to permit -- "Our strategy" to "Our 2026
+        strategy" is now blocked -- and that is the intended direction. The cost
+        of refusing is a change the user can see and re-run without the lock. The
+        cost of permitting is a figure nobody put in the deck.
+        """
+        s = cs()
+        s.lock("numbers")
+        invented = s.add(change(before="Revenue grew strongly", after="Revenue grew 15%"))
+        assert invented.status is Status.REJECTED
+        assert "numbers lock" in invented.rationale
+
+        filled = s.add(change(cid="c2", before="n/a", after="11.8x"))
+        assert filled.status is Status.REJECTED
 
     def test_deck_wide_slide_lock_blocks_everything(self):
         s = cs()

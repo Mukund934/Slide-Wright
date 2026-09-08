@@ -158,7 +158,23 @@ class Lock:
                 return False
             if change.before is None or str(change.before) == "":
                 return True
-            return _contains_number(str(change.before))
+            # Both sides, not just the old one. Asking only what a change
+            # *replaces* leaves the deck open to a figure that was never there:
+            #
+            #     "Revenue grew strongly" -> "Revenue grew 15%"     permitted
+            #     a cell reading "n/a"    -> "11.8x"                permitted
+            #
+            # Under a lock whose text is *"polish the copy, do not touch a
+            # single figure"*. A model inventing a multiple and a reviewer
+            # trusting the lock is the exact failure this product exists to
+            # refuse, arriving through the guarantee meant to prevent it.
+            #
+            # "No figure moves" has to mean none appears either. A change with
+            # no digit on either side is unaffected, which is every change this
+            # lock is held to permit.
+            return _contains_number(str(change.before)) or _contains_number(
+                str(change.after) if change.after is not None else ""
+            )
         if self.scope == "wording":
             # "improve the layout, leave my words exactly as written"
             return change.op in (Op.SET_TEXT, Op.SET_TABLE_CELL)
