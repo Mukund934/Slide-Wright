@@ -23,6 +23,7 @@ one's artifact and silently rebase onto the original.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -421,7 +422,15 @@ class Session:
                 "place to put it."
             )
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(self.current.path, destination)
+        # Beside, then moved. An interrupted export is the worst version of this
+        # failure: the truncated file is sitting at a path the user chose,
+        # under the name they gave it, and it is the one they attach.
+        scratch = destination.with_name(f"{destination.name}.{os.getpid()}.partial")
+        try:
+            shutil.copy(self.current.path, scratch)
+            os.replace(scratch, destination)
+        finally:
+            scratch.unlink(missing_ok=True)
         return destination
 
     def history(self) -> str:

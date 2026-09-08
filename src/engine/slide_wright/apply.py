@@ -17,6 +17,7 @@ silently widening its blast radius.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import zipfile
@@ -497,14 +498,37 @@ def _write_package(source: Path, output: Path, patched: dict[str, bytes]) -> Non
 
     Every other part is copied byte-for-byte from the source, which is what
     makes the fidelity claim hold by construction rather than by hope.
+
+    Written beside the destination and moved into place, never written at the
+    destination. A zip whose writing stops halfway still gets a central
+    directory when the file closes, so an interrupted apply used to leave a
+    *valid* archive holding the first few parts -- measured: 8,579 bytes where
+    45,348 belonged, at the exact path a finished deck goes, and `Package.open`
+    accepted it. A partial deck that reads as a deck is the precise shape of
+    failure this engine's third principle forbids.
+
+    `os.replace` is atomic within a filesystem on Windows and POSIX alike, so
+    the destination holds the whole previous file or the whole new one and
+    never something in between.
     """
     output.parent.mkdir(parents=True, exist_ok=True)
-    if not patched:
-        shutil.copy(source, output)
-        return
-    with zipfile.ZipFile(source) as zin, zipfile.ZipFile(
-        output, "w", zipfile.ZIP_DEFLATED
-    ) as zout:
-        for info in zin.infolist():
-            data = patched.get(info.filename)
-            zout.writestr(info.filename, data if data is not None else zin.read(info.filename))
+    scratch = output.with_name(f"{output.name}.{os.getpid()}.partial")
+    try:
+        if patched:
+            with zipfile.ZipFile(source) as zin, zipfile.ZipFile(
+                scratch, "w", zipfile.ZIP_DEFLATED
+            ) as zout:
+                for info in zin.infolist():
+                    data = patched.get(info.filename)
+                    zout.writestr(
+                        info.filename,
+                        data if data is not None else zin.read(info.filename),
+                    )
+        else:
+            shutil.copy(source, scratch)
+        os.replace(scratch, output)
+    finally:
+        # A half-written file with a name nobody reads is litter; one at the
+        # destination is a deliverable. Only the first kind can be left behind,
+        # and it is not left behind either.
+        scratch.unlink(missing_ok=True)

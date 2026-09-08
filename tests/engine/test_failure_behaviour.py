@@ -329,3 +329,85 @@ class TestWhatPartHashesCannotSee:
         report = build(compare(adversarial_deck, out))
         slides = len(Package.open(adversarial_deck).slides())
         assert f"{slides} slide(s) untouched" in report.render()
+
+
+class TestAHalfWrittenFileNeverReachesTheDestination:
+    """A zip that stops being written still gets a central directory.
+
+    Closing the file writes one for whatever made it in, so an interrupted apply
+    left a *valid* archive holding the first few parts — measured on the
+    adversarial deck: **8,579 bytes where 45,348 belonged**, sitting at the exact
+    path a finished deck goes, and `Package.open` accepted it. A partial deck
+    that reads as a deck is the precise shape of failure the third principle
+    forbids, and nothing downstream would have caught it: it opens, it has a
+    content-types part, and its slides parse.
+
+    Writing beside the destination and moving into place makes the question go
+    away rather than answering it. `os.replace` is atomic within a filesystem on
+    Windows and POSIX, so the destination holds the whole previous file or the
+    whole new one.
+    """
+
+    def _interrupt_after(self, count: int):
+        """A ZipFile.writestr that gives up part way through."""
+        real = zipfile.ZipFile.writestr
+        seen = {"n": 0}
+
+        def flaky(self, name, data, *args, **kwargs):
+            seen["n"] += 1
+            if seen["n"] > count:
+                raise KeyboardInterrupt("interrupted")
+            return real(self, name, data, *args, **kwargs)
+
+        return real, flaky
+
+    def _write_interrupted(self, source, output, monkeypatch, after=8):
+        from slide_wright.apply import _write_package
+
+        real, flaky = self._interrupt_after(after)
+        monkeypatch.setattr(zipfile.ZipFile, "writestr", flaky)
+        with pytest.raises(KeyboardInterrupt):
+            _write_package(source, output, {"ppt/slides/slide1.xml": b"<p:sld/>"})
+        monkeypatch.setattr(zipfile.ZipFile, "writestr", real)
+
+    def test_nothing_is_left_where_a_finished_deck_would_be(
+        self, adversarial_deck, tmp_path, monkeypatch
+    ):
+        out = tmp_path / "edited.pptx"
+        self._write_interrupted(adversarial_deck, out, monkeypatch)
+        assert not out.exists(), (
+            "a truncated deck is sitting where a finished one belongs, and it "
+            "opens"
+        )
+
+    def test_a_file_already_there_survives_untouched(
+        self, adversarial_deck, tmp_path, monkeypatch
+    ):
+        """The worse case: overwriting a good deck with half of another one."""
+        out = tmp_path / "already.pptx"
+        shutil.copy(adversarial_deck, out)
+        before = out.read_bytes()
+        self._write_interrupted(adversarial_deck, out, monkeypatch)
+        assert out.read_bytes() == before
+
+    def test_no_half_written_file_is_left_lying_around(
+        self, adversarial_deck, tmp_path, monkeypatch
+    ):
+        self._write_interrupted(adversarial_deck, tmp_path / "edited.pptx", monkeypatch)
+        assert not list(tmp_path.glob("*.partial"))
+
+    def test_an_uninterrupted_write_still_lands(self, adversarial_deck, tmp_path):
+        from slide_wright.apply import _write_package
+
+        out = tmp_path / "fine.pptx"
+        _write_package(adversarial_deck, out, {"ppt/slides/slide1.xml": b"<p:sld/>"})
+        assert Package.open(out).part_count == Package.open(adversarial_deck).part_count
+
+    def test_a_copy_with_nothing_patched_is_atomic_too(self, adversarial_deck, tmp_path):
+        """The no-changes path is a plain copy and takes the same route."""
+        from slide_wright.apply import _write_package
+
+        out = tmp_path / "copy.pptx"
+        _write_package(adversarial_deck, out, {})
+        assert out.read_bytes() == adversarial_deck.read_bytes()
+        assert not list(tmp_path.glob("*.partial"))
