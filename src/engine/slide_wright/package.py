@@ -168,6 +168,23 @@ class Package:
         )
 
 
+def readable(path: str | Path) -> bool:
+    """Whether this file could be opened as a package, without opening it.
+
+    Runs the same checks `Package.open` runs first, and they all read the zip
+    directory rather than decompressing anything -- a few milliseconds even on a
+    55 MB deck. That makes it cheap enough to ask on every request, which is
+    what callers holding a session need: a version file that is *present and
+    damaged* passed every `is_file()` check in the product and then failed deep
+    inside the reader, as a 500.
+    """
+    try:
+        _assert_safe(Path(path))
+    except (UnsafePackageError, OSError):
+        return False
+    return True
+
+
 def _assert_safe(path: Path) -> None:
     """Reject hostile archives before extracting anything.
 

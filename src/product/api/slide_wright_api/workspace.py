@@ -17,6 +17,7 @@ from pathlib import Path
 
 from slide_wright.changeset import Change, ChangeSet, Op, Origin
 from slide_wright.inspect import DeckInfo
+from slide_wright.package import readable
 from slide_wright.session import Session, SessionError
 
 
@@ -158,13 +159,23 @@ class Workspace:
 
 
 def _intact(session: Session) -> bool:
-    """Whether every version this session believes in is still on disk.
+    """Whether the versions this session serves are still there and still open.
 
     Checked on the current version and the original, not all of them: those two
     are what every request touches, and stat-ing a hundred files on each open
     would cost more than it catches.
+
+    *Openable*, not merely present. A version file damaged in place passed the
+    old `is_file()` check and then failed deep inside the reader as a 500 on
+    every route. `readable` runs the same validation `Package.open` runs first
+    and reads only the zip directory, so asking on each request costs
+    milliseconds even on a 55 MB deck.
     """
-    return session.current.path.is_file() and session.versions[0].path.is_file()
+    return (
+        session.current.path.is_file()
+        and session.versions[0].path.is_file()
+        and readable(session.current.path)
+    )
 
 
 def _identify(path: Path) -> str:

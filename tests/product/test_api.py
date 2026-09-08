@@ -1448,3 +1448,56 @@ class TestWhenTheModelProviderFails:
         before = client.deck.read_bytes()
         self._failing(client, GeminiError("could not reach Gemini"), monkeypatch)
         assert client.deck.read_bytes() == before
+
+
+class TestADamagedVersionIsAsBadAsAMissingOne:
+    """`is_file()` passed a version file that had been damaged in place.
+
+    Truncated, emptied, or replaced with text — every presence check in the
+    product said yes and the failure arrived as a **500** from inside the
+    reader, on every route. Present and damaged is the same situation as absent
+    and was the one nobody had checked.
+    """
+
+    @pytest.fixture
+    def opened(self, tmp_path, adversarial_deck):
+        from slide_wright_api.app import create_app
+
+        deck = tmp_path / "deck.pptx"
+        shutil.copy(adversarial_deck, deck)
+        client = TestClient(
+            create_app(workspace=Workspace(), serve_client=False),
+            base_url="http://127.0.0.1:8787", raise_server_exceptions=False,
+        )
+        document = client.post("/api/documents", json={"path": str(deck)}).json()
+        return client, document, deck, Path(document["workspace"])
+
+    @pytest.mark.parametrize("payload", [b"", b"not a zip", b"PK\x03\x04truncated"])
+    def test_it_is_never_a_500(self, opened, payload):
+        client, document, _, workspace = opened
+        next(workspace.glob("v*.pptx")).write_bytes(payload)
+        for route in ("", "/audit", "/history"):
+            response = client.get(f"/api/documents/{document['id']}{route}")
+            assert response.status_code != 500, f"{route or '/'} returned a 500"
+
+    def test_it_says_which_version_and_what_to_do(self, opened):
+        client, document, _, workspace = opened
+        next(workspace.glob("v*.pptx")).write_bytes(b"broken")
+        detail = client.get(f"/api/documents/{document['id']}").json()["detail"]
+        assert "damaged" in detail
+        assert "v000-original.pptx" in detail
+        assert "the original file is untouched" in detail
+
+    def test_the_workspace_outlives_a_ruined_source(self, opened):
+        """The other direction, and it should keep working: the workspace holds
+        the original, so the deck being replaced with garbage costs nothing."""
+        client, document, deck, _ = opened
+        deck.write_bytes(b"nope")
+        assert client.get(f"/api/documents/{document['id']}").status_code == 200
+
+    def test_a_healthy_workspace_is_not_slowed_into_uselessness(self, opened):
+        """The check runs on every request, so it reads the zip directory and
+        decompresses nothing."""
+        client, document, _, _ = opened
+        for _ in range(20):
+            assert client.get(f"/api/documents/{document['id']}").status_code == 200

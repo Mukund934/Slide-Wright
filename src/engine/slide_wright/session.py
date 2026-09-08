@@ -35,7 +35,7 @@ from slide_wright.changeset import Change, ChangeSet, Status
 from slide_wright.fidelity import FidelityReport, compare
 from slide_wright.gate import GateResult, check
 from slide_wright.inspect import DeckInfo, inspect
-from slide_wright.package import Package
+from slide_wright.package import Package, readable
 from slide_wright.report import ChangeReport, RequestedChange, build
 
 
@@ -158,6 +158,16 @@ class Session:
                 raise SessionError(
                     f"version {entry['number']} is missing from the workspace "
                     f"({path.name}); the history no longer describes what is there"
+                )
+            if not readable(path):
+                # Present and damaged is the same situation and was not checked:
+                # every `is_file()` in the product passed it, and the failure
+                # arrived as a 500 from inside the reader on whatever route
+                # touched it next.
+                raise SessionError(
+                    f"version {entry['number']} is damaged ({path.name}) and "
+                    "cannot be opened. Delete the workspace folder beside the "
+                    "deck and open it again -- the original file is untouched"
                 )
             versions.append(Version(
                 number=entry["number"], path=path, created_at=entry["created_at"],
