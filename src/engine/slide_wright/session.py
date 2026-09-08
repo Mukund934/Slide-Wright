@@ -42,7 +42,12 @@ from slide_wright.fidelity import FidelityReport, compare
 from slide_wright.gate import GateResult, check
 from slide_wright.inspect import DeckInfo, inspect
 from slide_wright.package import Package, readable
-from slide_wright.report import ChangeReport, RequestedChange, build
+from slide_wright.report import (
+    ChangeReport,
+    RequestedChange,
+    build,
+    lock_violations,
+)
 
 
 class SessionError(Exception):
@@ -413,7 +418,9 @@ class Session:
             RequestedChange(slide=c.slide, description=c.describe(), target=c.target)
             for c in (cs.applied if cs else [])
         ]
-        return build(fidelity, requested)
+        return build(
+            fidelity, requested, lock_violations(source, output, cs.locks if cs else [])
+        )
 
     # ── history ──────────────────────────────────────────────────────────────
 

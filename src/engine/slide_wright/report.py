@@ -45,6 +45,10 @@ class ChangeReport:
 
     fidelity: FidelityReport
     requested: list[RequestedChange] = field(default_factory=list)
+    #: Guarantees the *output* breaks, whatever the change set said. Filled by
+    #: `lock_violations`; see it for why this is checked here and not only where
+    #: the changes were admitted.
+    lock_breaks: list[str] = field(default_factory=list)
 
     # ── attribution ──────────────────────────────────────────────────────────
 
@@ -155,7 +159,8 @@ class ChangeReport:
         code, and a deck that reads in a different order all block delivery.
         """
         return (
-            not self.unrequested_slide_changes
+            not self.lock_breaks
+            and not self.unrequested_slide_changes
             and not self.fidelity.removed
             and not self.fidelity.native_losses
             and not self.fidelity.rasterisation_suspected
@@ -166,6 +171,7 @@ class ChangeReport:
     @property
     def blocking_reasons(self) -> list[str]:
         reasons = []
+        reasons.extend(self.lock_breaks)
         if self.unrequested_slide_changes:
             reasons.append(
                 "unrequested changes on slide(s) "
@@ -265,5 +271,78 @@ def _slide_part_count(f: FidelityReport) -> int:
     return len([d for d in f.deltas if d.slide_number is not None and d.status != "added"])
 
 
-def build(fidelity: FidelityReport, requested: list[RequestedChange] | None = None) -> ChangeReport:
-    return ChangeReport(fidelity=fidelity, requested=requested or [])
+#: Which delta kinds each scope forbids in the output. `slide`, `shape` and the
+#: three exhibit scopes are matched by location instead, below.
+_FORBIDDEN_KINDS = {
+    "wording": {"text", "table", "added", "removed"},
+    "layout": {"geometry", "size"},
+    "formatting": {"formatting"},
+}
+
+
+def lock_violations(source, output, locks) -> list[str]:
+    """Guarantees the written deck breaks, read off the deck rather than the plan.
+
+    A lock is normally enforced where changes are admitted: the change arrives,
+    `ChangeSet.add` refuses it, the status reads REJECTED. That proves the gate
+    works and says nothing about the file that comes out, and the two came apart
+    in practice -- `formatting` permits text edits *by design*, and an applier
+    that stripped run styling while making one left the lock declared, honoured,
+    reported honoured, and worthless.
+
+    So the same question is asked of the output. Every held lock is turned into
+    a property the two decks must share, and the semantic diff already computes
+    every one of them. A violation blocks delivery, which is what the README has
+    claimed since it was written and what nothing was doing.
+
+    Returns sentences, because they are read by whoever is deciding not to send
+    the deck.
+    """
+    if not locks:
+        return []
+
+    from slide_wright.diff import diff
+    from slide_wright.inspect import inspect
+
+    comparison = diff(source, output)
+    if not comparison.deltas:
+        return []
+
+    kinds = {
+        (sl.number, sh.id): sh.kind
+        for sl in inspect(source).slides
+        for sh in sl.shapes
+    }
+    exhibit = {"tables": "table", "charts": "chart", "media": "picture"}
+
+    broken: list[str] = []
+    for lock in locks:
+        for delta in comparison.deltas:
+            if not _breaks(lock, delta, kinds, exhibit):
+                continue
+            held = lock.scope + (f":{lock.target}" if lock.target else "")
+            broken.append(f"the {held} lock was held, and {delta.description}")
+            break          # one sentence per lock; the diff carries the rest
+    return broken
+
+
+def _breaks(lock, delta, kinds, exhibit) -> bool:
+    if lock.scope == "slide":
+        return not lock.target or str(delta.slide) == str(lock.target)
+    if lock.scope == "shape":
+        return delta.shape_id == lock.target
+    if lock.scope == "numbers":
+        return delta.changes_figures
+    if lock.scope in exhibit:
+        return kinds.get((delta.slide, delta.shape_id)) == exhibit[lock.scope]
+    return delta.kind in _FORBIDDEN_KINDS.get(lock.scope, set())
+
+
+def build(
+    fidelity: FidelityReport,
+    requested: list[RequestedChange] | None = None,
+    lock_breaks: list[str] | None = None,
+) -> ChangeReport:
+    return ChangeReport(
+        fidelity=fidelity, requested=requested or [], lock_breaks=lock_breaks or []
+    )

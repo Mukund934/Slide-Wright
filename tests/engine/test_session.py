@@ -593,3 +593,155 @@ class TestOneApplyAtATime:
         report = session.apply("fine")
         assert report.deliverable
         assert [v.number for v in session.versions] == [0, 1]
+
+
+class TestLocksAreEnforcedAtTheVerifier:
+    """The README has claimed this since it was written. Nothing was doing it.
+
+    A lock was consulted in exactly one place -- `ChangeSet.add`, where changes
+    are admitted -- so the guarantee was about the plan and not about the file.
+    The two came apart this morning: `formatting` permits text edits *by design*,
+    an applier stripped run styling while making one, and the lock was declared,
+    honoured, reported honoured, and worthless.
+
+    So the deck is asked as well as the plan. These tests construct outputs that
+    break a lock without going through the gate that would have refused them,
+    which is the only way to test a second line of defence -- if the first line
+    is working, the second never fires on anything it produces.
+    """
+
+    def _edited(self, deck, tmp_path, change, name):
+        """An output produced with no lock held, so the gate admits the change."""
+        from slide_wright.apply import apply_changes
+        from slide_wright.changeset import ChangeSet
+
+        cs = ChangeSet(deck=str(deck))
+        cs.add(change)
+        cs.approve_all()
+        out = tmp_path / name
+        assert not apply_changes(deck, cs, out).failed
+        return out
+
+    def _locked(self, deck, scope, target=""):
+        from slide_wright.changeset import ChangeSet
+
+        cs = ChangeSet(deck=str(deck))
+        cs.lock(scope, target)
+        return cs
+
+    def _styled_shape(self, deck):
+        return next(
+            (sl.number, s)
+            for sl in inspect(deck).slides
+            for s in sl.shapes
+            if s.kind not in {"table", "group", "chart", "picture"} and len(s.runs) > 1
+        )
+
+    def test_a_restyled_run_blocks_delivery_under_a_formatting_lock(
+        self, session, adversarial_deck, tmp_path
+    ):
+        number, shape = self._styled_shape(adversarial_deck)
+        # Size rather than typeface: the corpus run carries weight and size in
+        # its `rPr` and no `a:latin`, and the applier deliberately declines to
+        # invent an override on a run that inherits its typeface.
+        out = self._edited(
+            adversarial_deck, tmp_path,
+            Change(id="c1", op=Op.SET_FONT_SIZE, slide=number,
+                   target=f"{shape.id}/run/1", before=shape.runs[1].size_pt,
+                   after=9),
+            "restyled.pptx",
+        )
+        report = session.verify(
+            adversarial_deck, out, self._locked(adversarial_deck, "formatting")
+        )
+        assert not report.deliverable, "a broken guarantee has to stop the deck"
+        assert any("formatting lock" in reason for reason in report.blocking_reasons)
+
+    def test_a_moved_shape_blocks_delivery_under_a_layout_lock(
+        self, session, adversarial_deck, tmp_path
+    ):
+        number, table = next(
+            (sl.number, s)
+            for sl in inspect(adversarial_deck).slides
+            for s in sl.shapes
+            if s.kind == "table"
+        )
+        out = self._edited(
+            adversarial_deck, tmp_path,
+            Change(id="c1", op=Op.MOVE, slide=number, target=table.id,
+                   before=[table.x, table.y], after=[table.x + 400000, table.y]),
+            "moved.pptx",
+        )
+        report = session.verify(
+            adversarial_deck, out, self._locked(adversarial_deck, "layout")
+        )
+        assert not report.deliverable
+        assert any("layout lock" in reason for reason in report.blocking_reasons)
+
+    def test_a_changed_figure_blocks_delivery_under_a_numbers_lock(
+        self, session, adversarial_deck, tmp_path
+    ):
+        number, table = next(
+            (sl.number, s)
+            for sl in inspect(adversarial_deck).slides
+            for s in sl.shapes
+            if s.kind == "table" and s.cell(1, 1)
+        )
+        out = self._edited(
+            adversarial_deck, tmp_path,
+            Change(id="c1", op=Op.SET_TABLE_CELL, slide=number,
+                   target=f"{table.id}/r1/c1", before=table.cell(1, 1), after="99.9x"),
+            "refigured.pptx",
+        )
+        report = session.verify(
+            adversarial_deck, out, self._locked(adversarial_deck, "numbers")
+        )
+        assert not report.deliverable
+        assert any("numbers lock" in reason for reason in report.blocking_reasons)
+
+    def test_a_locked_slide_that_changed_blocks_delivery(
+        self, session, adversarial_deck, tmp_path
+    ):
+        number, shape = self._styled_shape(adversarial_deck)
+        out = self._edited(
+            adversarial_deck, tmp_path,
+            Change(id="c1", op=Op.SET_TEXT, slide=number, target=shape.id,
+                   before=shape.runs[0].text, after="CHANGED"),
+            "slide-changed.pptx",
+        )
+        report = session.verify(
+            adversarial_deck, out, self._locked(adversarial_deck, "slide", str(number))
+        )
+        assert not report.deliverable
+        assert any(f"slide:{number} lock" in r for r in report.blocking_reasons)
+
+    def test_a_lock_over_something_that_did_not_change_does_not_block(
+        self, session, adversarial_deck, tmp_path
+    ):
+        """The other half. A second line of defence that fires on clean output
+        is not a guarantee, it is a broken product."""
+        number, shape = self._styled_shape(adversarial_deck)
+        out = self._edited(
+            adversarial_deck, tmp_path,
+            Change(id="c1", op=Op.SET_TEXT, slide=number, target=shape.id,
+                   before=shape.runs[0].text, after="Reworded"),
+            "worded.pptx",
+        )
+        # Text moved; layout and figures did not.
+        for scope in ("layout", "numbers", "charts", "media"):
+            report = session.verify(
+                adversarial_deck, out, self._locked(adversarial_deck, scope)
+            )
+            assert not report.lock_breaks, f"{scope} fired on an output it does not cover"
+
+    def test_no_locks_means_no_extra_work_and_no_extra_reasons(
+        self, session, adversarial_deck, tmp_path
+    ):
+        number, shape = self._styled_shape(adversarial_deck)
+        out = self._edited(
+            adversarial_deck, tmp_path,
+            Change(id="c1", op=Op.SET_TEXT, slide=number, target=shape.id,
+                   before=shape.runs[0].text, after="Reworded"),
+            "plain.pptx",
+        )
+        assert session.verify(adversarial_deck, out).lock_breaks == []
