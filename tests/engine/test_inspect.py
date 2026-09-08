@@ -42,9 +42,9 @@ class TestObjectClassification:
     def test_finds_the_native_table_with_dimensions(self, adversarial_deck):
         d = inspect(adversarial_deck)
         tables = [s for s in d.all_shapes() if s.kind == "table"]
-        assert len(tables) == 1
-        assert tables[0].table_rows == 4
-        assert tables[0].table_cols == 4
+        assert len(tables) == 2, "the comps table and the split-run one"
+        comps = next(t for t in tables if t.table_rows == 4)
+        assert comps.table_cols == 4
 
     def test_finds_the_group_and_counts_children(self, adversarial_deck):
         d = inspect(adversarial_deck)

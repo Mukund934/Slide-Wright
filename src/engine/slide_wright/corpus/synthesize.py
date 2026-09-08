@@ -42,6 +42,7 @@ def build_adversarial(out_path: str | Path) -> Path:
     _slide_grouped_shapes(prs)        # <p:grpSp>
     _slide_custom_geometry(prs)       # <a:custGeom>
     _slide_hyperlinks_and_notes(prs)  # <a:hlinkClick> + notesSlide
+    _slide_split_runs(prs)            # one sentence, several <a:r>
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(out_path))
@@ -113,6 +114,54 @@ def _slide_table(prs: Presentation) -> None:
             if r == 0:
                 para.font.bold = True
     _source_note(s, "Source: broker comps, 30 June 2026")
+
+
+def _slide_split_runs(prs: Presentation) -> None:
+    """Text a reader sees as one thing and OOXML stores as several.
+
+    This is the construct that hid four defects through five hardening passes,
+    and it is the most ordinary thing on this deck: a sentence with a figure
+    emphasised in it, and a table cell whose number is not one run.
+
+    Every fidelity and narrowness test swept over a corpus where a paragraph was
+    a run and a cell was a run, so "the edit touched only the target" was being
+    measured at a granularity where it could not fail. Replacing two words at the
+    front of a paragraph unbolded the figure behind it; refreshing a cell wrote
+    1,987 beside the 34 left over from 1,234; a change addressed at one run
+    resized the whole shape. None of it was visible without this slide.
+
+    Run boundaries land inside a value for entirely mundane reasons -- part of a
+    number gets emphasised, a spell-check language boundary falls mid-token, text
+    is pasted in two pieces -- so a deck without them is not a simpler deck. It
+    is a deck that has not been asked the question.
+    """
+    s = prs.slides.add_slide(prs.slide_layouts[5])
+    s.shapes.title.text = "Split runs (one value, several runs)"
+
+    frame = s.shapes.add_textbox(
+        Inches(1), Inches(1.9), Inches(11), Inches(1)
+    ).text_frame
+    for text, bold in (("Revenue grew ", False), ("15%", True), (" in FY25", False)):
+        run = frame.paragraphs[0].add_run()
+        run.text = text
+        run.font.bold = bold
+        run.font.size = Pt(20)
+
+    tbl = s.shapes.add_table(
+        2, 2, Inches(1), Inches(3.2), Inches(6), Inches(1.4)
+    ).table
+    tbl.cell(0, 0).text = "Metric"
+    tbl.cell(0, 1).text = "FY25"
+    tbl.cell(1, 0).text = "Revenue"
+    cell = tbl.cell(1, 1).text_frame.paragraphs[0]
+    cell.text = ""
+    for text, bold in (("1,2", False), ("34", True)):
+        run = cell.add_run()
+        run.text = text
+        run.font.bold = bold
+        run.font.size = Pt(14)
+
+    _source_note(s, "Source: synthetic, for run-boundary coverage")
 
 
 def _slide_grouped_shapes(prs: Presentation) -> None:

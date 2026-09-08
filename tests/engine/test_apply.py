@@ -813,3 +813,85 @@ class TestATargetNamingOneRunChangesOneRun:
         ))
         assert len(apply_changes(src, cs, out).failed) == 1
         assert self._runs(out)[1] == before, "a refused change must write nothing"
+
+
+class TestNarrownessAskedOfEveryShape:
+    """The property, swept rather than exemplified.
+
+    Adding a split-run slide to the corpus caught nothing on its own: 884 tests
+    passed over it with the applier still broken, because every one of them
+    asked about a shape it had chosen. A construct nothing interrogates is a
+    construct nothing checks, which is the same lesson the surfaces taught and
+    it applies to fixtures too.
+
+    These two sweep the invariant over whatever the deck happens to contain, so
+    a fixture added later is covered by the question the day it lands.
+    """
+
+    FIELDS = ("text", "size_pt", "bold", "italic", "font", "color")
+
+    def _fingerprint(self, shape):
+        return [tuple(getattr(r, f) for f in self.FIELDS) for r in shape.runs]
+
+    def test_editing_one_run_leaves_every_other_run_untouched(
+        self, adversarial_deck, tmp_path
+    ):
+        deck = inspect(adversarial_deck)
+        swept = 0
+        for slide in deck.slides:
+            for shape in slide.shapes:
+                if shape.kind in {"table", "group"} or len(shape.runs) < 2:
+                    continue
+                head = shape.runs[0].text
+                if len(head) < 2:
+                    continue
+                # A proper prefix, so no run matches exactly and the edit goes
+                # through the joining path rather than the single-run one.
+                before = head[: len(head) - 1]
+                out = tmp_path / f"s{slide.number}-{shape.id}.pptx"
+                cs = approved(adversarial_deck, Change(
+                    id="c1", op=Op.SET_TEXT, slide=slide.number, target=shape.id,
+                    before=before, after=before.upper(),
+                ))
+                result = apply_changes(adversarial_deck, cs, out)
+                assert not result.failed, result.failed
+                after = next(
+                    s for s in inspect(out).slides[slide.number - 1].shapes
+                    if s.id == shape.id
+                )
+                assert self._fingerprint(after)[1:] == self._fingerprint(shape)[1:], (
+                    f"slide {slide.number} shape {shape.id}: an edit inside run 1 "
+                    f"changed a run it never addressed"
+                )
+                swept += 1
+        assert swept, "the corpus must contain a shape with more than one run"
+
+    def test_a_replaced_cell_holds_exactly_the_new_value(
+        self, adversarial_deck, tmp_path
+    ):
+        deck = inspect(adversarial_deck)
+        swept = 0
+        for slide in deck.slides:
+            for shape in slide.shapes:
+                if shape.kind != "table":
+                    continue
+                for address, value in shape.table_cells.items():
+                    if not value:
+                        continue
+                    out = tmp_path / f"c{slide.number}-{shape.id}-{address.replace('/', '')}.pptx"
+                    cs = approved(adversarial_deck, Change(
+                        id="c1", op=Op.SET_TABLE_CELL, slide=slide.number,
+                        target=f"{shape.id}/{address}", before=value, after="ZZ",
+                    ))
+                    result = apply_changes(adversarial_deck, cs, out)
+                    assert not result.failed, result.failed
+                    written = next(
+                        s for s in inspect(out).slides[slide.number - 1].shapes
+                        if s.id == shape.id
+                    ).table_cells[address]
+                    assert written == "ZZ", (
+                        f"slide {slide.number} table {shape.id} cell {address}: "
+                        f"replacing {value!r} left {written!r}"
+                    )
+                    swept += 1
+        assert swept, "the corpus must contain a table with a non-empty cell"
