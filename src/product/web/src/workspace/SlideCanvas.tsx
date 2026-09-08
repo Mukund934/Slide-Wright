@@ -18,7 +18,7 @@
 import { motion } from "motion/react";
 import { useMemo } from "react";
 
-import type { Shape, Slide } from "../api/types";
+import type { Run, Shape, Slide } from "../api/types";
 import { attention, carry } from "../motion/tokens";
 
 /** EMU per CSS pixel at 96 DPI. 914400 EMU to the inch. */
@@ -186,8 +186,40 @@ function TextBody({ shape }: { shape: Shape }) {
     // Top-anchored, which is OOXML's default. Centring looked tidier and was
     // wrong more often, which on a view whose only claim is accuracy is the
     // worse trade.
+    //
+    // Paragraphs are the lines; runs are a formatting split *within* a line.
+    // Laying the runs out directly as a column made every run its own flex
+    // item, so "Revenue grew **15%** in FY25" drew as three stacked lines --
+    // measured in Chrome at tops 1, 17 and 33 where there should have been one.
+    // Any sentence with a bold word, an emphasised figure or a hyperlink in it
+    // was drawn broken, on the view whose only claim is that it is accurate.
     <div className="flex size-full flex-col justify-start overflow-hidden px-1 leading-tight">
-      {shape.runs.map((run, index) => (
+      {paragraphsOf(shape.runs).map((runs, line) => (
+        <p key={line}>{runs.map(renderRun)}</p>
+      ))}
+    </div>
+  );
+}
+
+/** Runs grouped into the lines they belong to, in order. */
+function paragraphsOf(runs: Run[]): Run[][] {
+  const lines: Run[][] = [];
+  let current: number | null = null;
+  let line: Run[] = [];
+  for (const run of runs) {
+    if (current !== null && run.paragraph !== current) {
+      lines.push(line);
+      line = [];
+    }
+    current = run.paragraph;
+    line.push(run);
+  }
+  if (line.length) lines.push(line);
+  return lines;
+}
+
+function renderRun(run: Run, index: number) {
+  return (
         <span
           // Runs have no stable identity in OOXML; index is the only address.
           key={index}
@@ -206,8 +238,6 @@ function TextBody({ shape }: { shape: Shape }) {
         >
           {run.text}
         </span>
-      ))}
-    </div>
   );
 }
 

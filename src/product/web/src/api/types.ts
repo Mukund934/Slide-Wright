@@ -46,6 +46,14 @@ export interface Run {
   italic: boolean;
   font: string | null;
   color: string | null;
+  /**
+   * Which paragraph of the shape this run belongs to.
+   *
+   * Runs are a formatting split, not a line break — "Revenue grew **15%** in
+   * FY25" is three runs and one line. Paragraphs are the line breaks, and the
+   * canvas needs both to draw a shape the way PowerPoint does.
+   */
+  paragraph: number;
 }
 
 export interface Shape {

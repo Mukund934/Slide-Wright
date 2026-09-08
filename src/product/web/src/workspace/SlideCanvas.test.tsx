@@ -22,7 +22,7 @@ function shape(over: Partial<Shape> = {}): Shape {
     id: "1", name: "Rectangle 1", kind: "shape", placeholder_type: null,
     x: 914400, y: 914400, cx: 1828800, cy: 914400,
     rotation_deg: null, geometry_inherited: false, geometry: "rect",
-    runs: [{ text: "hello", size_pt: 18, bold: false, italic: false, font: null, color: null }],
+    runs: [{ text: "hello", size_pt: 18, bold: false, italic: false, font: null, color: null, paragraph: 0 }],
     table_rows: 0, table_cols: 0, table_cells: {}, child_count: 0, text: "hello",
     ...over,
   };
@@ -109,7 +109,7 @@ describe("what it draws", () => {
     // which reads as the object being absent rather than unrendered.
     const { container } = draw([
       shape({
-        runs: [{ text: "hi", size_pt: 18, bold: false, italic: false, font: null, color: "FFFFFF" }],
+        runs: [{ text: "hi", size_pt: 18, bold: false, italic: false, font: null, color: "FFFFFF" , paragraph: 0 }],
       }),
     ]);
     const span = container.querySelector("[data-shape-id] span") as HTMLElement;
@@ -132,5 +132,78 @@ describe("layout", () => {
     expect(container.querySelector('[role="group"]')?.getAttribute("aria-label")).toBe(
       "Slide 12: Comparables",
     );
+  });
+});
+
+
+describe("a shape's lines", () => {
+  /**
+   * Runs are a formatting split; paragraphs are the line breaks.
+   *
+   * The runs were laid out directly inside a column flex container, so each one
+   * became its own flex item and every run drew on its own line. Measured in
+   * Chrome: "Revenue grew " / "15%" / " in FY25" rendered at tops 1, 17 and 33
+   * where there should have been one line. jsdom does no layout and could not
+   * have shown that, so what is asserted here is the structure the layout
+   * follows from: runs of one paragraph share one block, and a new paragraph
+   * starts a new one.
+   */
+  const sentence = (text: string, paragraph: number, bold = false) => ({
+    text,
+    size_pt: 18,
+    bold,
+    italic: false,
+    font: null,
+    color: null,
+    paragraph,
+  });
+
+  it("keeps one sentence on one line however many runs it is", () => {
+    const { container } = draw([
+      shape({
+        runs: [
+          sentence("Revenue grew ", 0),
+          sentence("15%", 0, true),
+          sentence(" in FY25", 0),
+        ],
+      }),
+    ]);
+    const lines = [...container.querySelectorAll("[data-shape-id] p")];
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.querySelectorAll("span")).toHaveLength(3);
+    expect(lines[0]!.textContent).toBe("Revenue grew 15% in FY25");
+  });
+
+  it("starts a new line at a paragraph boundary", () => {
+    const { container } = draw([
+      shape({
+        runs: [
+          sentence("Margin held", 0),
+          sentence("Headcount fell", 1),
+          sentence("Cash stable", 2),
+        ],
+      }),
+    ]);
+    const lines = container.querySelectorAll("[data-shape-id] p");
+    expect(lines).toHaveLength(3);
+    expect([...lines].map((l) => l.textContent)).toEqual([
+      "Margin held",
+      "Headcount fell",
+      "Cash stable",
+    ]);
+  });
+
+  it("groups runs by the paragraph they name, not by how many there are", () => {
+    const { container } = draw([
+      shape({
+        runs: [
+          sentence("Total ", 0),
+          sentence("42", 0, true),
+          sentence("as at Q3", 1),
+        ],
+      }),
+    ]);
+    const lines = container.querySelectorAll("[data-shape-id] p");
+    expect([...lines].map((l) => l.querySelectorAll("span").length)).toEqual([2, 1]);
   });
 });

@@ -37,12 +37,17 @@ class RunOut(BaseModel):
     italic: bool = False
     font: str | None = None
     color: str | None = None
+    #: Which paragraph of the shape this run belongs to. The canvas needs it to
+    #: know where a line ends: without it, runs were laid out as a column and a
+    #: sentence containing one bold word drew as three stacked lines.
+    paragraph: int = 0
 
     @classmethod
     def of(cls, run: TextRun) -> RunOut:
         return cls(
             text=run.text, size_pt=run.size_pt, bold=run.bold,
             italic=run.italic, font=run.font, color=run.color,
+            paragraph=run.paragraph,
         )
 
 
