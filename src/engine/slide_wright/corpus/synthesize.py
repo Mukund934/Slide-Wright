@@ -17,6 +17,9 @@ rather than quietly skipped.
 
 from __future__ import annotations
 
+import io
+import struct
+import zlib
 from pathlib import Path
 
 from pptx import Presentation
@@ -215,6 +218,43 @@ def _slide_custom_geometry(prs: Presentation) -> None:
     shape = builder.convert_to_shape()
     shape.line.color.rgb = BRAND
     shape.line.width = Pt(3)
+
+    # A picture, because the deck had none and `assert_preserved` counts media
+    # parts: "media 0 -> 0" is a check with nothing to check. It also makes the
+    # `media` lock testable, which it was not on any generated deck.
+    s.shapes.add_picture(
+        io.BytesIO(_png(24, 24, BRAND)), Inches(11.6), Inches(1.7),
+        Inches(1.0), Inches(1.0),
+    )
+
+
+def _png(width: int, height: int, colour: RGBColor) -> bytes:
+    """A valid PNG of one colour, built here rather than committed.
+
+    Everything else in this corpus is generated, for the reason the module
+    docstring gives: a generated deck is reproducible on any machine and carries
+    no licence or confidentiality question. An image is the one construct where
+    the temptation is to commit a file instead, so it is built too -- forty
+    bytes of zlib rather than a binary blob nobody can diff.
+    """
+    raw = bytearray()
+    row = bytes((colour[0], colour[1], colour[2])) * width
+    for _ in range(height):
+        raw.append(0)          # filter type 0, once per scanline
+        raw.extend(row)
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(payload)) + kind + payload
+            + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+        )
+
+    return (
+        bytes((0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A))
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+        + chunk(b"IEND", b"")
+    )
 
 
 def _slide_hyperlinks_and_notes(prs: Presentation) -> None:
