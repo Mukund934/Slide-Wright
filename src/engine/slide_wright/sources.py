@@ -16,6 +16,7 @@ question; it may never decide what the cell contains.
 
 from __future__ import annotations
 
+import codecs
 import csv
 import re
 from dataclasses import dataclass, field
@@ -60,6 +61,23 @@ class SourceTable:
     document: str
     name: str
     rows: list[list[str]] = field(default_factory=list)
+
+    #: How the file was actually read. Both are recorded because both are
+    #: guesses when the file does not say, and a reader looking at a mangled
+    #: character deserves to know which guess produced it.
+    encoding: str = "utf-8"
+    delimiter: str = ","
+
+    @property
+    def read_note(self) -> str:
+        """What to say about the reading, when there is anything to say."""
+        parts = []
+        if self.encoding not in ("utf-8", "utf-8-sig"):
+            parts.append(f"decoded as {self.encoding}")
+        if self.delimiter != ",":
+            shown = {"	": "tab", ";": "semicolon"}.get(self.delimiter, self.delimiter)
+            parts.append(f"{shown}-separated")
+        return "; ".join(parts)
 
     @property
     def header(self) -> list[str]:
@@ -179,17 +197,88 @@ class SourceSet:
 
 # ── readers ──────────────────────────────────────────────────────────────────
 
+# Tried in order. UTF-8 is strict and therefore trustworthy: a file that decodes
+# as UTF-8 almost certainly is one. UTF-16 announces itself with a byte-order
+# mark. cp1252 is last because it decodes nearly any byte sequence into
+# *something* -- it can only ever be the fallback, never a detection.
+ENCODINGS = ("utf-8-sig", "utf-16", "cp1252")
+
+# The delimiters a spreadsheet actually writes. European Excel uses `;` where
+# the locale takes `,` as the decimal separator; "Unicode Text" is tab-separated.
+DELIMITERS = (",", ";", "	")
+
+# UTF-16 is only ever chosen when the file announces itself. Guessing it
+# turns ordinary ASCII into pairs of CJK characters without erroring at all.
+BOMS = (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)
+
+
 def read_csv(path: str | Path, name: str = "") -> SourceTable:
+    """Read a CSV the way spreadsheets actually write them.
+
+    Two things were refusing real files outright.
+
+    **Encoding.** Only UTF-8 was accepted, so a CSV saved by Excel on Windows --
+    cp1252 the moment any name has an accent in it -- came back as "could not
+    read: 'utf-8' codec can't decode byte 0xe9" and the feature was unusable for
+    that person entirely. That is the common case for this workflow, not an edge
+    one: the workbook an analyst emails you.
+
+    **Delimiter.** A semicolon-separated file parsed as a single column called
+    `Company;Multiple`, matched nothing, and reported that the labels did not
+    line up. Silently useless is worse than refused.
+
+    Both are guesses, so both are recorded on the table and `read_note` says so.
+    A reader looking at a mangled character is owed the reason.
+    """
     path = Path(path)
     if not path.is_file():
         raise SourceError(f"not a file: {path}")
     try:
-        with path.open(newline="", encoding="utf-8-sig") as handle:
-            rows = [[cell.strip() for cell in row] for row in csv.reader(handle)]
-    except (OSError, UnicodeDecodeError) as exc:
+        raw = path.read_bytes()
+    except OSError as exc:
         raise SourceError(f"could not read {path.name}: {exc}") from exc
-    return SourceTable(document=str(path), name=name or path.stem,
-                       rows=[r for r in rows if any(r)])
+
+    text, encoding = _decode(raw, path.name)
+    delimiter = _delimiter(text)
+    rows = [
+        [cell.strip() for cell in row]
+        for row in csv.reader(text.splitlines(), delimiter=delimiter)
+    ]
+    return SourceTable(
+        document=str(path), name=name or path.stem,
+        rows=[r for r in rows if any(r)],
+        encoding=encoding, delimiter=delimiter,
+    )
+
+
+def _decode(raw: bytes, name: str) -> tuple[str, str]:
+    for encoding in ENCODINGS:
+        if encoding == "utf-16" and not raw.startswith(BOMS):
+            continue  # only when the file says so; guessing UTF-16 mangles ASCII
+        try:
+            return raw.decode(encoding), encoding
+        except UnicodeDecodeError:
+            continue
+    raise SourceError(
+        f"could not read {name}: it is not text in any encoding a spreadsheet "
+        f"writes ({', '.join(ENCODINGS)})"
+    )
+
+
+def _delimiter(text: str) -> str:
+    """Whichever separator splits the first real line into the most fields.
+
+    Deterministic and explainable, which `csv.Sniffer` is not -- it guesses from
+    a sample and changes its mind on a different one. A tie keeps the comma,
+    because a file with no separator at all is a one-column file.
+    """
+    line = next((line for line in text.splitlines() if line.strip()), "")
+    best, most = ",", 1
+    for candidate in DELIMITERS:
+        fields = len(next(csv.reader([line], delimiter=candidate), []))
+        if fields > most:
+            best, most = candidate, fields
+    return best
 
 
 def read_xlsx(path: str | Path, sheet: str | None = None) -> list[SourceTable]:

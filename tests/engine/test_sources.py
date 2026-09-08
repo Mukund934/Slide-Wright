@@ -176,3 +176,77 @@ class TestCitationValue:
         citation = Citation(document="a.csv", locator="A1", value="1")
         with pytest.raises(Exception):
             citation.value = "2"  # type: ignore[misc]
+
+
+class TestCsvAsSpreadsheetsActuallyWriteIt:
+    """Two things were refusing real files outright.
+
+    **Encoding.** Only UTF-8 was accepted, so a CSV saved by Excel on Windows —
+    cp1252 the moment any name carries an accent — came back as "could not read:
+    'utf-8' codec can't decode byte 0xe9", and the feature was unusable for that
+    person entirely. That is the common case for this workflow, not an edge one:
+    it is the workbook an analyst emails you.
+
+    **Delimiter.** A semicolon-separated file, which is what European Excel
+    writes when the locale takes `,` as the decimal separator, parsed as a
+    single column called `Company;Multiple`. It then matched nothing and
+    reported that the labels did not line up — silently useless, which is worse
+    than refused.
+    """
+
+    def _read(self, tmp_path, name, data: bytes):
+        path = tmp_path / name
+        path.write_bytes(data)
+        return read_csv(path)
+
+    def test_plain_utf8(self, tmp_path):
+        table = self._read(tmp_path, "a.csv", b"Company,Multiple\nAlpha,9.4x\n")
+        assert table.rows == [["Company", "Multiple"], ["Alpha", "9.4x"]]
+
+    def test_a_byte_order_mark_is_not_part_of_the_first_header(self, tmp_path):
+        table = self._read(tmp_path, "b.csv", b"\xef\xbb\xbfCompany,Multiple\nAlpha,9.4x\n")
+        assert table.header[0] == "Company"
+
+    def test_cp1252_from_excel_on_windows(self, tmp_path):
+        table = self._read(tmp_path, "c.csv",
+                           "Company,Margin\nCaf\u00e9 Ltd,21%\n".encode("cp1252"))
+        assert table.rows[1] == ["Caf\u00e9 Ltd", "21%"], "the accent came back wrong"
+
+    def test_utf16_only_when_the_file_says_so(self, tmp_path):
+        """Guessing UTF-16 turns ordinary ASCII into pairs of CJK characters
+        and never raises, so it is chosen on the byte-order mark alone."""
+        table = self._read(tmp_path, "e.csv",
+                           "Company\tMultiple\nAlpha\t9.4x\n".encode("utf-16"))
+        assert table.rows == [["Company", "Multiple"], ["Alpha", "9.4x"]]
+
+    def test_semicolons_from_european_excel(self, tmp_path):
+        table = self._read(tmp_path, "f.csv", b"Company;Multiple\nAlpha;9.4x\n")
+        assert table.header == ["Company", "Multiple"]
+
+    def test_tabs(self, tmp_path):
+        table = self._read(tmp_path, "g.csv", b"Company\tMultiple\nAlpha\t9.4x\n")
+        assert table.header == ["Company", "Multiple"]
+
+    def test_a_comma_file_is_not_re_read_as_something_else(self, tmp_path):
+        """A tie keeps the comma. A file with no separator is one column."""
+        table = self._read(tmp_path, "h.csv", b"Company\nAlpha\n")
+        assert table.delimiter == ","
+
+    def test_a_comma_inside_a_quoted_field_is_still_one_field(self, tmp_path):
+        table = self._read(tmp_path, "i.csv",
+                           b'Company,Note\n"Alpha, Inc.","up, sharply"\n')
+        assert table.rows[1] == ["Alpha, Inc.", "up, sharply"]
+
+    def test_what_was_guessed_is_recorded(self, tmp_path):
+        """Both are guesses. A reader looking at a mangled character is owed
+        the reason, and one looking at a clean file should be told nothing."""
+        odd = self._read(tmp_path, "j.csv", b"Company;Margin\nAlpha;21%\n")
+        assert "semicolon" in odd.read_note
+        plain = self._read(tmp_path, "k.csv", b"Company,Margin\nAlpha,21%\n")
+        assert plain.read_note == ""
+
+    def test_something_that_is_not_text_at_all_is_still_refused(self, tmp_path):
+        """cp1252 decodes nearly any byte, so the fallback ladder must not turn
+        a refusal into a table of nonsense — a zip is not a spreadsheet."""
+        table = self._read(tmp_path, "l.csv", b"PK\x03\x04\x14\x00\x00\x00\x08\x00")
+        assert not table.rows or all(len(r) <= 1 for r in table.rows)
