@@ -38,7 +38,8 @@ export function History({
           </span>
         }
       >
-        nothing is undone — going back is choosing an earlier file
+        going back is choosing an earlier file — the ones after it stay in the
+        workspace folder
       </PanelContext>
       <motion.ol
         className="overflow-y-auto"
@@ -97,7 +98,24 @@ export function History({
                     Compare
                   </Button>
                 )}
-                <Button tone="quiet" busy={busy} onClick={() => onRevert(version.number)}>
+                {/* "Nothing is undone" was true of the file on disk and read
+                    as false the moment someone used this: the list shrinks, and
+                    a version they made appears to have been deleted. It has
+                    not — the engine keeps every artifact and never reissues a
+                    number — but the interface was letting them believe
+                    otherwise, which is a strange thing for this product of all
+                    products to do. */}
+                <Button
+                  tone="quiet"
+                  busy={busy}
+                  onClick={() => onRevert(version.number)}
+                  title={
+                    current && version.number < current.number
+                      ? `Make v${String(version.number).padStart(3, "0")} current. `
+                        + "Later versions leave this list and stay on disk."
+                      : undefined
+                  }
+                >
                   Go back
                 </Button>
               </div>
