@@ -201,6 +201,15 @@ export default function App() {
                 Apply {workspace.approved} approved change
                 {workspace.approved === 1 ? "" : "s"}
               </Button>
+              {/* The moment before writing to a deck that matters is where a
+                  person most wants to know they can get back, and the product's
+                  answer is a good one — it writes a new version and never
+                  touches the file they opened. That was only said in the
+                  History tab, which is not where they are looking. */}
+              <p className="mt-1.5 text-center text-2xs leading-relaxed text-ink-faint">
+                Writes a new version. The file you opened is never modified, and
+                every version stays.
+              </p>
             </div>
           )}
         </aside>

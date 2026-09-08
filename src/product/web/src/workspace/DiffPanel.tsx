@@ -299,7 +299,7 @@ function collapse(deltas: Delta[]): Repeated[] {
   const runs: Repeated[] = [];
   const index = new Map<string, Repeated>();
   for (const delta of deltas) {
-    const key = `${delta.kind} ${delta.summary || delta.description}`;
+    const key = `${delta.kind}\u0000${delta.summary || delta.description}`;
     let run = index.get(key);
     if (!run) {
       run = { key, first: delta, deltas: [] };

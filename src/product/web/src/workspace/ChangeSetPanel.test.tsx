@@ -305,3 +305,63 @@ describe("identical changes are collapsed", () => {
     expect(screen.queryByText(/Approve all/)).not.toBeInTheDocument();
   });
 });
+
+describe("saying no to the whole thing", () => {
+  /**
+   * Deciding against a proposal is a decision, and it needed one gesture rather
+   * than eight. Nothing is written either way — this exists so a reviewer can
+   * say no and watch the panel agree with them, instead of navigating away from
+   * a list that stays.
+   */
+  const three = () => [
+    change({ id: "a" }),
+    change({ id: "b" }),
+    change({ id: "c" }),
+  ];
+
+  it("is named apart from a group's own reject", async () => {
+    // Two controls reading "Reject all" a few rows apart mean different things,
+    // and a screen reader announces them identically.
+    render(<ChangeSetPanel {...handlers} changeset={changeset(three())} />);
+    expect(screen.getByRole("button", { name: /Reject all 3/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject everything" })).toBeInTheDocument();
+  });
+
+  it("rejects every undecided change in one gesture", async () => {
+    const onReject = vi.fn();
+    render(
+      <ChangeSetPanel {...handlers} onReject={onReject} changeset={changeset(three())} />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Reject everything" }));
+    expect(onReject).toHaveBeenCalledWith(["a", "b", "c"]);
+  });
+
+  it("leaves a change someone already decided on alone", async () => {
+    // Re-rejecting a rejected row is noise; re-deciding an approved one would
+    // overrule a decision the reviewer already made.
+    const onReject = vi.fn();
+    render(
+      <ChangeSetPanel
+        {...handlers}
+        onReject={onReject}
+        changeset={changeset([
+          change({ id: "a" }),
+          change({ id: "b", status: "approved" }),
+          change({ id: "c", status: "rejected" }),
+        ])}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Reject everything" }));
+    expect(onReject).toHaveBeenCalledWith(["a"]);
+  });
+
+  it("is not offered when there is nothing left to decide", () => {
+    render(
+      <ChangeSetPanel
+        {...handlers}
+        changeset={changeset([change({ id: "a", status: "applied" })])}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Reject everything" })).toBeNull();
+  });
+});

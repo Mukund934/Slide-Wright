@@ -282,3 +282,35 @@ class TestSessionWorkspacesAreIgnored:
     def test_no_workspace_file_is_tracked(self):
         tracked = [f for f in tracked_files() if ".slidewright" in f]
         assert not tracked, f"session workspace files are in the repository: {tracked}"
+
+
+TEXT_SUFFIXES = {".py", ".ts", ".tsx", ".css", ".json", ".md", ".html", ".yml"}
+
+
+def test_no_source_file_is_secretly_binary():
+    r"""A control byte in a text file makes git treat the whole file as binary.
+
+    No diff, no blame, no review — the file stops being readable by the tools
+    this project is reviewed with, and nothing warns you. Two client files
+    acquired one the same way: an escape sequence meant for the TypeScript
+    source (a null escape, used as a grouping-key separator) was interpreted by the
+    script that wrote the file, so the byte itself landed there instead of the
+    six characters. It works perfectly at runtime, which is why it survived
+    review and a full test run.
+    """
+    forbidden = bytes([0])
+    offenders = []
+    for path in (REPO / "src").rglob("*"):
+        if not path.is_file() or "node_modules" in path.parts:
+            continue
+        if path.suffix not in TEXT_SUFFIXES:
+            continue
+        raw = path.read_bytes()
+        if forbidden in raw:
+            offenders.append(
+                f"{path.relative_to(REPO)} at byte {raw.index(forbidden)}"
+            )
+    assert not offenders, (
+        "these text files hold a null byte, so git treats them as binary: "
+        + "; ".join(offenders)
+    )
