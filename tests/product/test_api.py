@@ -1292,3 +1292,63 @@ class TestWhenTheWorkspaceGoesAwayUnderneath:
         client.delete(f"/api/documents/{document['id']}")
         reopened = client.post("/api/documents", json={"path": str(deck)})
         assert reopened.status_code == 200
+
+
+class TestALockMustHaveSomethingToProtect:
+    """A lock naming a slide or an object that is not in the deck is refused.
+
+    It cannot block anything, so accepting it shows a user a guarantee they
+    asked for, in an interface that says it is held, over a deck where it does
+    nothing. That is worse than not offering the lock at all.
+
+    The engine cannot check this — a change set knows its locks and its changes,
+    not the deck they refer to — so it is checked at the one layer where both
+    are in scope.
+    """
+
+    def _propose(self, client, document, lock):
+        slide, target = table_target(document)
+        return client.post(
+            f"/api/documents/{document['id']}/propose",
+            json={
+                "sets": [{"slide": slide, "target": target,
+                          "op": "set_table_cell", "after": "11.8x"}],
+                "locks": [lock],
+            },
+        )
+
+    def test_a_slide_that_is_not_there_is_refused(self, client):
+        document = open_document(client)
+        response = self._propose(client, document, {"scope": "slide", "target": "999"})
+        assert response.status_code == 422
+        assert "no slide 999" in response.json()["detail"]
+
+    def test_the_refusal_says_which_slides_there_are(self, client):
+        document = open_document(client)
+        detail = self._propose(
+            client, document, {"scope": "slide", "target": "999"}
+        ).json()["detail"]
+        assert "this deck has 1" in detail
+
+    def test_an_object_that_is_not_there_is_refused(self, client):
+        document = open_document(client)
+        response = self._propose(client, document, {"scope": "shape", "target": "9999"})
+        assert response.status_code == 422
+        assert "no object" in response.json()["detail"]
+
+    def test_a_real_slide_lock_is_accepted(self, client):
+        document = open_document(client)
+        slide, _ = table_target(document)
+        response = self._propose(
+            client, document, {"scope": "slide", "target": str(slide)}
+        )
+        assert response.status_code == 200
+
+    def test_a_deck_wide_lock_needs_no_target(self, client):
+        document = open_document(client)
+        assert self._propose(client, document, {"scope": "wording"}).status_code == 200
+
+    def test_a_deck_wide_lock_still_blocks(self, client):
+        document = open_document(client)
+        body = self._propose(client, document, {"scope": "wording"}).json()
+        assert all(c["status"] == "rejected" for c in body["changes"])

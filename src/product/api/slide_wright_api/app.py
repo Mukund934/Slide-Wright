@@ -232,7 +232,7 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
         # It also shows up in the review panel under "Protected", which is where
         # a guarantee belongs: visible to the person being asked to approve.
         changeset.lock("wording", reason="a tidy changes presentation, never content")
-        _guard(lambda: apply_locks(changeset, body.locks))
+        _guard(lambda: apply_locks(changeset, body.locks, session.deck()))
         for change in [*conformance.changes, *alignment.changes]:
             changeset.add(change)
 
@@ -274,7 +274,7 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
             )
 
         changeset = session.propose(f"refresh {session.source.name} from source")
-        _guard(lambda: apply_locks(changeset, body.locks))
+        _guard(lambda: apply_locks(changeset, body.locks, session.deck()))
         for change in plan.to_changeset(str(session.current.path)).changes:
             changeset.add(change)
         changeset.save(session.workspace / "changes.json")
@@ -312,9 +312,10 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
         session = _require(space, doc_id)
         changeset = session.propose(body.instruction)
 
-        # Locks first: `ChangeSet.add` consults the locks that exist when a
-        # change arrives, so one declared afterwards protects nothing.
-        _guard(lambda: apply_locks(changeset, body.locks))
+        # Locks first. `ChangeSet.lock` now applies itself to changes already
+        # in the set, so this is no longer a correctness requirement -- but the
+        # guarantees still read better before the things they constrain.
+        _guard(lambda: apply_locks(changeset, body.locks, session.deck()))
 
         deck = session.deck()
         for change in _guard(lambda: build_typed_changes(deck, body.sets)):

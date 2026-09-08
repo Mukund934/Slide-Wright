@@ -282,15 +282,51 @@ def _kind(deck: DeckInfo, slide: int, target: str) -> str:
     return shape.kind if shape else ""
 
 
-def apply_locks(changeset: ChangeSet, specs) -> None:
-    """Declare the guarantees before adding any change.
+def apply_locks(changeset: ChangeSet, specs, deck: DeckInfo | None = None) -> None:
+    """Declare the guarantees, refusing any that would protect nothing.
 
-    Order matters and is not incidental: `ChangeSet.add` consults the locks that
-    exist at the moment the change arrives. Locks added afterwards protect
-    nothing that is already in the set.
+    Locks are still declared before changes are added -- `ChangeSet.lock` now
+    also applies itself to what is already there, so order is no longer a
+    correctness question, but declaring first keeps the reading order obvious.
+
+    A lock naming a slide or a shape that is not in the deck is refused rather
+    than accepted. It cannot block anything, so accepting it would show a user
+    a guarantee they asked for, in an interface that says it is held, over a
+    deck where it does nothing -- which is worse than not offering the lock at
+    all. The engine cannot check this: a `ChangeSet` knows its locks and its
+    changes, not the deck they refer to. Here is where both are in scope.
     """
     for spec in specs:
+        if deck is not None:
+            _assert_lock_has_a_target(spec, deck)
         try:
             changeset.lock(spec.scope, spec.target, spec.reason)
         except ValueError as exc:
             raise WorkspaceError(str(exc)) from exc
+
+
+def _assert_lock_has_a_target(spec, deck: DeckInfo) -> None:
+    target = str(spec.target or "").strip()
+    if not target:
+        return  # deck-wide, and there is always a deck
+
+    if spec.scope == "slide":
+        if not target.isdigit() or deck.slide(int(target)) is None:
+            have = ", ".join(str(s.number) for s in deck.slides[:12])
+            raise WorkspaceError(
+                f"there is no slide {target} to protect; this deck has {have}"
+                + (" …" if len(deck.slides) > 12 else "")
+            )
+        return
+
+    if spec.scope == "shape":
+        found = any(
+            shape.id == target.split("/")[0]
+            for slide in deck.slides
+            for shape in slide.shapes
+        )
+        if not found:
+            raise WorkspaceError(
+                f"there is no object {target!r} in this deck to protect. A lock "
+                "that matches nothing is not a guarantee."
+            )

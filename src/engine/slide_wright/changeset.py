@@ -147,9 +147,18 @@ class Lock:
             return change.target.split("/")[0] == self.target
         if self.scope == "numbers":
             # "polish it, but do not touch a single figure"
-            return change.op in (Op.SET_TEXT, Op.SET_TABLE_CELL) and _contains_number(
-                str(change.before)
-            )
+            #
+            # A change whose `before` is unknown blocks too. `_contains_number`
+            # was asked whether the old text held a figure, and given None it
+            # said no -- so a change that could not say what it was replacing
+            # walked straight through a lock whose entire purpose is that no
+            # figure moves. Not knowing is not the same as knowing there was no
+            # number, and a guarantee has to fail in the direction of refusing.
+            if change.op not in (Op.SET_TEXT, Op.SET_TABLE_CELL):
+                return False
+            if change.before is None or str(change.before) == "":
+                return True
+            return _contains_number(str(change.before))
         if self.scope == "wording":
             # "improve the layout, leave my words exactly as written"
             return change.op in (Op.SET_TEXT, Op.SET_TABLE_CELL)
@@ -165,6 +174,14 @@ class Lock:
             kind = {"tables": "table", "charts": "chart", "media": "picture"}[self.scope]
             return change.object_kind == kind
         return False
+
+
+def _reject(change: Change, lock: Lock) -> None:
+    change.status = Status.REJECTED
+    change.rationale = (
+        f"blocked by {lock.scope} lock"
+        + (f" ({lock.reason})" if lock.reason else "")
+    )
 
 
 @dataclass
@@ -193,11 +210,7 @@ class ChangeSet:
         change.id = self._unique(change.id)
         for lock in self.locks:
             if lock.blocks(change):
-                change.status = Status.REJECTED
-                change.rationale = (
-                    f"blocked by {lock.scope} lock"
-                    + (f" ({lock.reason})" if lock.reason else "")
-                )
+                _reject(change, lock)
                 break
         self.changes.append(change)
         return change
@@ -213,8 +226,19 @@ class ChangeSet:
         return f"{stem}.{n}"
 
     def lock(self, scope: str, target: str = "", reason: str = "") -> Lock:
+        """Add a guarantee, and apply it to what is already here.
+
+        `add` consulted the locks that existed when a change arrived, so a lock
+        added afterwards protected nothing at all -- silently, while the
+        interface showed it held. Order of calls is not something a safety
+        guarantee may depend on: the invariant is that a lock in this set blocks
+        every change in this set, whenever either arrived.
+        """
         lk = Lock(scope=scope, target=target, reason=reason)
         self.locks.append(lk)
+        for change in self.changes:
+            if change.status is not Status.APPLIED and lk.blocks(change):
+                _reject(change, lk)
         return lk
 
     # ── review ───────────────────────────────────────────────────────────────

@@ -307,3 +307,92 @@ class TestDescribeCoversEveryOp:
         for op in Op:
             c = Change(id="c1", op=op, slide=1, target="7", before="a", after="b")
             assert c.describe(), f"{op.value} has no description"
+
+
+class TestALockIsNotAMatterOfOrder:
+    """`add` consulted the locks that existed when a change arrived.
+
+    A lock declared afterwards protected nothing at all — silently, while the
+    interface showed it held. Every production path happened to declare locks
+    first, so the trap was live and unhit: the guarantee depended on the order
+    two public methods were called in, and nothing said so except a comment.
+    """
+
+    def _change(self, **over):
+        base = dict(id="c1", op=Op.SET_TEXT, slide=1, target="5",
+                    before="Revenue grew", after="Revenue fell")
+        base.update(over)
+        return Change(**base)
+
+    def test_a_lock_added_after_the_change_still_blocks_it(self):
+        changeset = ChangeSet(deck="d.pptx")
+        change = changeset.add(self._change())
+        assert change.status is Status.PROPOSED
+        changeset.lock("wording")
+        assert change.status is Status.REJECTED
+
+    def test_it_says_which_lock_stopped_it(self):
+        changeset = ChangeSet(deck="d.pptx")
+        change = changeset.add(self._change())
+        changeset.lock("wording", reason="the partner signed this off")
+        assert "wording lock" in change.rationale
+        assert "the partner signed this off" in change.rationale
+
+    def test_a_lock_added_first_still_blocks(self):
+        changeset = ChangeSet(deck="d.pptx")
+        changeset.lock("wording")
+        assert changeset.add(self._change()).status is Status.REJECTED
+
+    def test_an_applied_change_is_not_retroactively_rejected(self):
+        """It is already in the file. Marking it rejected would make the record
+        of what happened disagree with what happened."""
+        changeset = ChangeSet(deck="d.pptx")
+        change = changeset.add(self._change())
+        change.status = Status.APPLIED
+        changeset.lock("wording")
+        assert change.status is Status.APPLIED
+
+    def test_a_lock_that_matches_nothing_leaves_the_set_alone(self):
+        changeset = ChangeSet(deck="d.pptx")
+        change = changeset.add(self._change(op=Op.MOVE, before=(0, 0), after=(1, 1)))
+        changeset.lock("wording")
+        assert change.status is Status.PROPOSED
+
+
+class TestNotKnowingIsNotTheSameAsKnowingThereIsNoNumber:
+    """`numbers` means "do not touch a single figure".
+
+    It asked `_contains_number` about the text being replaced, and given `None`
+    that answered no — so a change that could not say what it was replacing
+    walked through a lock whose whole purpose is that no figure moves. A
+    guarantee has to fail in the direction of refusing.
+    """
+
+    def _with_numbers_lock(self, **over):
+        changeset = ChangeSet(deck="d.pptx")
+        changeset.lock("numbers")
+        base = dict(id="c1", op=Op.SET_TEXT, slide=1, target="5",
+                    before="9.4x", after="11.8x")
+        base.update(over)
+        return changeset.add(Change(**base))
+
+    def test_a_figure_is_blocked(self):
+        assert self._with_numbers_lock().status is Status.REJECTED
+
+    def test_prose_is_not(self):
+        assert self._with_numbers_lock(
+            before="Revenue grew", after="Revenue rose"
+        ).status is Status.PROPOSED
+
+    def test_an_unknown_before_is_blocked(self):
+        assert self._with_numbers_lock(before=None).status is Status.REJECTED
+
+    def test_an_empty_before_is_blocked(self):
+        """An empty cell being filled in could be filled with a figure."""
+        assert self._with_numbers_lock(before="").status is Status.REJECTED
+
+    def test_it_still_only_applies_to_content_operations(self):
+        """A move is not a figure changing, whatever its `before` says."""
+        assert self._with_numbers_lock(
+            op=Op.MOVE, before=None, after=(1, 1)
+        ).status is Status.PROPOSED
