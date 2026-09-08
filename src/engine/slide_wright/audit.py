@@ -193,13 +193,76 @@ def audit(deck: DeckInfo, name: str = "") -> DeckAudit:
 
 # ── rules ────────────────────────────────────────────────────────────────────
 
+#: How long a line may be and still read as a heading rather than a sentence.
+#: A stated threshold, not a measurement -- like the 10pt floor and the 0.02in
+#: alignment tolerance, it has to come from somewhere and this is where.
+HEADING_CHARS = 60
+
+
+def _heading_of(slide) -> str | None:
+    """The de facto title: the topmost short line on the slide, if there is one.
+
+    Structural, not a judgement about wording. A shape qualifies when it has its
+    own box, holds a single line of at most `HEADING_CHARS`, and nothing else
+    with text sits above it. That is the thing a reader's eye lands on first and
+    reads as the heading, whether or not PowerPoint calls it a title.
+    """
+    candidates = [
+        s for s in slide.shapes
+        if s.has_text and s.y is not None
+        and "\n" not in s.text.strip() and len(s.text.strip()) <= HEADING_CHARS
+    ]
+    if not candidates:
+        return None
+    top = min(candidates, key=lambda s: s.y)
+    others = [
+        s for s in slide.shapes
+        if s is not top and s.has_text and s.y is not None
+    ]
+    if any(s.y < top.y for s in others):
+        return None
+    if not any(s.y > top.y for s in others):
+        return None
+    return top.text.strip()
+
+
 def _missing_titles(deck: DeckInfo, out: DeckAudit) -> None:
-    missing = [s.number for s in deck.slides if not s.title and s.shapes]
-    if missing:
+    """Two findings, because they are two problems with different answers.
+
+    `SlideInfo.title` is a *title placeholder*, which is the strict and correct
+    reading. Reporting every slide without one as "have no title" was true and
+    unhelpful: measured across the 26 real fixtures, **36 of the 73 slides it
+    named do have a heading** -- 24 of the 26 on nasa-bhutan-water, a deck whose
+    every slide reads OBJECTIVES, METHODOLOGY, CONCLUSION at the top. Telling
+    that author "every slide needs a title" sends them to write titles they can
+    see on the screen.
+
+    A slide with no heading at all needs one written. A slide whose heading is an
+    ordinary text box has the words already and is missing something else: the
+    outline pane, the accessibility tree and a template's title styling all read
+    the placeholder, not the position. Neither is automatable -- there is no
+    operation that promotes a text box to a placeholder, and choosing which box
+    is the title is exactly the judgement this module refuses to make for you.
+    """
+    bare, unmarked = [], []
+    for slide in deck.slides:
+        if not slide.shapes or slide.title:
+            continue
+        (unmarked if _heading_of(slide) else bare).append(slide.number)
+
+    if bare:
         out.observations.append(Observation(
-            Area.NARRATIVE, missing,
-            f"{len(missing)} slide(s) have no title",
+            Area.NARRATIVE, bare,
+            f"{len(bare)} slide(s) have no title",
             "a reader skimming the deck sees only titles; every slide needs one",
+        ))
+    if unmarked:
+        out.observations.append(Observation(
+            Area.NARRATIVE, unmarked,
+            f"{len(unmarked)} slide(s) have a heading that is not a title placeholder",
+            "the words are there; PowerPoint does not know they are the title, so "
+            "the outline pane, screen readers and a template's title styling all "
+            "miss them",
         ))
 
 

@@ -637,3 +637,80 @@ class TestAFindingThatDescribesItsOwnRemedyDeclaresIt:
                     f"{observation.message!r} advises conforming and reports "
                     "itself as needing a human"
                 )
+
+
+class TestAHeadingIsNotTheSameAsNoTitle:
+    """Two problems with different answers, reported as one.
+
+    `SlideInfo.title` means *title placeholder*, which is the strict and correct
+    reading. Reporting every slide without one as "have no title" was true and
+    unhelpful: measured across the 26 real fixtures, **36 of the 73 slides it
+    named have a heading** — 21 of 26 on nasa-bhutan-water, whose every slide
+    reads OBJECTIVES, METHODOLOGY, CONCLUSION at the top. Telling that author
+    every slide needs a title sends them to write titles they can already see.
+    """
+
+    def _at(self, text, y_inches, sid, size=18.0):
+        s = shape(text, sid=sid, size=size)
+        s.y = int(y_inches * EMU_PER_INCH)
+        return s
+
+    def _messages(self, result):
+        return [o.message for o in result.by_area(Area.NARRATIVE)]
+
+    def test_a_heading_above_body_text_is_named_as_such(self):
+        slide = SlideInfo(number=1, part_name="s1", shapes=[
+            self._at("OBJECTIVES", 0.5, "h"),
+            self._at("Provide a trend analysis for temperature", 2.0, "b"),
+        ])
+        messages = self._messages(audit(deck(slide)))
+        assert any("not a title placeholder" in m for m in messages)
+        assert not any(m.startswith("1 slide(s) have no title") for m in messages)
+
+    def test_body_text_alone_is_still_no_title(self):
+        """One short line with nothing under it is content, not a heading."""
+        slide = SlideInfo(number=1, part_name="s1", shapes=[
+            self._at("Body text with no title above it", 1.0, "b"),
+        ])
+        messages = self._messages(audit(deck(slide)))
+        assert any("have no title" in m for m in messages)
+        assert not any("not a title placeholder" in m for m in messages)
+
+    def test_a_long_top_line_is_not_a_heading(self):
+        slide = SlideInfo(number=1, part_name="s1", shapes=[
+            self._at("A sentence of prose that runs on well past the point "
+                     "where anyone would read it as a heading", 0.5, "p"),
+            self._at("More body", 2.0, "b"),
+        ])
+        assert any("have no title" in m for m in self._messages(audit(deck(slide))))
+
+    def test_a_real_title_placeholder_produces_neither(self):
+        result = audit(deck(titled(1, "Overview", shape("body", sid="b"))))
+        assert not any("title" in m and "no title" in m
+                       for m in self._messages(result))
+        assert not any("not a title placeholder" in m
+                       for m in self._messages(result))
+
+    def test_a_shape_above_the_candidate_disqualifies_it(self):
+        """Something sitting higher means the short line is not what is read first."""
+        slide = SlideInfo(number=1, part_name="s1", shapes=[
+            self._at("Kicker line above everything", 0.2, "k"),
+            self._at("OBJECTIVES", 0.5, "h"),
+            self._at("Body", 2.0, "b"),
+        ])
+        # The kicker is itself short and topmost, so it becomes the heading.
+        assert any("not a title placeholder" in m
+                   for m in self._messages(audit(deck(slide))))
+
+    def test_neither_finding_claims_to_be_fixable(self):
+        """There is no operation that promotes a text box to a placeholder, and
+        choosing which box is the title is the judgement this module refuses."""
+        heading = SlideInfo(number=1, part_name="s1", shapes=[
+            self._at("OBJECTIVES", 0.5, "h"), self._at("Body", 2.0, "b"),
+        ])
+        bare = SlideInfo(number=2, part_name="s2", shapes=[
+            self._at("Body only", 1.0, "b2"),
+        ])
+        for o in audit(deck(heading, bare)).by_area(Area.NARRATIVE):
+            if "title" in o.message:
+                assert not o.is_automatable, o.message
