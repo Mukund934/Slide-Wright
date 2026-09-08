@@ -411,3 +411,74 @@ class TestALostLinkIsReported:
         src = self._linked(tmp_path / "a.pptx")
         again = self._linked(tmp_path / "b.pptx")
         assert not [d for d in diff(src, again).deltas if d.kind == "link"]
+
+
+class TestFormattingAReaderSeesAndTheDiffDidNot:
+    """Bold and italic were compared. Underline, strikethrough and baseline were not.
+
+    Three attributes on the same element as the two that *were* read, each one
+    visible at a glance: "Confidential draft" losing its underline, a figure
+    gaining a strikethrough, a footnote marker dropping out of superscript. Every
+    one of them came back as **no structural differences**.
+
+    Measured across the 26 real fixtures: 50 underlined runs, 24 with a baseline
+    and 6 struck through — 80 runs carrying formatting nothing here could see,
+    and superscript in 5 of the 26 decks.
+    """
+
+    def _deck(self, path, **rpr):
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        frame = slide.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(8), Inches(2)
+        ).text_frame
+        run = frame.paragraphs[0].add_run()
+        run.text = "Confidential draft"
+        run.font.size = Pt(18)
+        for name, value in rpr.items():
+            run.font._rPr.set(name, value)
+        prs.save(str(path))
+        return path
+
+    def test_a_lost_underline_is_reported(self, tmp_path):
+        before = self._deck(tmp_path / "a.pptx", u="sng")
+        after = self._deck(tmp_path / "b.pptx")
+        deltas = diff(before, after).deltas
+        assert [d.summary for d in deltas] == ["underline 'sng' -> None"]
+
+    def test_a_double_underline_becoming_single_is_reported(self, tmp_path):
+        """Flattening these to booleans would have hidden this one."""
+        before = self._deck(tmp_path / "a.pptx", u="dbl")
+        after = self._deck(tmp_path / "b.pptx", u="sng")
+        assert [d.summary for d in diff(before, after).deltas] == [
+            "underline 'dbl' -> 'sng'"
+        ]
+
+    def test_a_strikethrough_is_reported(self, tmp_path):
+        before = self._deck(tmp_path / "a.pptx")
+        after = self._deck(tmp_path / "b.pptx", strike="sngStrike")
+        assert [d.summary for d in diff(before, after).deltas] == [
+            "strikethrough None -> 'sngStrike'"
+        ]
+
+    def test_a_lost_superscript_is_reported(self, tmp_path):
+        before = self._deck(tmp_path / "a.pptx", baseline="30000")
+        after = self._deck(tmp_path / "b.pptx")
+        assert [d.summary for d in diff(before, after).deltas] == [
+            "baseline 30000 -> None"
+        ]
+
+    def test_saying_off_and_saying_nothing_are_not_a_difference(self, tmp_path):
+        """`u="none"` and no `u` at all render identically, so they must compare
+        identically. Reporting that gap would be a difference nobody can see."""
+        before = self._deck(tmp_path / "a.pptx", u="none", strike="noStrike", baseline="0")
+        after = self._deck(tmp_path / "b.pptx")
+        assert not diff(before, after).changed
+
+    def test_these_are_presentation_not_content(self, tmp_path):
+        before = self._deck(tmp_path / "a.pptx", u="sng")
+        after = self._deck(tmp_path / "b.pptx")
+        assert all(not d.is_content for d in diff(before, after).deltas)

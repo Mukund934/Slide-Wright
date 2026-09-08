@@ -37,6 +37,18 @@ class TextRun:
     italic: bool = False
     font: str | None = None
     color: str | None = None
+    #: Underline and strikethrough as OOXML states them ("sng", "dbl",
+    #: "sngStrike"...), and baseline as thousandths of a percent -- positive for
+    #: superscript, negative for subscript.
+    #:
+    #: Kept as values rather than flattened to booleans the way `bold` and
+    #: `italic` are, because a double underline becoming a single one is
+    #: something a reader sees. The off states -- absent, "none", "noStrike",
+    #: zero -- are all normalised to None: they render identically, so telling
+    #: them apart would report a difference nobody can see.
+    underline: str | None = None
+    strike: str | None = None
+    baseline: int | None = None
     #: Where this run points, resolved through the slide's relationships. A
     #: hyperlink is carried by the run, so an edit that empties a run takes the
     #: link off the slide while leaving both the `a:hlinkClick` and the
@@ -385,6 +397,11 @@ def _read_cells(rows) -> dict[str, str]:
     return cells
 
 
+def _off(value: str | None, none_word: str) -> str | None:
+    """An OOXML on/off enumeration, with every way of saying "off" reading None."""
+    return None if value in (None, "", none_word) else value
+
+
 def _hyperlink_targets(pkg: Package, part_name: str) -> dict[str, str]:
     """`rId` to what it points at, for this slide's relationships.
 
@@ -491,6 +508,11 @@ def _read_shape(el, links: dict[str, str] | None = None) -> ShapeInfo | None:
             clr = rpr.find(".//a:srgbClr", NS)
             if clr is not None:
                 run.color = clr.get("val")
+            run.underline = _off(rpr.get("u"), "none")
+            run.strike = _off(rpr.get("strike"), "noStrike")
+            baseline = rpr.get("baseline")
+            if baseline and baseline.lstrip("-").isdigit() and int(baseline) != 0:
+                run.baseline = int(baseline)
             hlink = rpr.find("a:hlinkClick", NS)
             if hlink is not None:
                 rid = hlink.get(f"{{{NS['r']}}}id")

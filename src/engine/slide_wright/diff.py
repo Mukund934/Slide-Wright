@@ -252,7 +252,11 @@ def _diff_geometry(old: ShapeInfo, new: ShapeInfo, add) -> None:
 #: counts as content, and a deck that comes back with a dead link may not be
 #: described as "nothing changed about what it says".
 RUN_ATTRIBUTES = (("size_pt", "size", "formatting"), ("bold", "bold", "formatting"),
-                  ("italic", "italic", "formatting"), ("font", "font", "formatting"),
+                  ("italic", "italic", "formatting"),
+                  ("underline", "underline", "formatting"),
+                  ("strike", "strikethrough", "formatting"),
+                  ("baseline", "baseline", "formatting"),
+                  ("font", "font", "formatting"),
                   ("color", "colour", "formatting"), ("link", "link", "link"))
 
 
