@@ -217,8 +217,17 @@ non-conforming — the commonest font in a deck is never mistaken for the brand.
 | A one-object edit on 14 real third-party decks | **exactly 1 part changed** — 14 of 14 — at 96.7–99.7% identical |
 | A table-cell edit, measured inside the edited slide | **2 character substitutions**; 99.95% of the slide preserved |
 | Native tables, charts, embedded workbooks, media | preserved and asserted on every edit |
+| The whole loop on a 400-slide deck | open, read, audit, plan, **apply 2,400 corrections** and diff, in **2.3 s total** |
+| The heaviest real deck — 52 slides, 55 MB | opens in 0.19 s, reads in 0.21 s, applies and verifies in 3.0 s |
 
 The hardest corpus deck carries native charts with embedded Excel workbooks, grouped shapes, native tables, custom geometry, hyperlinks and speaker notes. The largest real deck tested is 340 parts across 52 slides and 55 MB.
+
+Timings are `scripts/perf_report.py --large`. The largest real deck available is
+52 slides, so the 100-, 200- and 400-slide rows are synthesised — text only, so
+they measure how the engine scales with shape count while the real decks measure
+what media and charts cost. Applying is linear in the number of changes at about
+**0.4 ms each**, which is the property worth having; the absolute number will
+differ on your machine.
 
 The lower end of that fidelity range is arithmetic rather than a worse edit. A one-object change touches exactly one part in every case; on a 45-part deck that is 97.8% and on a 350-part deck it is 99.7%. The count is the claim — the percentage is the count divided by how much else the deck happened to contain.
 
