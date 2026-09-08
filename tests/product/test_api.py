@@ -1501,3 +1501,43 @@ class TestADamagedVersionIsAsBadAsAMissingOne:
         client, document, _, _ = opened
         for _ in range(20):
             assert client.get(f"/api/documents/{document['id']}").status_code == 200
+
+
+class TestHowASourceWasReadIsShown:
+    """The encoding and delimiter are guesses when the file does not say.
+
+    The engine records which guess it made, and recording it without showing it
+    would be pointless — the reader looking at a mangled character is the only
+    person the note is for.
+    """
+
+    def _preview(self, client, document, path):
+        return client.post(
+            f"/api/documents/{document['id']}/refresh/preview",
+            json={"sources": [str(path)]},
+        )
+
+    def test_an_unusual_encoding_and_delimiter_are_named(self, client, tmp_path):
+        document = open_document(client)
+        odd = tmp_path / "comps.csv"
+        odd.write_bytes("Company;Margin\nCaf\u00e9 Ltd;21%\n".encode("cp1252"))
+        sources = self._preview(client, document, odd).json()["sources"]
+        assert "cp1252" in sources[0]
+        assert "semicolon" in sources[0]
+
+    def test_a_plain_utf8_file_is_named_and_nothing_more(self, client, tmp_path):
+        """Saying "decoded as utf-8" on every ordinary file is noise, and noise
+        is how a note that matters gets skipped."""
+        document = open_document(client)
+        plain = tmp_path / "clean.csv"
+        plain.write_bytes(b"Company,Margin\nAlpha,21%\n")
+        sources = self._preview(client, document, plain).json()["sources"]
+        assert sources == ["clean.csv"]
+
+    def test_an_excel_csv_from_windows_is_no_longer_refused(self, client, tmp_path):
+        """It used to be a 422: "could not read: 'utf-8' codec can't decode byte
+        0xe9" — the workbook an analyst emails you, rejected outright."""
+        document = open_document(client)
+        excel = tmp_path / "from-excel.csv"
+        excel.write_bytes("Company,Margin\nZ\u00fcrich AG,18%\n".encode("cp1252"))
+        assert self._preview(client, document, excel).status_code == 200

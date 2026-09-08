@@ -543,7 +543,16 @@ def _read_sources(paths: list[str]) -> tuple[SourceSet, list[str]]:
             raise HTTPException(
                 422, f"{path.name} could not be read as a spreadsheet: {exc}"
             ) from exc
-        names.append(path.name)
+        # The encoding and delimiter are guesses when the file does not say, and
+        # the engine records which it made. Recording it and not showing it
+        # would be pointless: the reader looking at a mangled character is the
+        # only person the note is for.
+        note = next(
+            (t.read_note for t in sources.tables
+             if Path(t.document).name == path.name and t.read_note),
+            "",
+        )
+        names.append(f"{path.name} ({note})" if note else path.name)
 
     if not sources.tables:
         raise HTTPException(
