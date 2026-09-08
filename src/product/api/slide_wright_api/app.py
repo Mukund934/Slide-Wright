@@ -690,14 +690,43 @@ def _plan_into(changeset: ChangeSet, session: Session, instruction: str) -> None
     and arrives as origin MODEL, which means it is never auto-approved. The
     stub provider produces nothing; that is a configuration state the client is
     told about through /api/health, not a failure to hide here.
+
+    A provider that fails is translated rather than raised. The engine writes
+    careful, actionable messages for each of these -- "Gemini free-tier quota
+    reached", "Check GEMINI_API_KEY is current and the API is enabled", "could
+    not reach Gemini" -- and every one of them used to arrive at the client as
+    `500 Internal Server Error`. Seven distinct causes, one useless answer, and
+    the two that a user can actually do something about (a quota that resets, a
+    key that needs renewing) were indistinguishable from a bug in the product.
     """
-    from slide_wright.llm.client import default_provider
+    from slide_wright.llm.client import (
+        ProviderError,
+        ProviderRateLimited,
+        default_provider,
+    )
     from slide_wright.planner import plan
 
-    result = plan(
-        session.deck(), instruction,
-        deck_path=str(session.current.path), provider=default_provider(),
-    )
+    try:
+        result = plan(
+            session.deck(), instruction,
+            deck_path=str(session.current.path), provider=default_provider(),
+        )
+    except ProviderRateLimited as exc:
+        # 429 rather than 502: the request was fine and will be fine again. A
+        # client that wants to back off needs to be able to tell those apart.
+        wait = (f" — try again in about {exc.retry_after:.0f}s"
+                if getattr(exc, "retry_after", 0) else "")
+        raise HTTPException(429, f"{exc}{wait}") from exc
+    except ProviderError as exc:
+        # 502: this request was well formed and the upstream did not answer.
+        raise HTTPException(502, str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - a provider is a foreign boundary
+        raise HTTPException(
+            502,
+            f"the model provider failed unexpectedly ({type(exc).__name__}). "
+            "Nothing was changed. Editing objects directly does not use a model.",
+        ) from exc
+
     for change in result.changeset.changes:
         changeset.add(change)
 

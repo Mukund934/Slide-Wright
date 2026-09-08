@@ -22,6 +22,28 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+class ProviderError(RuntimeError):
+    """A model provider failed. Never carries a credential.
+
+    Provider-neutral on purpose. The surfaces that have to translate one of
+    these -- the API turning it into a status code, the CLI turning it into a
+    message -- must not import a particular vendor's module to do it, or adding
+    a second provider means finding every place the first one is named.
+    """
+
+
+class ProviderRateLimited(ProviderError):
+    """Quota reached. The request was fine and will be fine again.
+
+    Worth its own type rather than a string match: it is the one provider
+    failure a caller can act on, by waiting.
+    """
+
+    def __init__(self, message: str, retry_after: float = 0.0):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class BudgetExceeded(Exception):
     """A job hit its token ceiling. Stop and report; never silently continue."""
 

@@ -28,7 +28,13 @@ import time
 import urllib.error
 import urllib.request
 
-from slide_wright.llm.client import Completion, Provider, Usage
+from slide_wright.llm.client import (
+    Completion,
+    Provider,
+    ProviderError,
+    ProviderRateLimited,
+    Usage,
+)
 
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -50,11 +56,16 @@ DEFAULT_MODELS = (
 )
 
 
-class GeminiError(RuntimeError):
-    """A Gemini call failed. Never carries the API key."""
+class GeminiError(ProviderError):
+    """A Gemini call failed. Never carries the API key.
+
+    Kept as a name because the messages are Gemini's and say so, but it *is* a
+    `ProviderError` -- so a caller translating failures does not have to know
+    which provider is configured.
+    """
 
 
-class RateLimited(GeminiError):
+class RateLimited(GeminiError, ProviderRateLimited):
     """Free-tier quota reached. Back off, batch, or use the offline path."""
 
     def __init__(self, message: str, retry_after: float = 0.0):

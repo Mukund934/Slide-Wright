@@ -1352,3 +1352,99 @@ class TestALockMustHaveSomethingToProtect:
         document = open_document(client)
         body = self._propose(client, document, {"scope": "wording"}).json()
         assert all(c["status"] == "rejected" for c in body["changes"])
+
+
+class TestWhenTheModelProviderFails:
+    """The engine writes careful, actionable messages for each of these.
+
+    "Gemini free-tier quota reached", "Check GEMINI_API_KEY is current and the
+    API is enabled", "could not reach Gemini" — and every one of them arrived at
+    the client as `500 Internal Server Error`. Seven distinct causes, one
+    useless answer, and the two a user can actually act on (a quota that resets,
+    a key that needs renewing) were indistinguishable from a bug in the product.
+    """
+
+    def _failing(self, client, exc, monkeypatch):
+        import slide_wright.llm.client as llm
+
+        class Failing(llm.Provider):
+            name = "gemini"
+
+            def complete(self, system, prompt):
+                raise exc
+
+        monkeypatch.setattr(llm, "default_provider", lambda: Failing())
+        document = open_document(client)
+        return client.post(
+            f"/api/documents/{document['id']}/propose",
+            json={"instruction": "make the title shorter"},
+        )
+
+    def test_a_quota_limit_is_429_not_500(self, client, monkeypatch):
+        """The request was fine and will be fine again. A client that wants to
+        back off has to be able to tell that from a failure that will not."""
+        from slide_wright.llm.gemini import RateLimited
+
+        response = self._failing(
+            client, RateLimited("Gemini free-tier quota reached (HTTP 429)", 41.0),
+            monkeypatch,
+        )
+        assert response.status_code == 429
+        assert "quota" in response.json()["detail"]
+
+    def test_it_says_how_long_to_wait(self, client, monkeypatch):
+        from slide_wright.llm.gemini import RateLimited
+
+        response = self._failing(
+            client, RateLimited("quota reached", 41.0), monkeypatch
+        )
+        assert "41s" in response.json()["detail"]
+
+    def test_a_rejected_credential_reaches_the_user_verbatim(self, client, monkeypatch):
+        """It is the one failure with a fix the user owns."""
+        from slide_wright.llm.gemini import GeminiError
+
+        response = self._failing(
+            client,
+            GeminiError("Gemini rejected the credential (HTTP 401). "
+                        "Check GEMINI_API_KEY is current and the API is enabled."),
+            monkeypatch,
+        )
+        assert response.status_code == 502
+        assert "GEMINI_API_KEY" in response.json()["detail"]
+
+    def test_an_unreachable_provider_says_so(self, client, monkeypatch):
+        from slide_wright.llm.gemini import GeminiError
+
+        response = self._failing(
+            client, GeminiError("could not reach Gemini: getaddrinfo failed"),
+            monkeypatch,
+        )
+        assert response.status_code == 502
+        assert "could not reach" in response.json()["detail"]
+
+    def test_an_unexpected_provider_bug_is_still_not_a_bare_500(self, client, monkeypatch):
+        """A provider is a foreign boundary. Whatever comes out of it, the user
+        gets told what happened to their deck — which is nothing."""
+        response = self._failing(client, RuntimeError("no attribute 'candidates'"),
+                                 monkeypatch)
+        assert response.status_code == 502
+        detail = response.json()["detail"]
+        assert "Nothing was changed" in detail
+        assert "RuntimeError" in detail
+
+    def test_the_translation_is_provider_neutral(self):
+        """The API must not import a vendor module to classify a failure, or a
+        second provider means finding every place the first one is named."""
+        from slide_wright.llm.client import ProviderError, ProviderRateLimited
+        from slide_wright.llm.gemini import GeminiError, RateLimited
+
+        assert issubclass(GeminiError, ProviderError)
+        assert issubclass(RateLimited, ProviderRateLimited)
+
+    def test_nothing_is_written_when_the_provider_fails(self, client, monkeypatch):
+        from slide_wright.llm.gemini import GeminiError
+
+        before = client.deck.read_bytes()
+        self._failing(client, GeminiError("could not reach Gemini"), monkeypatch)
+        assert client.deck.read_bytes() == before
