@@ -482,3 +482,89 @@ class TestFormattingAReaderSeesAndTheDiffDidNot:
         before = self._deck(tmp_path / "a.pptx", u="sng")
         after = self._deck(tmp_path / "b.pptx")
         assert all(not d.is_content for d in diff(before, after).deltas)
+
+
+class TestEmphasisLostToATextEdit:
+    """Styling a shape used before an edit and does not use after it.
+
+    Run formatting is deliberately not compared when the text changed: the runs
+    have been re-described by the text delta, and reporting every field of every
+    rewritten run buries the line the reviewer needs. That holds for *changes*
+    and not for *disappearances*.
+
+    It matters because replacing a shape's text is the only way the workspace
+    edits words — the contract names an object and its new full text — so every
+    intra-shape emphasis collapses into one run on every edit. Changing FY25 to
+    FY26 on "Revenue grew **15%** in FY25" took the bold off the figure and the
+    diff said `text ...FY2[5 -> 6]`.
+    """
+
+    def _deck(self, path, runs):
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        frame = slide.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(8), Inches(1)
+        ).text_frame
+        for text, bold, size in runs:
+            run = frame.paragraphs[0].add_run()
+            run.text = text
+            run.font.bold = bold
+            run.font.size = Pt(size)
+        prs.save(str(path))
+        return path
+
+    def _rewrite(self, src, tmp_path, after):
+        from slide_wright.apply import apply_changes
+        from slide_wright.changeset import Change, ChangeSet, Op
+
+        shape = next(s for s in inspect(src).slides[0].shapes if s.text.strip())
+        out = tmp_path / "after.pptx"
+        cs = ChangeSet(deck=str(src))
+        cs.add(Change(id="c1", op=Op.SET_TEXT, slide=1, target=shape.id,
+                      before=shape.text, after=after))
+        cs.approve_all()
+        assert not apply_changes(src, cs, out).failed
+        return diff(src, out)
+
+    def test_a_flattened_emphasis_is_reported(self, tmp_path):
+        src = self._deck(tmp_path / "a.pptx", [
+            ("Revenue grew ", False, 18), ("15%", True, 24), (" in FY25", False, 18),
+        ])
+        summaries = [d.summary for d in self._rewrite(src, tmp_path, "Revenue grew 15% in FY26").deltas]
+        assert "bold True no longer used in this text" in summaries
+        assert "size 24.0 no longer used in this text" in summaries
+
+    def test_a_uniform_shape_reports_nothing_extra(self, tmp_path):
+        """Nothing to lose: there was one style and there still is."""
+        src = self._deck(tmp_path / "a.pptx", [("Revenue grew in FY25", False, 18)])
+        kinds = [d.kind for d in self._rewrite(src, tmp_path, "Revenue grew in FY26").deltas]
+        assert kinds == ["text"]
+
+    def test_emphasis_that_survives_is_not_reported(self, tmp_path):
+        """The rewrite keeps a bold run, so bold is still in use."""
+        from slide_wright.apply import apply_changes
+        from slide_wright.changeset import Change, ChangeSet, Op
+
+        src = self._deck(tmp_path / "a.pptx", [
+            ("Revenue grew ", False, 18), ("15%", True, 18),
+        ])
+        shape = next(s for s in inspect(src).slides[0].shapes if s.text.strip())
+        out = tmp_path / "b.pptx"
+        cs = ChangeSet(deck=str(src))
+        # A narrow edit inside the first run: the bold run is untouched.
+        cs.add(Change(id="c1", op=Op.SET_TEXT, slide=1, target=shape.id,
+                      before="Revenue grew", after="Revenue rose"))
+        cs.approve_all()
+        assert not apply_changes(src, cs, out).failed
+        assert not [d for d in diff(src, out).deltas if "no longer used" in d.summary]
+
+    def test_it_is_presentation_not_content(self, tmp_path):
+        src = self._deck(tmp_path / "a.pptx", [
+            ("Revenue grew ", False, 18), ("15%", True, 24),
+        ])
+        lost = [d for d in self._rewrite(src, tmp_path, "Revenue grew 20%").deltas
+                if "no longer used" in d.summary]
+        assert lost and all(not d.is_content for d in lost)

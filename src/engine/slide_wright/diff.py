@@ -209,6 +209,7 @@ def _diff_shape(number: int, old: ShapeInfo, new: ShapeInfo, result: DeckDiff) -
         # slide while leaving the `a:hlinkClick` and the relationship in place,
         # and the deck comes back with a dead link and a clean report.
         _diff_links_by_presence(old, new, add)
+        _diff_emphasis_lost(old, new, add)
 
     if (old.table_rows, old.table_cols) != (new.table_rows, new.table_cols):
         add("table",
@@ -299,6 +300,36 @@ def _diff_formatting(old: ShapeInfo, new: ShapeInfo, add) -> None:
                         where=f" run {i + 1}")
         return
     _diff_formatting_by_character(old, new, add)
+
+
+def _diff_emphasis_lost(old: ShapeInfo, new: ShapeInfo, add) -> None:
+    """Styling that the shape used before the edit and does not use after it.
+
+    Run-by-run formatting is deliberately not compared when the text changed:
+    the runs have been re-described by the text delta and reporting every field
+    of every rewritten run buries the one line the reviewer needs. That
+    reasoning holds for *changes* and not for *disappearances*.
+
+    Replacing a shape's text is the only way the workspace edits words -- the
+    contract names an object and its new full text -- so every intra-shape
+    emphasis collapses into one run every time. Change FY25 to FY26 on
+    "Revenue grew **15%** in FY25" and the bold on the figure is gone, with the
+    diff saying `text ...FY2[5 -> 6]` and nothing else. The user changed a year.
+
+    One delta per attribute, not per run: the claim is about the shape, and the
+    reviewer needs to know the emphasis went, not where it went from.
+    """
+    for attr, label, kind in RUN_ATTRIBUTES:
+        if kind != "formatting":
+            continue
+        was = {getattr(run, attr) for run in old.runs}
+        if len(was) < 2:
+            continue          # nothing to lose: the shape was uniform already
+        lost = was - {getattr(run, attr) for run in new.runs}
+        if not lost:
+            continue
+        gone = ", ".join(repr(value) for value in sorted(lost, key=str))
+        add("formatting", f"{label} {gone} no longer used in this text", sorted(lost, key=str), None)
 
 
 def _diff_links_by_presence(old: ShapeInfo, new: ShapeInfo, add) -> None:
