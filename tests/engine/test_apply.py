@@ -8,12 +8,13 @@ assert preservation *within* the edited slide, down to the character.
 from __future__ import annotations
 
 import difflib
+import re
 import zipfile
 
 import pytest
 
 from slide_wright.apply import ApplyError, apply_changes
-from slide_wright.changeset import Change, ChangeSet, Op
+from slide_wright.changeset import Change, ChangeSet, Op, Status
 from slide_wright.fidelity import compare
 from slide_wright.inspect import inspect
 from slide_wright.package import Package
@@ -1023,3 +1024,293 @@ class TestAFormattingLockSurvivesATextEdit:
             "a formatting lock has to survive the edit it was held across"
         )
         assert "42%" in after.text
+
+
+class TestEveryLockIsAPropertyOfTheWrittenDeck:
+    """Nine scopes, each stated as something true of the output file.
+
+    A lock is tested elsewhere by what the change set does with it: the change
+    arrives, the lock rejects it, the status reads REJECTED. That is the gate
+    working, and it is not the guarantee. The guarantee is about the deck that
+    comes out, and the difference is exactly where this product keeps finding
+    defects -- a `formatting` lock permits text edits by design, and the applier
+    used to strip formatting while making one.
+
+    So each case holds a lock, sends one change the lock must refuse *and one it
+    must allow*, applies, and asks the output whether the protected property
+    survived the edit it was held across. A lock with nothing applied alongside
+    it proves nothing: the deck is never rewritten, so of course it did not
+    change.
+    """
+
+    def _find(self, deck, kind):
+        for slide in deck.slides:
+            for shape in slide.shapes:
+                if shape.kind == kind:
+                    return slide.number, shape
+        raise AssertionError(f"the corpus has no {kind}")
+
+    def _text_shape(self, deck, slide_number):
+        return next(
+            s
+            for s in deck.slides[slide_number - 1].shapes
+            if s.kind not in {"table", "group", "chart", "picture"} and s.text.strip()
+        )
+
+    # -- the properties, read off a deck --------------------------------------
+
+    def _all_text(self, deck):
+        return {(sl.number, s.id): s.text for sl in deck.slides for s in sl.shapes}
+
+    def _all_geometry(self, deck):
+        return {
+            (sl.number, s.id): (s.x, s.y, s.cx, s.cy)
+            for sl in deck.slides
+            for s in sl.shapes
+        }
+
+    def _all_formatting(self, deck):
+        return {
+            (sl.number, s.id): [
+                (r.text, r.size_pt, r.bold, r.italic, r.font, r.color) for r in s.runs
+            ]
+            for sl in deck.slides
+            for s in sl.shapes
+        }
+
+    def _all_styling(self, deck):
+        """Formatting with the text removed, so a text edit can be applied to the
+        same shape the property is asserted over. Comparing text too would make
+        the permitted change look like a violation and force the shape to be
+        excluded -- which is what made the first version of this suite pass
+        against an applier that destroyed styling."""
+        return {
+            (sl.number, s.id): [
+                (r.size_pt, r.bold, r.italic, r.font, r.color) for r in s.runs
+            ]
+            for sl in deck.slides
+            for s in sl.shapes
+        }
+
+    def _all_cells(self, deck):
+        return {
+            (sl.number, s.id): dict(s.table_cells)
+            for sl in deck.slides
+            for s in sl.shapes
+            if s.kind == "table"
+        }
+
+    def _all_digits(self, deck):
+        text = " ".join(s.text for sl in deck.slides for s in sl.shapes)
+        return sorted(re.findall(r"\d+", text))
+
+    # -- the harness ----------------------------------------------------------
+
+    def _apply_under(self, deck_path, tmp_path, scope, target, forbidden, permitted):
+        cs = ChangeSet(deck=str(deck_path))
+        cs.lock(scope, target)
+        cs.add(forbidden)
+        cs.add(permitted)
+        cs.approve_all()
+        assert forbidden.status is Status.REJECTED, (
+            f"the {scope} lock did not refuse the change it exists to refuse"
+        )
+        out = tmp_path / f"{scope}.pptx"
+        result = apply_changes(deck_path, cs, out)
+        assert not result.failed, result.failed
+        assert result.applied == [permitted], "the permitted change must land"
+        return inspect(out)
+
+    def _multi_run_shape(self, deck, slide_number):
+        """The shape whose text is several runs — the one narrowness needs."""
+        return next(
+            s
+            for s in deck.slides[slide_number - 1].shapes
+            if s.kind not in {"table", "group", "chart", "picture"} and len(s.runs) > 1
+        )
+
+    def _wordy(self, deck):
+        """A digit-free text edit that every case can use as its permitted change."""
+        shape = self._text_shape(deck, 1)
+        return shape, Change(
+            id="p", op=Op.SET_TEXT, slide=1, target=shape.id,
+            before=shape.runs[0].text, after="Rewritten opening",
+        )
+
+    # -- the nine -------------------------------------------------------------
+
+    def test_a_slide_lock_leaves_that_slide_byte_identical(
+        self, adversarial_deck, tmp_path
+    ):
+        deck = inspect(adversarial_deck)
+        protected = self._text_shape(deck, 1)
+        elsewhere = self._text_shape(deck, 6)
+        cs = ChangeSet(deck=str(adversarial_deck))
+        cs.lock("slide", "1")
+        forbidden = cs.add(Change(
+            id="f", op=Op.SET_TEXT, slide=1, target=protected.id,
+            before=protected.runs[0].text, after="CHANGED",
+        ))
+        permitted = cs.add(Change(
+            id="p", op=Op.SET_TEXT, slide=6, target=elsewhere.id,
+            before=elsewhere.runs[0].text, after="edited",
+        ))
+        cs.approve_all()
+        assert forbidden.status is Status.REJECTED
+
+        out = tmp_path / "slide.pptx"
+        assert not apply_changes(adversarial_deck, cs, out).failed
+        assert permitted.status is Status.APPLIED
+
+        part = deck.slides[0].part_name
+        assert zipfile.ZipFile(out).read(part) == zipfile.ZipFile(
+            adversarial_deck
+        ).read(part), "a locked slide's part must come back byte for byte"
+
+    def test_a_shape_lock_leaves_that_shape_alone(self, adversarial_deck, tmp_path):
+        deck = inspect(adversarial_deck)
+        protected = self._multi_run_shape(deck, 7)
+        # On the *same slide*, so the part is rewritten around the lock rather
+        # than left alone. A locked shape on a part nothing touched is not a
+        # test of the lock.
+        neighbour = next(
+            s for s in deck.slides[6].shapes
+            if s.id != protected.id and s.kind == "shape" and s.text.strip()
+        )
+        after = self._apply_under(
+            adversarial_deck, tmp_path, "shape", protected.id,
+            Change(
+                id="f", op=Op.SET_TEXT, slide=7,
+                target=f"{protected.id}/run/0",
+                before=protected.runs[0].text, after="CHANGED",
+            ),
+            Change(
+                id="p", op=Op.SET_TEXT, slide=7, target=neighbour.id,
+                before=neighbour.runs[0].text[:6], after="EDITED",
+            ),
+        )
+        survived = next(s for s in after.slides[6].shapes if s.id == protected.id)
+        assert survived.text == protected.text
+        assert [r.bold for r in survived.runs] == [r.bold for r in protected.runs]
+
+    def test_a_numbers_lock_leaves_every_figure_where_it_was(
+        self, adversarial_deck, tmp_path
+    ):
+        deck = inspect(adversarial_deck)
+        slide_number, table = self._find(deck, "table")
+        shape, permitted = self._wordy(deck)
+        assert not re.search(r"\d", shape.runs[0].text), (
+            "the permitted edit has to be digit-free or the lock would refuse it too"
+        )
+        after = self._apply_under(
+            adversarial_deck, tmp_path, "numbers", "",
+            Change(
+                id="f", op=Op.SET_TABLE_CELL, slide=slide_number,
+                target=f"{table.id}/r1/c1", before=table.cell(1, 1), after="99.9x",
+            ),
+            permitted,
+        )
+        assert self._all_digits(after) == self._all_digits(deck)
+
+    def test_a_wording_lock_leaves_every_word(self, adversarial_deck, tmp_path):
+        deck = inspect(adversarial_deck)
+        slide_number, table = self._find(deck, "table")
+        shape = self._text_shape(deck, 1)
+        after = self._apply_under(
+            adversarial_deck, tmp_path, "wording", "",
+            Change(
+                id="f", op=Op.SET_TEXT, slide=1, target=shape.id,
+                before=shape.runs[0].text, after="CHANGED",
+            ),
+            Change(
+                id="p", op=Op.MOVE, slide=slide_number, target=table.id,
+                before=[table.x, table.y], after=[table.x + 100000, table.y],
+            ),
+        )
+        assert self._all_text(after) == self._all_text(deck)
+
+    def test_a_layout_lock_leaves_every_box(self, adversarial_deck, tmp_path):
+        deck = inspect(adversarial_deck)
+        slide_number, table = self._find(deck, "table")
+        _, permitted = self._wordy(deck)
+        after = self._apply_under(
+            adversarial_deck, tmp_path, "layout", "",
+            Change(
+                id="f", op=Op.MOVE, slide=slide_number, target=table.id,
+                before=[table.x, table.y], after=[table.x + 100000, table.y],
+            ),
+            permitted,
+        )
+        assert self._all_geometry(after) == self._all_geometry(deck)
+
+    def test_a_formatting_lock_survives_the_text_edit_it_permits(
+        self, adversarial_deck, tmp_path
+    ):
+        deck = inspect(adversarial_deck)
+        styled = self._multi_run_shape(deck, 7)
+        head = styled.runs[0].text
+        after = self._apply_under(
+            adversarial_deck, tmp_path, "formatting", "",
+            Change(
+                id="f", op=Op.SET_FONT, slide=7, target=f"{styled.id}/run/1",
+                before=styled.runs[1].font, after="Georgia",
+            ),
+            # The permitted edit lands on the styled shape, through the joining
+            # path -- a prefix, so no run matches exactly. This is the whole
+            # point: "fix the words" is what the lock is held across.
+            Change(
+                id="p", op=Op.SET_TEXT, slide=7, target=styled.id,
+                before=head[: len(head) - 1], after=head[: len(head) - 1].upper(),
+            ),
+        )
+        assert self._all_styling(after) == self._all_styling(deck), (
+            "a formatting lock has to survive the text edit it permits"
+        )
+
+    def test_a_tables_lock_leaves_every_cell(self, adversarial_deck, tmp_path):
+        deck = inspect(adversarial_deck)
+        slide_number, table = self._find(deck, "table")
+        _, permitted = self._wordy(deck)
+        after = self._apply_under(
+            adversarial_deck, tmp_path, "tables", "",
+            Change(
+                id="f", op=Op.SET_TABLE_CELL, slide=slide_number,
+                target=f"{table.id}/r1/c1", before=table.cell(1, 1), after="ZZ",
+            ),
+            permitted,
+        )
+        assert self._all_cells(after) == self._all_cells(deck)
+
+    def test_a_charts_lock_leaves_the_chart_frame(self, adversarial_deck, tmp_path):
+        deck = inspect(adversarial_deck)
+        slide_number, chart = self._find(deck, "chart")
+        _, permitted = self._wordy(deck)
+        after = self._apply_under(
+            adversarial_deck, tmp_path, "charts", "",
+            Change(
+                id="f", op=Op.MOVE, slide=slide_number, target=chart.id,
+                before=[chart.x, chart.y], after=[chart.x + 100000, chart.y],
+                object_kind="chart",
+            ),
+            permitted,
+        )
+        held = next(s for s in after.slides[slide_number - 1].shapes if s.id == chart.id)
+        assert (held.x, held.y) == (chart.x, chart.y)
+
+    def test_a_media_lock_leaves_the_picture(self, adversarial_deck, tmp_path):
+        deck = inspect(adversarial_deck)
+        slide_number, picture = self._find(deck, "picture")
+        _, permitted = self._wordy(deck)
+        after = self._apply_under(
+            adversarial_deck, tmp_path, "media", "",
+            Change(
+                id="f", op=Op.MOVE, slide=slide_number, target=picture.id,
+                before=[picture.x, picture.y],
+                after=[picture.x + 100000, picture.y], object_kind="picture",
+            ),
+            permitted,
+        )
+        held = next(
+            s for s in after.slides[slide_number - 1].shapes if s.id == picture.id
+        )
+        assert (held.x, held.y) == (picture.x, picture.y)
