@@ -93,12 +93,17 @@ class TestTextSpanningParagraphs:
     `ShapeInfo.text` joins every run in the shape, so a caller passing that
     value back could describe a span no single paragraph contained. The applier
     only searched within paragraphs, so it silently matched nothing.
+
+    The join now puts a newline between paragraphs, so the string the caller
+    reads carries the shape's line breaks. The property under test is unchanged
+    and slightly stronger: whatever `ShapeInfo.text` returns, passing it back
+    as `before` has to find the whole shape.
     """
 
     def test_replaces_text_spanning_paragraphs_and_runs(self, tmp_path):
         deck_path = multi_paragraph_deck(tmp_path / "multi.pptx")
         shape = next(s for s in inspect(deck_path).all_shapes() if s.has_text)
-        assert "\n" not in shape.text  # joined across paragraphs, as the caller sees it
+        assert "\n" in shape.text, "paragraphs are separated, not welded"
 
         changeset = ChangeSet(deck=str(deck_path))
         changeset.add(Change(id="c1", op=Op.SET_TEXT, slide=1, target=shape.id,

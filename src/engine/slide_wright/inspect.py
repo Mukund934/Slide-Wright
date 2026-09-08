@@ -49,6 +49,9 @@ class TextRun:
     underline: str | None = None
     strike: str | None = None
     baseline: int | None = None
+    #: Which paragraph of the shape this run belongs to. Only `ShapeInfo.text`
+    #: uses it, and only to know where one line ends and the next begins.
+    paragraph: int = 0
     #: Where this run points, resolved through the slide's relationships. A
     #: hyperlink is carried by the run, so an edit that empties a run takes the
     #: link off the slide while leaving both the `a:hlinkClick` and the
@@ -90,7 +93,30 @@ class ShapeInfo:
 
     @property
     def text(self) -> str:
-        return "".join(r.text for r in self.runs)
+        """Everything the shape says, with its paragraphs kept apart.
+
+        Runs were joined with nothing between them, so a bulleted list came back
+        as one string with the bullets welded together: `"March 16,
+        2023www.eia.gov/aeo"` is a real shape from a real deck. Every consumer
+        inherited it -- `word_count` read that as one word, so the audit's
+        density measures ran **12.4% low** across the corpus (9,712 words
+        counted where 11,085 exist, over 227 shapes in 11 of 26 decks); the
+        model summary sent the welded version; and a `before` a caller built
+        from this text could only match by welding too.
+
+        `planner.summarise` has always done `shape.text.replace("\n", " ")`,
+        which is what the separator was supposed to need. `apply._set_text`
+        joins the same way, because the two have to agree about what this string
+        is for a `before` taken from one to be found by the other.
+        """
+        parts: list[str] = []
+        previous: int | None = None
+        for run in self.runs:
+            if previous is not None and run.paragraph != previous:
+                parts.append("\n")
+            parts.append(run.text)
+            previous = run.paragraph
+        return "".join(parts)
 
     @property
     def has_text(self) -> bool:
@@ -491,33 +517,34 @@ def _read_shape(el, links: dict[str, str] | None = None) -> ShapeInfo | None:
             1 for c in el if etree.QName(c).localname in {"sp", "pic", "grpSp", "graphicFrame", "cxnSp"}
         )
 
-    for r in el.findall(".//a:r", NS):
-        t = r.find("a:t", NS)
-        if t is None or not t.text:
-            continue
-        rpr = r.find("a:rPr", NS)
-        run = TextRun(text=t.text)
-        if rpr is not None:
-            sz = rpr.get("sz")
-            run.size_pt = int(sz) / 100.0 if sz else None
-            run.bold = rpr.get("b") == "1"
-            run.italic = rpr.get("i") == "1"
-            latin = rpr.find("a:latin", NS)
-            if latin is not None:
-                run.font = latin.get("typeface")
-            clr = rpr.find(".//a:srgbClr", NS)
-            if clr is not None:
-                run.color = clr.get("val")
-            run.underline = _off(rpr.get("u"), "none")
-            run.strike = _off(rpr.get("strike"), "noStrike")
-            baseline = rpr.get("baseline")
-            if baseline and baseline.lstrip("-").isdigit() and int(baseline) != 0:
-                run.baseline = int(baseline)
-            hlink = rpr.find("a:hlinkClick", NS)
-            if hlink is not None:
-                rid = hlink.get(f"{{{NS['r']}}}id")
-                if rid:
-                    run.link = (links or {}).get(rid, rid)
-        shape.runs.append(run)
+    for index, para in enumerate(el.findall(".//a:p", NS)):
+        for r in para.findall(".//a:r", NS):
+            t = r.find("a:t", NS)
+            if t is None or not t.text:
+                continue
+            rpr = r.find("a:rPr", NS)
+            run = TextRun(text=t.text, paragraph=index)
+            if rpr is not None:
+                sz = rpr.get("sz")
+                run.size_pt = int(sz) / 100.0 if sz else None
+                run.bold = rpr.get("b") == "1"
+                run.italic = rpr.get("i") == "1"
+                latin = rpr.find("a:latin", NS)
+                if latin is not None:
+                    run.font = latin.get("typeface")
+                clr = rpr.find(".//a:srgbClr", NS)
+                if clr is not None:
+                    run.color = clr.get("val")
+                run.underline = _off(rpr.get("u"), "none")
+                run.strike = _off(rpr.get("strike"), "noStrike")
+                baseline = rpr.get("baseline")
+                if baseline and baseline.lstrip("-").isdigit() and int(baseline) != 0:
+                    run.baseline = int(baseline)
+                hlink = rpr.find("a:hlinkClick", NS)
+                if hlink is not None:
+                    rid = hlink.get(f"{{{NS['r']}}}id")
+                    if rid:
+                        run.link = (links or {}).get(rid, rid)
+            shape.runs.append(run)
 
     return shape

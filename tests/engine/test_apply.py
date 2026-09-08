@@ -625,7 +625,7 @@ class TestAnEditKeepsTheFormattingItDidNotAskAbout:
             '<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
             f' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">{paras}</p:sp>'
         )
-        assert _set_text(shape, "42%Headcount fell", "42%Headcount rose")
+        assert _set_text(shape, "42%\nHeadcount fell", "42%\nHeadcount rose")
         third = shape.findall(f"{self.A}p")[2]
         assert third.find(f".//{self.A}t").text == "Cash runway 18 months", (
             "a bullet the span never reached must still hold its own text"

@@ -346,9 +346,21 @@ def _set_text(shape, before: str, after: str) -> bool:
         if _replace_within(para.findall("a:r", NS), before, after):
             return True
 
-    # 3. The span crosses paragraphs; treat the shape as one text block.
-    all_runs = [r for para in paragraphs for r in para.findall("a:r", NS)]
-    return _replace_within(all_runs, before, after)
+    # 3. The span crosses paragraphs. The joined view puts a newline between
+    #    them, exactly as `ShapeInfo.text` does -- the two have to agree, or a
+    #    `before` read off the deck could not be found in it.
+    slots: list[tuple] = []
+    previous: int | None = None
+    for index, para in enumerate(paragraphs):
+        for run in para.findall("a:r", NS):
+            element = run.find("a:t", NS)
+            if element is None or not element.text:
+                continue
+            if previous is not None and index != previous:
+                slots.append((None, "\n"))
+            slots.append((element, element.text))
+            previous = index
+    return _replace_slots(slots, before, after)
 
 
 def _replace_within(runs, before: str, after: str) -> bool:
@@ -368,12 +380,24 @@ def _replace_within(runs, before: str, after: str) -> bool:
     replacement crosses runs that are formatted differently; the docstring above
     `_set_text` has always said that, and now it is true.
     """
-    texts = [(r, r.find("a:t", NS)) for r in runs]
-    texts = [(r, t) for r, t in texts if t is not None]
-    if not texts:
+    slots = [(t, t.text or "") for t in (r.find("a:t", NS) for r in runs) if t is not None]
+    return _replace_slots(slots, before, after)
+
+
+def _replace_slots(slots, before: str, after: str) -> bool:
+    """Replace `before` across a sequence of writable and unwritable pieces.
+
+    A slot is `(element, text)`. An element of None is a piece that exists in
+    the joined view and not in the document -- the newline between paragraphs --
+    so it contributes its length to the arithmetic and is never written to. That
+    is the whole reason this is separate from the run walk: the span has to be
+    located in the string the caller was reading, which has separators in it,
+    and written back to the runs, which do not.
+    """
+    if not slots:
         return False
 
-    joined = "".join(t.text or "" for _, t in texts)
+    joined = "".join(text for _, text in slots)
     start = joined.find(before) if before else -1
     if start < 0:
         return False
@@ -381,15 +405,14 @@ def _replace_within(runs, before: str, after: str) -> bool:
 
     offset = 0
     written = False
-    for _, t in texts:
-        text = t.text or ""
-        run_start, run_end = offset, offset + len(text)
-        offset = run_end
-        if run_end <= start or run_start >= end:
+    for element, text in slots:
+        slot_start, slot_end = offset, offset + len(text)
+        offset = slot_end
+        if element is None or slot_end <= start or slot_start >= end:
             continue
-        head = text[: start - run_start] if run_start < start else ""
-        tail = text[end - run_start :] if run_end > end else ""
-        t.text = head + after + tail if not written else head + tail
+        head = text[: start - slot_start] if slot_start < start else ""
+        tail = text[end - slot_start :] if slot_end > end else ""
+        element.text = head + after + tail if not written else head + tail
         written = True
     return written
 
