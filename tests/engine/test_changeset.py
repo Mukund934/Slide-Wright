@@ -396,3 +396,28 @@ class TestNotKnowingIsNotTheSameAsKnowingThereIsNoNumber:
         assert self._with_numbers_lock(
             op=Op.MOVE, before=None, after=(1, 1)
         ).status is Status.PROPOSED
+
+
+class TestAnExhibitLockDoesNotDependOnBeingToldTheKind:
+    """A cell edit is a table edit however the change describes itself.
+
+    `tables`, `charts` and `media` match on `Change.object_kind`. That is a
+    description the builder supplies, so a builder that omits it produces a
+    change the lock cannot see — which is a guarantee resting on bookkeeping.
+    For a cell edit the op alone settles it, so that case no longer asks.
+    """
+
+    def test_a_cell_edit_is_blocked_with_no_object_kind_declared(self):
+        cs = ChangeSet(deck="d.pptx")
+        cs.lock("tables", reason="leave the exhibits alone")
+        cs.add(Change(id="c1", op=Op.SET_TABLE_CELL, slide=1, target="5/r1/c1",
+                      before="9.4x", after="11.8x"))
+        assert cs.changes[0].status is Status.REJECTED
+        assert "tables lock" in cs.changes[0].rationale
+
+    def test_an_ordinary_text_edit_is_not_caught_by_it(self):
+        cs = ChangeSet(deck="d.pptx")
+        cs.lock("tables")
+        cs.add(Change(id="c1", op=Op.SET_TEXT, slide=1, target="5",
+                      before="Draft", after="Final"))
+        assert cs.changes[0].status is Status.PROPOSED

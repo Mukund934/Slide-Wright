@@ -171,6 +171,14 @@ class Lock:
             return change.op in (Op.SET_FONT, Op.SET_COLOR, Op.SET_FONT_SIZE)
         if self.scope in ("tables", "charts", "media"):
             # "leave the exhibits alone" — matched on the object being edited
+            #
+            # A cell edit is a table edit by construction, whoever built the
+            # change and whatever it says about itself. Matching only on
+            # `object_kind` made the guarantee depend on a field carried for
+            # review UX: `--set` never filled it, so the CLI printed "tables
+            # deck-wide" above the table edit it was failing to block.
+            if self.scope == "tables" and change.op is Op.SET_TABLE_CELL:
+                return True
             kind = {"tables": "table", "charts": "chart", "media": "picture"}[self.scope]
             return change.object_kind == kind
         return False

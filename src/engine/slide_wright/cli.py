@@ -271,7 +271,7 @@ def _build_changes(session, args, changeset) -> int | None:
 
     for i, spec in enumerate(args.set or [], start=1):
         try:
-            changeset.add(_parse_set(spec, i))
+            changeset.add(_parse_set(spec, i, session.deck()))
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return EXIT_ERROR
@@ -637,7 +637,7 @@ def cmd_edit(args) -> int:
 
     for i, spec in enumerate(args.set or [], start=1):
         try:
-            change = _parse_set(spec, i)
+            change = _parse_set(spec, i, session.deck())
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return EXIT_ERROR
@@ -697,11 +697,18 @@ def cmd_edit(args) -> int:
     return EXIT_OK
 
 
-def _parse_set(spec: str, index: int) -> Change:
+def _parse_set(spec: str, index: int, deck=None) -> Change:
     """Parse `slide:target:before=after` into a change.
 
     Targets ending in /r{row}/c{col} address a table cell; anything else
     addresses a shape's text.
+
+    `deck` is what the change is *about*, and it is needed for the object kind.
+    The `tables`, `charts` and `media` locks match on that kind, so a change that
+    does not carry one is invisible to them: `--set` on a table cell with
+    `--lock tables` held printed "tables deck-wide" above the change it was
+    failing to block. Every other path that builds a change -- refresh, brand,
+    align, the planner -- has always set it, which is why nothing caught this.
     """
     head, sep, after = spec.partition("=")
     if not sep:
@@ -713,8 +720,16 @@ def _parse_set(spec: str, index: int) -> Change:
     if not slide_s.isdigit():
         raise ValueError(f"slide must be a number, got {slide_s!r}")
     op = Op.SET_TABLE_CELL if "/r" in target and "/c" in target else Op.SET_TEXT
+    kind = ""
+    if deck is not None:
+        slide_info = deck.slide(int(slide_s))
+        shape_id = target.split("/")[0]
+        shape = next(
+            (sh for sh in slide_info.shapes if sh.id == shape_id), None
+        ) if slide_info else None
+        kind = shape.kind if shape else ""
     return Change(id=f"c{index}", op=op, slide=int(slide_s), target=target,
-                  before=before, after=after)
+                  before=before, after=after, object_kind=kind)
 
 
 def build_parser() -> argparse.ArgumentParser:

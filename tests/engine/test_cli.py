@@ -124,6 +124,31 @@ class TestEdit:
         ])
         assert code == EXIT_FINDINGS
 
+    def test_tables_lock_blocks_a_cell_edit(self, adversarial_deck, tmp_path, capsys):
+        """`--lock`'s own help offers `tables`, so it has to mean something here.
+
+        It matched on `Change.object_kind`, a field carried for review UX that
+        every builder set except `--set`. The lock printed as held, deck-wide,
+        directly above the table edit it was not blocking.
+        """
+        table = next(s for s in inspect(adversarial_deck).all_shapes() if s.kind == "table")
+        code = main([
+            "edit", str(adversarial_deck),
+            "--set", f"3:{table.id}/r1/c1:9.4x=11.8x",
+            "--lock", "tables", "--workspace", str(tmp_path / "ws"),
+        ])
+        assert code == EXIT_FINDINGS
+        assert "blocked by tables lock" in capsys.readouterr().out
+
+    def test_a_set_change_knows_what_kind_of_object_it_edits(self, adversarial_deck):
+        """The field the exhibit locks read, filled where the change is built."""
+        from slide_wright.cli import _parse_set
+
+        deck = inspect(adversarial_deck)
+        table = next(s for s in deck.all_shapes() if s.kind == "table")
+        change = _parse_set(f"3:{table.id}/r1/c1:9.4x=11.8x", 1, deck)
+        assert change.object_kind == "table"
+
     def test_malformed_set_is_a_usage_error(self, adversarial_deck, tmp_path, capsys):
         code = main([
             "edit", str(adversarial_deck), "--set", "nonsense",
