@@ -328,3 +328,86 @@ class TestFormattingIsComparedEvenWhenTheRunsMoved:
         deltas = diff(before, after).deltas
         assert [d.summary for d in deltas] == ["bold True -> False"]
         assert "' and margin'" in deltas[0].description
+
+
+class TestALostLinkIsReported:
+    """A hyperlink is carried by a run, so an edit can take one off the slide.
+
+    The `a:hlinkClick` and the relationship both survive -- the run keeps its
+    `rPr`, the .rels file keeps its target -- and there is no longer any text
+    carrying the link. Part counts are unchanged, the package is well formed,
+    and the deck has a dead link.
+
+    Nothing in this product could see that until now: `inspect` did not record a
+    run's link, so the diff had nothing to compare and the audit had nothing to
+    check. The only line printed was the text delta, which says nothing about
+    where the deck used to point.
+    """
+
+    def _linked(self, path):
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        frame = slide.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(8), Inches(2)
+        ).text_frame
+        for text in ("See ", "methodology", " for details"):
+            run = frame.paragraphs[0].add_run()
+            run.text = text
+            run.font.size = Pt(18)
+            if text == "methodology":
+                run.hyperlink.address = "https://example.com/methodology"
+        prs.save(str(path))
+        return path
+
+    def _shape(self, deck):
+        return next(s for s in inspect(deck).slides[0].shapes if s.text.strip())
+
+    def test_inspect_records_where_a_run_points(self, tmp_path):
+        src = self._linked(tmp_path / "a.pptx")
+        assert [r.link for r in self._shape(src).runs] == [
+            None, "https://example.com/methodology", None
+        ], "a run's link has to be readable before anything can compare it"
+
+    def test_an_edit_that_drops_a_link_says_so(self, tmp_path):
+        from slide_wright.apply import apply_changes
+        from slide_wright.changeset import Change, ChangeSet, Op
+
+        src = self._linked(tmp_path / "a.pptx")
+        shape = self._shape(src)
+        out = tmp_path / "b.pptx"
+        cs = ChangeSet(deck=str(src))
+        cs.add(Change(id="c1", op=Op.SET_TEXT, slide=1, target=shape.id,
+                      before="See methodology", after="See the appendix"))
+        cs.approve_all()
+        assert not apply_changes(src, cs, out).failed
+
+        deltas = diff(src, out).deltas
+        lost = [d for d in deltas if d.kind == "link"]
+        assert len(lost) == 1, [d.description for d in deltas]
+        assert "https://example.com/methodology" in lost[0].description
+        assert "removed" in lost[0].description
+
+    def test_a_dropped_link_counts_as_content(self, tmp_path):
+        """It is what the deck points at, and a reader notices losing one."""
+        from slide_wright.apply import apply_changes
+        from slide_wright.changeset import Change, ChangeSet, Op
+
+        src = self._linked(tmp_path / "a.pptx")
+        shape = self._shape(src)
+        out = tmp_path / "b.pptx"
+        cs = ChangeSet(deck=str(src))
+        cs.add(Change(id="c1", op=Op.SET_TEXT, slide=1, target=shape.id,
+                      before="See methodology", after="See the appendix"))
+        cs.approve_all()
+        apply_changes(src, cs, out)
+
+        result = diff(src, out)
+        assert all(d.is_content for d in result.deltas if d.kind == "link")
+
+    def test_a_link_left_alone_is_not_reported(self, tmp_path):
+        src = self._linked(tmp_path / "a.pptx")
+        again = self._linked(tmp_path / "b.pptx")
+        assert not [d for d in diff(src, again).deltas if d.kind == "link"]

@@ -37,6 +37,12 @@ class TextRun:
     italic: bool = False
     font: str | None = None
     color: str | None = None
+    #: Where this run points, resolved through the slide's relationships. A
+    #: hyperlink is carried by the run, so an edit that empties a run takes the
+    #: link off the slide while leaving both the `a:hlinkClick` and the
+    #: relationship in the package -- nothing downstream could see that, because
+    #: nothing here recorded it.
+    link: str | None = None
 
 
 @dataclass
@@ -316,8 +322,9 @@ def _read_slide(pkg: Package, part_name: str, number: int) -> SlideInfo:
     tree = root.find(".//p:cSld/p:spTree", NS)
     if tree is None:
         return slide
+    links = _hyperlink_targets(pkg, part_name)
     for el in tree:
-        info = _read_shape(el)
+        info = _read_shape(el, links)
         if info is not None:
             slide.shapes.append(info)
     _inherit_geometry(pkg, part_name, slide)
@@ -378,7 +385,29 @@ def _read_cells(rows) -> dict[str, str]:
     return cells
 
 
-def _read_shape(el) -> ShapeInfo | None:
+def _hyperlink_targets(pkg: Package, part_name: str) -> dict[str, str]:
+    """`rId` to what it points at, for this slide's relationships.
+
+    An unresolvable id is kept as the id: knowing a run links *somewhere* and
+    not knowing where is still worth more than not knowing it links at all.
+    """
+    rels_name = part_name.replace("slides/", "slides/_rels/") + ".rels"
+    if rels_name not in pkg.parts:
+        return {}
+    try:
+        root = etree.fromstring(pkg.read(rels_name))
+    except etree.XMLSyntaxError:
+        return {}
+    return {
+        rel.get("Id"): rel.get("Target", "")
+        for rel in root.iter(
+            "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
+        )
+        if rel.get("Id")
+    }
+
+
+def _read_shape(el, links: dict[str, str] | None = None) -> ShapeInfo | None:
     tag = etree.QName(el).localname
     kind = {
         "sp": "shape",
@@ -462,6 +491,11 @@ def _read_shape(el) -> ShapeInfo | None:
             clr = rpr.find(".//a:srgbClr", NS)
             if clr is not None:
                 run.color = clr.get("val")
+            hlink = rpr.find("a:hlinkClick", NS)
+            if hlink is not None:
+                rid = hlink.get(f"{{{NS['r']}}}id")
+                if rid:
+                    run.link = (links or {}).get(rid, rid)
         shape.runs.append(run)
 
     return shape

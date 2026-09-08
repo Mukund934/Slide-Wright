@@ -43,7 +43,7 @@ class ShapeDelta:
 
     slide: int
     shape_id: str
-    kind: str            # text | geometry | size | formatting | table | added | removed
+    kind: str            # text | geometry | size | formatting | link | table | added | removed
     description: str
     before: object = None
     after: object = None
@@ -63,7 +63,7 @@ class ShapeDelta:
     @property
     def is_content(self) -> bool:
         """Content changes alter what the deck says. Everything else is presentation."""
-        return self.kind in {"text", "table", "added", "removed"}
+        return self.kind in {"text", "table", "added", "removed", "link"}
 
     @property
     def changes_figures(self) -> bool:
@@ -202,6 +202,13 @@ def _diff_shape(number: int, old: ShapeInfo, new: ShapeInfo, result: DeckDiff) -
     if old.text != new.text:
         add("text", f"text {_describe_text_change(old.text, new.text)}",
             old.text, new.text)
+        # Styling is suppressed when the text changed, because the text delta
+        # has already re-described those runs. A link is not styling and the
+        # text delta says nothing about one, so suppressing it hides the only
+        # signal there was: a run emptied by an edit takes its hyperlink off the
+        # slide while leaving the `a:hlinkClick` and the relationship in place,
+        # and the deck comes back with a dead link and a clean report.
+        _diff_links_by_presence(old, new, add)
 
     if (old.table_rows, old.table_cols) != (new.table_rows, new.table_cols):
         add("table",
@@ -236,10 +243,17 @@ def _diff_geometry(old: ShapeInfo, new: ShapeInfo, add) -> None:
             old.rotation_deg, new.rotation_deg)
 
 
-#: The run attributes a reader would see change. Order is the order they are
-#: reported in, so it is the order a reviewer reads them.
-RUN_ATTRIBUTES = (("size_pt", "size"), ("bold", "bold"), ("italic", "italic"),
-                  ("font", "font"), ("color", "colour"))
+#: The run attributes a reader would see change, each with the kind of delta it
+#: produces. Order is the order they are reported in, so it is the order a
+#: reviewer reads them.
+#:
+#: `link` is not formatting. A hyperlink is what the deck *points at*, and a
+#: reader notices losing one the way they notice losing a sentence -- so it
+#: counts as content, and a deck that comes back with a dead link may not be
+#: described as "nothing changed about what it says".
+RUN_ATTRIBUTES = (("size_pt", "size", "formatting"), ("bold", "bold", "formatting"),
+                  ("italic", "italic", "formatting"), ("font", "font", "formatting"),
+                  ("color", "colour", "formatting"), ("link", "link", "link"))
 
 
 def _diff_formatting(old: ShapeInfo, new: ShapeInfo, add) -> None:
@@ -271,16 +285,31 @@ def _diff_formatting(old: ShapeInfo, new: ShapeInfo, add) -> None:
         return
     if [r.text for r in old.runs] == [r.text for r in new.runs]:
         for i, (a, b) in enumerate(zip(old.runs, new.runs)):
-            for attr, label in RUN_ATTRIBUTES:
+            for attr, label, kind in RUN_ATTRIBUTES:
                 av, bv = getattr(a, attr), getattr(b, attr)
                 if av != bv:
                     # The run index is location, so it goes in `where`. Without
                     # that, 266 identical font changes are 266 distinct
                     # summaries and grouping them is impossible.
-                    add("formatting", f"{label} {av!r} -> {bv!r}", av, bv,
+                    add(kind, f"{label} {av!r} -> {bv!r}", av, bv,
                         where=f" run {i + 1}")
         return
     _diff_formatting_by_character(old, new, add)
+
+
+def _diff_links_by_presence(old: ShapeInfo, new: ShapeInfo, add) -> None:
+    """Which links the shape carries, when the runs cannot be lined up.
+
+    Compared as a set rather than by position: the text changed, so there is no
+    correspondence between the runs either side, and "the deck used to point
+    here and no longer does" is the whole of what a reviewer needs.
+    """
+    before = {r.link for r in old.runs if r.link}
+    after = {r.link for r in new.runs if r.link}
+    for gone in sorted(before - after):
+        add("link", f"link to {gone!r} removed", gone, None)
+    for arrived in sorted(after - before):
+        add("link", f"link to {arrived!r} added", None, arrived)
 
 
 def _diff_formatting_by_character(old: ShapeInfo, new: ShapeInfo, add) -> None:
@@ -290,9 +319,9 @@ def _diff_formatting_by_character(old: ShapeInfo, new: ShapeInfo, add) -> None:
     after = _run_per_character(new.runs)
     if not len(before) == len(after) == len(text):
         return
-    for attr, label in RUN_ATTRIBUTES:
+    for attr, label, kind in RUN_ATTRIBUTES:
         for (av, bv), span in _differing_spans(text, before, after, attr):
-            add("formatting", f"{label} {av!r} -> {bv!r}", av, bv,
+            add(kind, f"{label} {av!r} -> {bv!r}", av, bv,
                 where=f" in {_quote(span)}")
 
 
