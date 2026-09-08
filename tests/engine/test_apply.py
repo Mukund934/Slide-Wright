@@ -748,3 +748,68 @@ class TestACellSplitAcrossRunsIsStillOneValue:
         ))
         assert not apply_changes(src, cs, out).failed
         assert self._table(out).cell(1, 1) == "n/a"
+
+
+class TestATargetNamingOneRunChangesOneRun:
+    """Three formatting ops, one addressing rule.
+
+    `<shape>/run/<index>` is how conformance work stays checkable: the word that
+    was pasted in the wrong font comes back fixed and every other run byte
+    identical. Font and colour honoured it; size did not, and set `sz` on every
+    run in the shape whatever the target said.
+    """
+
+    def _deck(self, tmp_path):
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        path = tmp_path / "sizes.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        frame = slide.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(8), Inches(2)
+        ).text_frame
+        for text, size in (("Headline ", 28), ("footnote", 10), (" tail", 28)):
+            run = frame.paragraphs[0].add_run()
+            run.text = text
+            run.font.size = Pt(size)
+        prs.save(str(path))
+        return path
+
+    def _runs(self, deck):
+        shape = next(s for s in inspect(deck).slides[0].shapes if s.text.strip())
+        return shape.id, [(r.text, r.size_pt) for r in shape.runs]
+
+    def test_resizing_one_run_leaves_the_headline_alone(self, tmp_path):
+        src = self._deck(tmp_path)
+        shape_id, _ = self._runs(src)
+        out = tmp_path / "o.pptx"
+        cs = approved(src, Change(
+            id="c1", op=Op.SET_FONT_SIZE, slide=1, target=f"{shape_id}/run/1",
+            before=10, after=12,
+        ))
+        assert not apply_changes(src, cs, out).failed
+        assert self._runs(out)[1] == [
+            ("Headline ", 28.0), ("footnote", 12.0), (" tail", 28.0)
+        ], "a change addressed at one run must not resize its neighbours"
+
+    def test_a_bare_shape_id_still_resizes_the_whole_shape(self, tmp_path):
+        src = self._deck(tmp_path)
+        shape_id, _ = self._runs(src)
+        out = tmp_path / "o.pptx"
+        cs = approved(src, Change(
+            id="c1", op=Op.SET_FONT_SIZE, slide=1, target=shape_id, after=12,
+        ))
+        assert not apply_changes(src, cs, out).failed
+        assert {size for _, size in self._runs(out)[1]} == {12.0}
+
+    def test_a_run_index_off_the_end_is_refused(self, tmp_path):
+        src = self._deck(tmp_path)
+        shape_id, before = self._runs(src)
+        out = tmp_path / "o.pptx"
+        cs = approved(src, Change(
+            id="c1", op=Op.SET_FONT_SIZE, slide=1, target=f"{shape_id}/run/9",
+            after=12,
+        ))
+        assert len(apply_changes(src, cs, out).failed) == 1
+        assert self._runs(out)[1] == before, "a refused change must write nothing"

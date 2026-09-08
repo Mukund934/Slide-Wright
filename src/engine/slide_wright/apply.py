@@ -260,7 +260,7 @@ def _apply_one(root, change: Change) -> tuple[bool, str]:
         return False, (f"run {change.target} not found, or it carries no explicit "
                        f"formatting to change")
     if change.op is Op.SET_FONT_SIZE:
-        if _set_font_size(shape, float(change.after)):
+        if _set_font_size(shape, change):
             return True, ""
         # Runs inherit their size from the layout unless they carry an explicit
         # override. There is nothing to change, and saying "not found" would be
@@ -417,12 +417,26 @@ def _table_size(shape) -> tuple[int, int] | None:
     return len(rows), max(len(r.findall("a:tc", NS)) for r in rows)
 
 
-def _set_font_size(shape, size_pt: float) -> bool:
-    hundredths = str(int(round(size_pt * 100)))
+def _set_font_size(shape, change: Change) -> bool:
+    """Change one run's size, or every run's, according to what the target names.
+
+    `_set_run_format` has honoured `<shape>/run/<index>` since run addressing
+    existed and this did not: it set `sz` on every `a:rPr` in the shape whatever
+    the target said. A change reviewed as "make the footnote 12pt" -- one run,
+    named -- took the 28pt headline beside it down to 12pt as well, and reported
+    itself applied. Three ops, two addressing rules, and the review UI showing
+    the narrow one.
+    """
+    runs = _targeted_runs(shape, change.target)
+    if runs is None:
+        return False
+    hundredths = str(int(round(float(change.after) * 100)))
     changed = False
-    for rpr in shape.findall(".//a:rPr", NS):
-        rpr.set("sz", hundredths)
-        changed = True
+    for run in runs:
+        rpr = run.find("a:rPr", NS)
+        if rpr is not None:
+            rpr.set("sz", hundredths)
+            changed = True
     return changed
 
 
@@ -451,6 +465,28 @@ def _addressable_runs(shape) -> list:
     return addressable
 
 
+def _targeted_runs(shape, target: str) -> list | None:
+    """The runs a target addresses: one when it names a run, otherwise all.
+
+    `<shape>/run/<index>` addresses exactly one, indexed as `inspect` enumerates
+    them. A bare shape id addresses every run in the shape. None means the
+    target names a run that does not exist, which is a refusal rather than a
+    quietly wider edit -- the difference matters because the reviewer approved
+    the narrow sentence the target described.
+    """
+    runs = _addressable_runs(shape)
+    parts = target.split("/")
+    if len(parts) >= 3 and parts[1] == "run":
+        try:
+            index = int(parts[2])
+        except ValueError:
+            return None
+        if not 0 <= index < len(runs):
+            return None
+        return [runs[index]]
+    return runs
+
+
 def _set_run_format(shape, change: Change) -> bool:
     """Change one run's typeface or colour, touching nothing else.
 
@@ -460,19 +496,9 @@ def _set_run_format(shape, change: Change) -> bool:
     fixed and every other run byte-identical, which is what makes "we changed
     only what did not conform" a checkable claim rather than a slogan.
     """
-    runs = _addressable_runs(shape)
+    runs = _targeted_runs(shape, change.target)
     if not runs:
         return False
-
-    parts = change.target.split("/")
-    if len(parts) >= 3 and parts[1] == "run":
-        try:
-            index = int(parts[2])
-        except ValueError:
-            return False
-        if not 0 <= index < len(runs):
-            return False
-        runs = [runs[index]]
 
     changed = False
     for run in runs:
