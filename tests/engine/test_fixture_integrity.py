@@ -54,11 +54,22 @@ class TestTheManifestDescribesWhatIsOnDisk:
 
     @pytest.mark.fixtures
     def test_the_corpus_is_complete(self):
+        """A *partial* corpus is the dangerous state, and the only one this can
+        report.
+
+        "You have not fetched the fixtures" and "your fixtures are incomplete"
+        look identical from here and mean opposite things. CI never fetches
+        them, so an absent directory has to skip -- the `fixtures` marker is
+        documentation in this repository, not a filter the workflow applies,
+        and treating it as one turned a real guard into a red build.
+        """
+        if not FIXTURES.is_dir() or not any(FIXTURES.glob("*.pptx")):
+            pytest.skip("no fixtures fetched; run scripts/fetch_fixtures.py")
         missing = [e["name"] for e in entries() if not (FIXTURES / e["name"]).is_file()]
         assert not missing, (
-            f"{len(missing)} fixture(s) are missing; measurements taken now "
-            "would have a smaller denominator than the one published: "
-            + ", ".join(missing)
+            f"{len(missing)} of {len(entries())} fixture(s) are missing, so a "
+            "measurement taken now would have a smaller denominator than the "
+            "one published: " + ", ".join(missing)
         )
 
     @pytest.mark.fixtures
