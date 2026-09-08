@@ -98,9 +98,23 @@ floor: state feedback, reveal and dismiss, focus.
 Panels travel 4px, not 20. A panel that travels far enough to notice is telling
 you about itself; one that travels 4px is telling you it arrived.
 
-`prefers-reduced-motion` is honoured from the first commit rather than
-retrofitted, and every animation resolves to its correct final state instantly
-rather than being skipped.
+`prefers-reduced-motion` is honoured in **two** places, and for a while it was
+only honoured in one.
+
+`styles.css` has collapsed CSS animation and transition under the preference
+since the first commit. That covers what CSS animates — and Motion animates by
+writing inline styles from JavaScript, so it covered none of the panel
+entrances, none of the stagger, and not the changed-region halo. Which is every
+animation the product actually has. This paragraph used to claim the preference
+was honoured, and it was true of the stylesheet and false of the application.
+
+Motion defaults to `reducedMotion: "never"` — ignore the preference — so the app
+root sets `reducedMotion="user"`. That drops transform and layout animation for
+a reader who asked for less motion and keeps opacity, which is the right line:
+a fade is not what causes vestibular trouble, movement is.
+
+Either way, every animation resolves to its correct final state instantly rather
+than being skipped.
 
 **Exit animations are not used for popovers, alerts or list rows.** That is a
 correctness rule, not a taste one. An `AnimatePresence` exit that failed to
