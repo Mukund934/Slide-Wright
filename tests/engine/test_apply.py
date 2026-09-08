@@ -895,3 +895,71 @@ class TestNarrownessAskedOfEveryShape:
                     )
                     swept += 1
         assert swept, "the corpus must contain a table with a non-empty cell"
+
+
+class TestARunTargetMeansWhatItMeantWhenApproved:
+    """Indices are read against the deck the reviewer saw, not the one mid-edit.
+
+    A run index names a position in `inspect`'s enumeration, which skips runs
+    with no text. A text edit can empty a run, so a change set containing both a
+    text edit and a run-addressed formatting change on the same shape shifts its
+    own indices while it is being applied.
+    """
+
+    def _five_runs(self, tmp_path):
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        path = tmp_path / "five.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        frame = slide.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(8), Inches(2)
+        ).text_frame
+        for text in ("AAA", "BBB", "CCC", "DDD", "EEE"):
+            run = frame.paragraphs[0].add_run()
+            run.text = text
+            run.font.name = "Arial"
+            run.font.size = Pt(18)
+        prs.save(str(path))
+        return path
+
+    def _fonts(self, deck):
+        shape = next(s for s in inspect(deck).slides[0].shapes if s.text.strip())
+        return [(r.text, r.font) for r in shape.runs]
+
+    def test_an_earlier_text_edit_does_not_move_a_later_run_target(self, tmp_path):
+        src = self._five_runs(tmp_path)
+        shape_id = next(s for s in inspect(src).slides[0].shapes if s.text.strip()).id
+        out = tmp_path / "o.pptx"
+        cs = approved(
+            src,
+            # Empties the second run, so the enumeration shrinks by one.
+            Change(id="c1", op=Op.SET_TEXT, slide=1, target=shape_id,
+                   before="AAABBB", after="X"),
+            # Run 3 is DDD in the deck as read; it was EEE by the time this landed.
+            Change(id="c2", op=Op.SET_FONT, slide=1, target=f"{shape_id}/run/3",
+                   before="Arial", after="Georgia"),
+        )
+        result = apply_changes(src, cs, out)
+        assert not result.failed, result.failed
+        assert self._fonts(out) == [
+            ("X", "Arial"), ("CCC", "Arial"), ("DDD", "Georgia"), ("EEE", "Arial")
+        ], "the run the change named must be the run that changed"
+
+    def test_the_same_holds_for_size(self, tmp_path):
+        src = self._five_runs(tmp_path)
+        shape_id = next(s for s in inspect(src).slides[0].shapes if s.text.strip()).id
+        out = tmp_path / "o.pptx"
+        cs = approved(
+            src,
+            Change(id="c1", op=Op.SET_TEXT, slide=1, target=shape_id,
+                   before="AAABBB", after="X"),
+            Change(id="c2", op=Op.SET_FONT_SIZE, slide=1,
+                   target=f"{shape_id}/run/3", before=18, after=9),
+        )
+        assert not apply_changes(src, cs, out).failed
+        shape = next(s for s in inspect(out).slides[0].shapes if s.text.strip())
+        assert [(r.text, r.size_pt) for r in shape.runs] == [
+            ("X", 18.0), ("CCC", 18.0), ("DDD", 9.0), ("EEE", 18.0)
+        ]

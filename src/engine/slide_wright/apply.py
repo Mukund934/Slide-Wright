@@ -134,10 +134,12 @@ def apply_changes(deck: str | Path, changeset: ChangeSet, output: str | Path) ->
     patched: dict[str, bytes] = {}
     for part_name, changes in by_part.items():
         root = etree.fromstring(pkg.read(part_name))
+        # Resolved against the part as it was read, before any change alters it.
+        pinned = _pin_run_targets(root, changes)
         part_applied = False
         for change in changes:
             try:
-                ok, why = _apply_one(root, change)
+                ok, why = _apply_one(root, change, pinned)
                 if ok:
                     change.status = Status.APPLIED
                     result.applied.append(change)
@@ -221,7 +223,43 @@ def _unusable_value(change: Change) -> str:
     return ""
 
 
-def _apply_one(root, change: Change) -> tuple[bool, str]:
+def _pin_run_targets(root, changes) -> dict[int, list]:
+    """Resolve every `<shape>/run/<index>` target against the part as it was read.
+
+    A run index names a position in `inspect`'s enumeration, which skips runs
+    with no text. Applying a text edit can empty a run -- it happens whenever a
+    replaced span covers one -- so the enumeration shifts *while the change set
+    is being applied*, and an index resolved afterwards names a different run
+    than the one the reviewer was shown.
+
+    Measured on five runs AAA|BBB|CCC|DDD|EEE: replace "AAABBB" with "X", then a
+    typeface change addressed at `run/3`. Run 3 is DDD in the deck as read and
+    EEE by the time the second change lands. Applied: 2. Failed: 0. DDD keeps its
+    typeface and EEE, which nobody named, changes.
+
+    Pinning to the element rather than the index makes the target mean what it
+    meant when the change set was written, which is the only reading under which
+    a reviewer's approval is about the thing they approved.
+    """
+    pinned: dict[int, list] = {}
+    for change in changes:
+        if not _names_a_run(change.target):
+            continue
+        parts = change.target.split("/")
+        shape = _find_shape(root, parts[0])
+        if shape is None:
+            continue
+        try:
+            index = int(parts[2])
+        except ValueError:
+            continue
+        runs = _addressable_runs(shape)
+        if 0 <= index < len(runs):
+            pinned[id(change)] = [runs[index]]
+    return pinned
+
+
+def _apply_one(root, change: Change, pinned: dict[int, list] | None = None) -> tuple[bool, str]:
     """Apply one change, returning whether it worked and, if not, why.
 
     A single boolean conflated two very different failures: the shape is not
@@ -255,12 +293,12 @@ def _apply_one(root, change: Change) -> tuple[bool, str]:
                            f"{size[0]}x{size[1]}; {change.target} is off it")
         return False, f"cell {change.target} does not hold {str(change.before)!r}"
     if change.op in (Op.SET_FONT, Op.SET_COLOR):
-        if _set_run_format(shape, change):
+        if _set_run_format(shape, change, pinned or {}):
             return True, ""
         return False, (f"run {change.target} not found, or it carries no explicit "
                        f"formatting to change")
     if change.op is Op.SET_FONT_SIZE:
-        if _set_font_size(shape, change):
+        if _set_font_size(shape, change, pinned or {}):
             return True, ""
         # Runs inherit their size from the layout unless they carry an explicit
         # override. There is nothing to change, and saying "not found" would be
@@ -417,7 +455,7 @@ def _table_size(shape) -> tuple[int, int] | None:
     return len(rows), max(len(r.findall("a:tc", NS)) for r in rows)
 
 
-def _set_font_size(shape, change: Change) -> bool:
+def _set_font_size(shape, change: Change, pinned: dict[int, list]) -> bool:
     """Change one run's size, or every run's, according to what the target names.
 
     `_set_run_format` has honoured `<shape>/run/<index>` since run addressing
@@ -427,8 +465,8 @@ def _set_font_size(shape, change: Change) -> bool:
     itself applied. Three ops, two addressing rules, and the review UI showing
     the narrow one.
     """
-    runs = _targeted_runs(shape, change.target)
-    if runs is None:
+    runs = _targeted_runs(shape, change, pinned)
+    if not runs:
         return False
     hundredths = str(int(round(float(change.after) * 100)))
     changed = False
@@ -465,29 +503,26 @@ def _addressable_runs(shape) -> list:
     return addressable
 
 
-def _targeted_runs(shape, target: str) -> list | None:
-    """The runs a target addresses: one when it names a run, otherwise all.
-
-    `<shape>/run/<index>` addresses exactly one, indexed as `inspect` enumerates
-    them. A bare shape id addresses every run in the shape. None means the
-    target names a run that does not exist, which is a refusal rather than a
-    quietly wider edit -- the difference matters because the reviewer approved
-    the narrow sentence the target described.
-    """
-    runs = _addressable_runs(shape)
+def _names_a_run(target: str) -> bool:
     parts = target.split("/")
-    if len(parts) >= 3 and parts[1] == "run":
-        try:
-            index = int(parts[2])
-        except ValueError:
-            return None
-        if not 0 <= index < len(runs):
-            return None
-        return [runs[index]]
-    return runs
+    return len(parts) >= 3 and parts[1] == "run"
 
 
-def _set_run_format(shape, change: Change) -> bool:
+def _targeted_runs(shape, change: Change, pinned: dict[int, list]) -> list | None:
+    """The runs a change addresses: the one it named, or all of them.
+
+    A target naming a run is answered only from `pinned`, never re-resolved
+    here. Re-resolving would read an index against a tree that earlier changes
+    in the same set may have altered, which is the whole defect `_pin_run_targets`
+    exists to close. Nothing pinned means the target named a run that was not
+    there when the set was written -- a refusal, not a quietly wider edit.
+    """
+    if _names_a_run(change.target):
+        return pinned.get(id(change))
+    return _addressable_runs(shape)
+
+
+def _set_run_format(shape, change: Change, pinned: dict[int, list]) -> bool:
     """Change one run's typeface or colour, touching nothing else.
 
     Targets are `<shape>/run/<index>`; a bare shape id applies to every run in
@@ -496,7 +531,7 @@ def _set_run_format(shape, change: Change) -> bool:
     fixed and every other run byte-identical, which is what makes "we changed
     only what did not conform" a checkable claim rather than a slogan.
     """
-    runs = _targeted_runs(shape, change.target)
+    runs = _targeted_runs(shape, change, pinned)
     if not runs:
         return False
 
