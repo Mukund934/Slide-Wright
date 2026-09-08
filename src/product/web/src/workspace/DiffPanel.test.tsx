@@ -32,6 +32,7 @@ function delta(over: Partial<Delta> = {}): Delta {
 function comparison(deltas: Delta[], over: Partial<Comparison> = {}): Comparison {
   return {
     from: 0, to: 1, before: EMPTY_DECK, after: EMPTY_DECK, deltas,
+    slidesAdded: [], slidesRemoved: [],
     showing: "after", blend: 1, ...over,
   };
 }
@@ -263,5 +264,48 @@ describe("the same change in many places", () => {
       delta({ kind: "text", summary: "same words", is_content: true }),
     ])} />);
     expect(screen.queryByText("2×")).not.toBeInTheDocument();
+  });
+});
+
+describe("a slide appearing or vanishing", () => {
+  /**
+   * The engine has always reported these and the client dropped them on the
+   * way in, so a slide going missing between two versions showed nothing at
+   * all — on the panel whose entire job is answering "what changed?".
+   *
+   * No operation this engine performs can remove a slide, which is exactly why
+   * it has to be said if one ever does: an unreportable change is the only kind
+   * that can quietly happen.
+   */
+  it("is reported, and above the counts", () => {
+    render(
+      <DiffPanel
+        {...handlers}
+        comparison={comparison([], { slidesRemoved: [4, 9] })}
+      />,
+    );
+    expect(screen.getByText(/2 slides removed/)).toBeInTheDocument();
+    expect(screen.getByText(/\(4, 9\)/)).toBeInTheDocument();
+  });
+
+  it("reports one added as well", () => {
+    render(
+      <DiffPanel {...handlers} comparison={comparison([], { slidesAdded: [12] })} />,
+    );
+    expect(screen.getByText(/1 slide added/)).toBeInTheDocument();
+  });
+
+  it("does not claim the versions read the same when a slide is gone", () => {
+    // No deltas — the remaining slides are identical — but a slide is missing.
+    // "These two versions read the same" would be false, and reassuringly so.
+    render(
+      <DiffPanel {...handlers} comparison={comparison([], { slidesRemoved: [4] })} />,
+    );
+    expect(screen.queryByText(/read the same/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing when the slide count did not change", () => {
+    render(<DiffPanel {...handlers} comparison={comparison([delta()])} />);
+    expect(screen.queryByText(/slides? removed|slides? added/)).not.toBeInTheDocument();
   });
 });

@@ -45,6 +45,18 @@ export interface Comparison {
   before: Deck;
   after: Deck;
   deltas: Delta[];
+  /**
+   * Slides that appeared or vanished between the two versions.
+   *
+   * The engine has always reported these and the client dropped them on the
+   * way in, so a slide going missing between two versions showed nothing at
+   * all -- on the panel whose entire job is answering "what changed?". No
+   * operation this engine performs can remove a slide, which is exactly why it
+   * has to be said if one ever does: an unreportable change is the only kind
+   * that can quietly happen.
+   */
+  slidesAdded: number[];
+  slidesRemoved: number[];
   /** Which side the canvas is showing. Flipping is how a difference is found. */
   showing: "before" | "after";
   /**
@@ -446,7 +458,10 @@ export function useWorkspace() {
         dispatch({
           type: "comparing",
           comparison: {
-            from, to, before, after, deltas: diff.deltas, showing: "after", blend: 1,
+            from, to, before, after, deltas: diff.deltas,
+            slidesAdded: diff.slides_added ?? [],
+            slidesRemoved: diff.slides_removed ?? [],
+            showing: "after", blend: 1,
           },
         });
       } catch (error) {

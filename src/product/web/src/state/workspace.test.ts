@@ -249,7 +249,8 @@ describe("comparing two versions", () => {
     { slide: 9, shape_id: "7", kind: "text", description: "9.4 -> 11.8",
       summary: "9.4 -> 11.8", is_content: true, changes_figures: true },
   ];
-  const comparison = { from: 0, to: 1, before, after, deltas, showing: "after" as const, blend: 1 };
+  const comparison = { from: 0, to: 1, before, after, deltas, slidesAdded: [],
+                     slidesRemoved: [], showing: "after" as const, blend: 1 };
 
   it("lands on the first slide that actually differs", () => {
     // Opening a comparison on a slide where nothing changed makes the feature
@@ -425,6 +426,7 @@ describe("blending between versions", () => {
   const deck = { slide_width: 1, slide_height: 1, theme_fonts: {}, slides: [] };
   const base = {
     from: 0, to: 1, before: deck, after: deck, deltas: [],
+    slidesAdded: [], slidesRemoved: [],
     showing: "after" as const, blend: 1,
   };
 

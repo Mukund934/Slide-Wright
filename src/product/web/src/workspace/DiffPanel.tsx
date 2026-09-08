@@ -60,6 +60,32 @@ export function DiffPanel({
         v{pad(comparison.from)} → v{pad(comparison.to)}
       </PanelHeading>
 
+      {/* Above the counts, because a slide that is gone outranks a figure that
+          moved, and because this is the one difference a reader cannot find by
+          looking at the slide in front of them. */}
+      {(comparison.slidesRemoved.length > 0 || comparison.slidesAdded.length > 0) && (
+        <p className="shrink-0 border-b border-line px-3 py-2 text-xs leading-relaxed text-ink">
+          {comparison.slidesRemoved.length > 0 && (
+            <>
+              <span className="text-evidence text-blocked">
+                {comparison.slidesRemoved.length} slide
+                {comparison.slidesRemoved.length === 1 ? "" : "s"} removed
+              </span>{" "}
+              ({comparison.slidesRemoved.join(", ")}){" "}
+            </>
+          )}
+          {comparison.slidesAdded.length > 0 && (
+            <>
+              <span className="text-evidence text-changed">
+                {comparison.slidesAdded.length} slide
+                {comparison.slidesAdded.length === 1 ? "" : "s"} added
+              </span>{" "}
+              ({comparison.slidesAdded.join(", ")})
+            </>
+          )}
+        </p>
+      )}
+
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-line px-3 py-2">
         {/* Figures first, and stated even when the answer is none.
             "No figure changed" is the sharpest claim this product can make and
@@ -94,7 +120,9 @@ export function DiffPanel({
 
       <Blend comparison={comparison} onBlend={onBlend} />
 
-      {comparison.deltas.length === 0 ? (
+      {comparison.deltas.length === 0
+        && comparison.slidesAdded.length === 0
+        && comparison.slidesRemoved.length === 0 ? (
         <Empty
           title="These two versions read the same"
           detail="Their bytes may still differ — verification answers that. Nothing a reader would notice is different."
