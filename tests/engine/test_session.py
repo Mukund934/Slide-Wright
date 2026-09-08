@@ -6,6 +6,8 @@ the user by any route, including export.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from slide_wright.changeset import Change, Op
@@ -503,3 +505,91 @@ class TestExportSaysWhereItActuallyWrote:
         written = session.export(tmp_path / "deck.pptx")
         assert written.is_file()
         assert written == tmp_path / "deck.pptx"
+
+
+class TestOneApplyAtATime:
+    """`apply` reads `next_number`, writes that file, verifies it, and only then
+    advances the counter — so two calls overlapping both aim at the same version.
+
+    Measured through the API with three requests at once, before the lock: one
+    committed, and two died on the half-written file with
+    `PermissionError: the process cannot access the file because it is being
+    used by another process`, which reached the client as a raw 500. The work in
+    those two was simply lost.
+
+    The client guards its own button. Two browser tabs on one document do not,
+    and neither does a script.
+    """
+
+    def _tidy(self, session):
+        from slide_wright.brand import plan_conformance, read_profile
+        from slide_wright.layout import plan_alignment
+
+        info = session.deck()
+        changeset = session.propose("tidy")
+        try:
+            for change in plan_conformance(info, read_profile(session.current.path)).changes:
+                changeset.add(change)
+        except Exception:
+            pass
+        for change in plan_alignment(info).changes:
+            changeset.add(change)
+        if not changeset.changes:
+            changeset.add(cell_change(session))
+        changeset.approve_all()
+        return changeset
+
+    def test_a_second_apply_is_refused_while_one_is_running(self, session):
+        import threading
+
+        self._tidy(session)
+        outcomes: list[str] = []
+        started = threading.Event()
+
+        real = session.verify
+
+        def slow_verify(*args, **kwargs):
+            started.set()
+            time.sleep(0.4)          # hold the lock long enough to collide
+            return real(*args, **kwargs)
+
+        session.verify = slow_verify  # type: ignore[method-assign]
+
+        def first():
+            try:
+                session.apply("first")
+                outcomes.append("first committed")
+            except SessionError as exc:
+                outcomes.append(f"first refused: {exc}")
+
+        worker = threading.Thread(target=first)
+        worker.start()
+        assert started.wait(5), "the first apply never began"
+        with pytest.raises(SessionError, match="already running"):
+            session.apply("second")
+        worker.join(10)
+
+        assert outcomes == ["first committed"]
+
+    def test_the_refusal_says_where_the_result_will_appear(self, session):
+        session._applying.acquire()
+        try:
+            with pytest.raises(SessionError, match="appear in the history"):
+                session.apply("blocked")
+        finally:
+            session._applying.release()
+
+    def test_the_lock_is_released_when_an_apply_fails(self, session):
+        """A refusal that leaks the lock turns one bad apply into a dead
+        document."""
+        with pytest.raises(SessionError):
+            session.apply("nothing proposed")   # no change set at all
+        assert session._applying.acquire(blocking=False)
+        session._applying.release()
+
+    def test_an_ordinary_apply_still_works(self, session):
+        changeset = self._tidy(session)
+        assert changeset.approved
+        report = session.apply("fine")
+        assert report.deliverable
+        assert [v.number for v in session.versions] == [0, 1]

@@ -126,11 +126,37 @@ class TestNoImplicitUpload:
     """
 
     def test_the_engine_contains_no_outbound_calls_outside_the_provider(self):
+        """Scanned as code, not as text.
+
+        The first version grepped the raw file and fired on a docstring
+        containing the words "a server handling two requests." -- `requests.`
+        with a full stop after it. That is the shape of guard that teaches
+        people to reword their comments, and once a check can be satisfied by
+        editing prose it stops meaning anything about the code.
+
+        So comments and string literals are stripped before the scan. What it
+        catches is what it is for: someone adding a font download, a version
+        check, a telemetry ping. It is not defending against an author who
+        wants to hide one, and could not.
+        """
+        import io
+        import tokenize
         from pathlib import Path
 
         engine = Path(__file__).resolve().parents[2] / "src" / "engine" / "slide_wright"
         forbidden = ("requests.", "urlopen", "urllib.request", "http.client",
                      "httpx.", "socket.create_connection")
+
+        def code_only(source: str) -> str:
+            kept = []
+            try:
+                for token in tokenize.generate_tokens(io.StringIO(source).readline):
+                    if token.type in (tokenize.COMMENT, tokenize.STRING):
+                        continue
+                    kept.append(token.string)
+            except (tokenize.TokenError, IndentationError):
+                return source  # unparseable: scan it whole rather than skip it
+            return " ".join(kept)
 
         offenders = []
         for path in engine.rglob("*.py"):
@@ -138,11 +164,37 @@ class TestNoImplicitUpload:
             # is optional: with no key configured nothing there is reached.
             if path.parent.name == "llm":
                 continue
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            text = code_only(path.read_text(encoding="utf-8", errors="ignore"))
             for token in forbidden:
                 if token in text:
                     offenders.append(f"{path.relative_to(engine)}: {token}")
 
         assert not offenders, (
             "outbound network code outside the provider layer: " + "; ".join(offenders)
+        )
+
+    def test_that_scan_still_catches_a_real_call(self, tmp_path):
+        """Stripping comments must not have stripped the teeth.
+
+        Verified against a planted call rather than trusted: the tokeniser
+        joins tokens with spaces, so `urllib.request` becomes `urllib . request`
+        unless the check accounts for it.
+        """
+        import io
+        import tokenize
+
+        planted = (
+            "import urllib.request\n"
+            "\n"
+            "def fetch(url):\n"
+            "    return urllib.request.urlopen(url).read()\n"
+        )
+        kept = []
+        for token in tokenize.generate_tokens(io.StringIO(planted).readline):
+            if token.type in (tokenize.COMMENT, tokenize.STRING):
+                continue
+            kept.append(token.string)
+        scanned = " ".join(kept)
+        assert any(t in scanned for t in ("urlopen", "urllib.request", "urllib . request")), (
+            "the scan would not notice a real outbound call"
         )

@@ -483,3 +483,66 @@ class TestTheCostOfAnApplyDoesNotGrowWithTheChangeCount:
         ))
         with pytest.raises(ApplyError, match="native chart"):
             apply_changes(adversarial_deck, cs, tmp_path / "no.pptx")
+
+
+class TestTwoWritesAtOnceDoNotCollide:
+    """The scratch file has to be unique per call, not per process.
+
+    Keying it on the process id was enough for two processes and not for two
+    threads, and two threads is the ordinary case — a server handling two
+    requests. Three concurrent applies produced `PermissionError: the process
+    cannot access the file because it is being used by another process`: one
+    success and two raw 500s, with the work in them lost.
+    """
+
+    def test_concurrent_writes_to_different_outputs_all_succeed(
+        self, adversarial_deck, tmp_path
+    ):
+        import threading
+
+        from slide_wright.apply import _write_package
+
+        results: list[tuple[int, str]] = []
+
+        def write(i: int) -> None:
+            try:
+                _write_package(
+                    adversarial_deck, tmp_path / f"out-{i}.pptx",
+                    {"ppt/slides/slide1.xml": f"<p:sld n='{i}'/>".encode()},
+                )
+                results.append((i, "ok"))
+            except Exception as exc:  # noqa: BLE001
+                results.append((i, f"{type(exc).__name__}: {exc}"))
+
+        threads = [threading.Thread(target=write, args=(i,)) for i in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(30)
+
+        assert [r for _, r in results] == ["ok"] * 6, results
+
+    def test_each_output_is_a_whole_package(self, adversarial_deck, tmp_path):
+        import threading
+
+        from slide_wright.apply import _write_package
+
+        def write(i: int) -> None:
+            _write_package(adversarial_deck, tmp_path / f"out-{i}.pptx", {})
+
+        threads = [threading.Thread(target=write, args=(i,)) for i in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(30)
+
+        expected = Package.open(adversarial_deck).part_count
+        for i in range(6):
+            assert Package.open(tmp_path / f"out-{i}.pptx").part_count == expected
+
+    def test_nothing_is_left_behind(self, adversarial_deck, tmp_path):
+        from slide_wright.apply import _write_package
+
+        _write_package(adversarial_deck, tmp_path / "out.pptx", {})
+        assert not list(tmp_path.glob("*.partial"))
+        assert not list(tmp_path.glob(".*"))

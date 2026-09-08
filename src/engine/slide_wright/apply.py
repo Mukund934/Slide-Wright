@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -493,6 +494,23 @@ def _slide_part_for(pkg: Package, slide_number: int) -> str | None:
     return None
 
 
+def _scratch_beside(destination: Path) -> Path:
+    """A private name to write under, in the destination's own directory.
+
+    Same directory so the move into place is a rename within one filesystem and
+    therefore atomic. Unique per *call*: keying it on the process id was enough
+    for two processes and not for two threads, and two threads is the ordinary
+    case -- a server handling two requests. Three concurrent applies produced
+    `PermissionError: the process cannot access the file because it is being
+    used by another process`, one success and two raw 500s.
+    """
+    handle, name = tempfile.mkstemp(
+        prefix=f".{destination.name}.", suffix=".partial", dir=destination.parent
+    )
+    os.close(handle)
+    return Path(name)
+
+
 def _write_package(source: Path, output: Path, patched: dict[str, bytes]) -> None:
     """Copy the package, substituting only the patched parts.
 
@@ -512,7 +530,7 @@ def _write_package(source: Path, output: Path, patched: dict[str, bytes]) -> Non
     never something in between.
     """
     output.parent.mkdir(parents=True, exist_ok=True)
-    scratch = output.with_name(f"{output.name}.{os.getpid()}.partial")
+    scratch = _scratch_beside(output)
     try:
         if patched:
             with zipfile.ZipFile(source) as zin, zipfile.ZipFile(

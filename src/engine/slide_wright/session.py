@@ -25,12 +25,18 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from slide_wright.apply import ApplyError, ApplyResult, apply_changes
+from slide_wright.apply import (
+    ApplyError,
+    ApplyResult,
+    _scratch_beside,
+    apply_changes,
+)
 from slide_wright.changeset import Change, ChangeSet, Status
 from slide_wright.fidelity import FidelityReport, compare
 from slide_wright.gate import GateResult, check
@@ -100,6 +106,18 @@ class Session:
     # sessions each committed "version 1", both believed they held their own
     # edit, and the file on disk was one of them. Neither was told.
     _history_seen: tuple | None = field(default=None, repr=False)
+
+    # One apply at a time, per session.
+    #
+    # `apply` reads `next_number`, writes that file, verifies it and only then
+    # advances the counter -- so two calls overlapping both aim at the same
+    # version. Measured through the API with three requests at once: one
+    # committed, two died on the half-written file with a raw 500, and the work
+    # in them was simply lost. The client guards its own button; two browser
+    # tabs on one document do not.
+    _applying: threading.Lock = field(
+        default_factory=threading.Lock, repr=False, compare=False
+    )
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -288,6 +306,20 @@ class Session:
         the engine does not know how long a stage will take and a made-up number
         is the specific dishonesty this product exists to avoid.
         """
+        if not self._applying.acquire(blocking=False):
+            # Refused, not queued. A second apply that waits looks to the caller
+            # exactly like a slow one, and what they actually need to know is
+            # that something else is already writing this deck.
+            raise SessionError(
+                "an apply is already running on this document. Wait for it to "
+                "finish -- its result will appear in the history."
+            )
+        try:
+            return self._apply(note, on_progress)
+        finally:
+            self._applying.release()
+
+    def _apply(self, note: str, on_progress: Progress | None) -> ChangeReport:
         emit = _emitter(on_progress)
         cs = self.require_changeset()
         if not cs.approved:
@@ -435,7 +467,7 @@ class Session:
         # Beside, then moved. An interrupted export is the worst version of this
         # failure: the truncated file is sitting at a path the user chose,
         # under the name they gave it, and it is the one they attach.
-        scratch = destination.with_name(f"{destination.name}.{os.getpid()}.partial")
+        scratch = _scratch_beside(destination)
         try:
             shutil.copy(self.current.path, scratch)
             os.replace(scratch, destination)
