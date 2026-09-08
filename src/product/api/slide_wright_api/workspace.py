@@ -30,6 +30,15 @@ class Workspace:
 
     sessions: dict[str, Session] = field(default_factory=dict)
 
+    #: Why a document stopped being open, kept after the session is dropped.
+    #:
+    #: Without it the second request after a failure tells a different story
+    #: from the first: "the file is gone from disk" becomes "it may have been
+    #: opened by an earlier run of the app", which is a plausible sentence and
+    #: the wrong one. A user clicks something else immediately, so the second
+    #: message is the one they act on.
+    dropped: dict[str, str] = field(default_factory=dict)
+
     # ── opening ──────────────────────────────────────────────────────────────
 
     def open(self, path: str | Path) -> tuple[str, Session]:
@@ -86,17 +95,66 @@ class Workspace:
         return doc_id, session
 
     def require(self, doc_id: str) -> Session:
+        """The session for a document, or a refusal a person can act on.
+
+        `_intact` was checked when opening and nowhere else, so every other
+        route -- read, audit, diff, apply, export -- served a cached session
+        whose files had gone, and the failure came back as a bare 500 from deep
+        inside the package reader. Measured: delete the workspace folder while
+        the app is open and `GET /api/documents/{id}` returns "Internal Server
+        Error".
+
+        A workspace lives on disk beside the deck, so it gets deleted, synced,
+        restored and moved by people and by software that knows nothing about
+        this app. It going away mid-session is ordinary, not exceptional.
+
+        Recovery is the same as opening: rebuild from the source file, and read
+        back whatever history survived. That is only possible while the source
+        is still there, and when it is not, saying so is the answer.
+        """
         session = self.sessions.get(doc_id)
         if session is None:
-            raise WorkspaceError(
+            raise WorkspaceError(self.dropped.get(doc_id) or (
                 "that document is not open. It may have been opened by an earlier "
                 "run of the app -- open the file again and its history comes back."
-            )
-        return session
+            ))
+        if _intact(session):
+            return session
+
+        source = session.source
+        self.sessions.pop(doc_id, None)
+        if not source.is_file():
+            raise WorkspaceError(self._drop(doc_id, (
+                f"{source.name} is gone from disk, and so is its workspace. "
+                "Nothing is left to reopen -- if the file has moved, open it "
+                "from its new location."
+            )))
+        try:
+            reopened = Session.open(source)
+        except SessionError as exc:
+            raise WorkspaceError(self._drop(doc_id, (
+                f"the workspace beside {source.name} changed while it was open: "
+                f"{exc}"
+            ))) from exc
+        except Exception as exc:
+            raise WorkspaceError(self._drop(doc_id, (
+                f"{source.name} could not be reopened after its workspace "
+                f"changed: {exc}"
+            ))) from exc
+        self.dropped.pop(doc_id, None)
+        self.sessions[doc_id] = reopened
+        return reopened
+
+    def _drop(self, doc_id: str, why: str) -> str:
+        self.dropped[doc_id] = why
+        return why
 
     def close(self, doc_id: str) -> None:
         """Drop the view. The workspace on disk is untouched and still complete."""
         self.sessions.pop(doc_id, None)
+        # Closing on purpose is not a failure, so it must not leave a reason
+        # behind for the next open to explain itself with.
+        self.dropped.pop(doc_id, None)
 
 
 def _intact(session: Session) -> bool:

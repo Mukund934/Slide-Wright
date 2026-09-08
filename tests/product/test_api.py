@@ -11,6 +11,7 @@ The tests that matter here are not "does the route return 200". They are:
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -1221,3 +1222,73 @@ class TestExportingIntoAFolder:
             json={"destination": str(folder)},
         )
         assert "original" not in Path(response.json()["path"]).name
+
+
+class TestWhenTheWorkspaceGoesAwayUnderneath:
+    """A workspace lives on disk beside the deck.
+
+    It gets deleted, synced, restored and moved by people and by software that
+    knows nothing about this app, so it going away mid-session is ordinary
+    rather than exceptional. `_intact` was checked when opening and nowhere
+    else, so every other route — read, audit, diff, apply, export — served a
+    cached session whose files had gone and the failure came back as a bare
+    **500 Internal Server Error** from deep inside the package reader.
+    """
+
+    @pytest.fixture
+    def opened(self, tmp_path, adversarial_deck):
+        from slide_wright_api.app import create_app
+
+        deck = tmp_path / "deck.pptx"
+        shutil.copy(adversarial_deck, deck)
+        app = create_app(workspace=Workspace(), serve_client=False)
+        client = TestClient(app, base_url="http://127.0.0.1:8787",
+                            raise_server_exceptions=False)
+        document = client.post("/api/documents", json={"path": str(deck)}).json()
+        return client, document, deck, Path(document["workspace"])
+
+    def test_a_deleted_workspace_is_rebuilt_rather_than_crashing(self, opened):
+        client, document, _, workspace = opened
+        shutil.rmtree(workspace, ignore_errors=True)
+        response = client.get(f"/api/documents/{document['id']}")
+        assert response.status_code == 200
+        assert Path(response.json()["workspace"]).is_dir()
+
+    def test_every_route_recovers_not_just_the_first(self, opened):
+        client, document, _, workspace = opened
+        shutil.rmtree(workspace, ignore_errors=True)
+        for route in ("", "/audit", "/history", "/sources"):
+            response = client.get(f"/api/documents/{document['id']}{route}")
+            assert response.status_code != 500, f"{route or '/'} returned a 500"
+
+    def test_a_version_file_removed_is_recovered_from_the_source(self, opened):
+        client, document, _, workspace = opened
+        next(workspace.glob("v*.pptx")).unlink()
+        assert client.get(f"/api/documents/{document['id']}").status_code == 200
+
+    def test_with_the_source_gone_too_it_says_so(self, opened):
+        client, document, deck, workspace = opened
+        shutil.rmtree(workspace, ignore_errors=True)
+        deck.unlink()
+        response = client.get(f"/api/documents/{document['id']}")
+        assert response.status_code == 404
+        assert "gone from disk" in response.json()["detail"]
+
+    def test_the_second_request_tells_the_same_story_as_the_first(self, opened):
+        """A user clicks something else immediately, so the second message is
+        the one they act on. Left to the generic path it read "it may have been
+        opened by an earlier run of the app" — plausible, and the wrong
+        explanation for a file that had just been deleted."""
+        client, document, deck, workspace = opened
+        shutil.rmtree(workspace, ignore_errors=True)
+        deck.unlink()
+        first = client.get(f"/api/documents/{document['id']}").json()["detail"]
+        second = client.get(f"/api/documents/{document['id']}/audit").json()["detail"]
+        assert first == second
+
+    def test_closing_on_purpose_leaves_no_explanation_behind(self, opened):
+        """Closing is not a failure, so the next open must not inherit one."""
+        client, document, deck, _ = opened
+        client.delete(f"/api/documents/{document['id']}")
+        reopened = client.post("/api/documents", json={"path": str(deck)})
+        assert reopened.status_code == 200
