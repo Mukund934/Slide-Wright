@@ -42,6 +42,13 @@ export default function App() {
     api.health().then(setHealth).catch(() => setHealth(null));
   }, []);
 
+  // Reconnect to whatever this browser had open. The workspace on disk survives
+  // a reload; until now the client did not, so a refresh mid-review meant
+  // retyping an absolute Windows path to get back to work.
+  useEffect(() => {
+    void workspace.restore();
+  }, [workspace.restore]);
+
   // A settled apply is the moment the review panel stops being the thing to
   // look at, so the panel follows the work rather than making the user find it.
   useEffect(() => {

@@ -23,6 +23,51 @@ import type {
   Verification,
 } from "../api/types";
 
+/**
+ * The document this browser had open, so a reload returns to it.
+ *
+ * The id and nothing else. It is a SHA-256 prefix of the deck's resolved path,
+ * which the workspace derives *because* of this -- its own docstring says the
+ * id is "derived from the resolved path rather than handed out in sequence, so
+ * a client that reloads reconnects to its own document". The server was built
+ * for a reconnect the client never attempted, and refreshing the page sent the
+ * user back to an empty box to retype an absolute path.
+ *
+ * The id is stored and the path is not, deliberately. A deck's name is the one
+ * thing about it that is confidential without opening it, and this product's
+ * whole promise is about what it does not leave lying around. An opaque digest
+ * says which document without saying which file.
+ *
+ * Every access is guarded: storage throws in a private window, and a reload
+ * that cannot be resumed is not a reason to fail to start.
+ */
+const REMEMBERED = "slide-wright.document";
+
+function remembered(): string | null {
+  try {
+    return window.localStorage.getItem(REMEMBERED);
+  } catch {
+    return null;
+  }
+}
+
+function remember(id: string): void {
+  try {
+    window.localStorage.setItem(REMEMBERED, id);
+  } catch {
+    // Nothing to do and nothing worth saying: the session still works, it just
+    // will not survive a reload.
+  }
+}
+
+function forget(): void {
+  try {
+    window.localStorage.removeItem(REMEMBERED);
+  } catch {
+    // As above.
+  }
+}
+
 export type Phase =
   | "empty"
   | "opening"
@@ -313,13 +358,31 @@ export function useWorkspace() {
     async (path: string) => {
       dispatch({ type: "opening" });
       try {
-        dispatch({ type: "opened", document: await api.open(path) });
+        const document = await api.open(path);
+        remember(document.id);
+        dispatch({ type: "opened", document });
       } catch (error) {
         fail(error);
       }
     },
     [fail],
   );
+
+  const restore = useCallback(async () => {
+    const id = remembered();
+    if (!id) return;
+    dispatch({ type: "opening" });
+    try {
+      dispatch({ type: "opened", document: await api.read(id) });
+    } catch {
+      // The document is gone -- the app was restarted, the deck moved, the
+      // workspace deleted. None of those is an error the user asked about, so
+      // this is not `fail`: it is the first-run screen, which is where they
+      // were headed anyway.
+      forget();
+      dispatch({ type: "closed" });
+    }
+  }, []);
 
   const propose = useCallback(
     async (body: { instruction?: string; sets?: SetSpec[]; locks?: LockSpec[] }) => {
@@ -501,6 +564,7 @@ export function useWorkspace() {
     ...state,
     ...derived,
     open,
+    restore,
     propose,
     tidy,
     refresh,
