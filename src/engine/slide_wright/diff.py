@@ -236,26 +236,87 @@ def _diff_geometry(old: ShapeInfo, new: ShapeInfo, add) -> None:
             old.rotation_deg, new.rotation_deg)
 
 
+#: The run attributes a reader would see change. Order is the order they are
+#: reported in, so it is the order a reviewer reads them.
+RUN_ATTRIBUTES = (("size_pt", "size"), ("bold", "bold"), ("italic", "italic"),
+                  ("font", "font"), ("color", "colour"))
+
+
 def _diff_formatting(old: ShapeInfo, new: ShapeInfo, add) -> None:
     """Compare run formatting, but only where the text itself is unchanged.
 
     When the text changed the runs have already been re-described by the text
     delta, and reporting every formatting field of a rewritten run as its own
     difference buries the one line the reviewer needs.
+
+    Pairing runs by index is only meaningful when both sides split the text the
+    same way. It used to be the only path, guarded by an equal-count check that
+    returned silently when the counts differed -- so two decks both reading
+    "Total 42", one with the figure bold and one without, came back **"No
+    structural differences"**. Same text, one run against two, and the panel
+    whose question is *is my deck still my deck* answered yes.
+
+    Equal counts were not safe either, in the same direction. Move one boundary
+    by a character -- "Total " + "**42**" against "Total" + "** 42**", where the
+    space changed weight -- and index pairing finds both pairs equal and reports
+    nothing, because it compares run 1 to run 1 rather than character to
+    character. Measured: 0 deltas before, 1 after.
+
+    So the partition decides. Identical partitions keep index pairing, which
+    names the run and keeps one delta per run. Anything else is compared
+    character by character and reported over the text it covers, which is the
+    only description that survives runs being split or merged.
     """
-    if old.text != new.text or len(old.runs) != len(new.runs):
+    if old.text != new.text:
         return
-    for i, (a, b) in enumerate(zip(old.runs, new.runs)):
-        for attr, label in (("size_pt", "size"), ("bold", "bold"),
-                            ("italic", "italic"), ("font", "font"),
-                            ("color", "colour")):
-            av, bv = getattr(a, attr), getattr(b, attr)
-            if av != bv:
-                # The run index is location, so it goes in `where`. Without
-                # that, 266 identical font changes are 266 distinct summaries
-                # and grouping them is impossible.
-                add("formatting", f"{label} {av!r} -> {bv!r}", av, bv,
-                    where=f" run {i + 1}")
+    if [r.text for r in old.runs] == [r.text for r in new.runs]:
+        for i, (a, b) in enumerate(zip(old.runs, new.runs)):
+            for attr, label in RUN_ATTRIBUTES:
+                av, bv = getattr(a, attr), getattr(b, attr)
+                if av != bv:
+                    # The run index is location, so it goes in `where`. Without
+                    # that, 266 identical font changes are 266 distinct
+                    # summaries and grouping them is impossible.
+                    add("formatting", f"{label} {av!r} -> {bv!r}", av, bv,
+                        where=f" run {i + 1}")
+        return
+    _diff_formatting_by_character(old, new, add)
+
+
+def _diff_formatting_by_character(old: ShapeInfo, new: ShapeInfo, add) -> None:
+    """Compare formatting position by position, for runs that do not line up."""
+    text = old.text
+    before = _run_per_character(old.runs)
+    after = _run_per_character(new.runs)
+    if not len(before) == len(after) == len(text):
+        return
+    for attr, label in RUN_ATTRIBUTES:
+        for (av, bv), span in _differing_spans(text, before, after, attr):
+            add("formatting", f"{label} {av!r} -> {bv!r}", av, bv,
+                where=f" in {_quote(span)}")
+
+
+def _run_per_character(runs) -> list:
+    """The run each character of the shape's text belongs to."""
+    return [run for run in runs for _ in run.text]
+
+
+def _differing_spans(text: str, before: list, after: list, attr: str):
+    """Maximal stretches of text over which one attribute differs the same way.
+
+    Merging adjacent positions matters: a typeface change across a whole run is
+    one sentence a reviewer reads once, not forty characters of it.
+    """
+    spans: list[list] = []
+    for index in range(len(text)):
+        pair = (getattr(before[index], attr), getattr(after[index], attr))
+        if pair[0] == pair[1]:
+            continue
+        if spans and spans[-1][0] == pair and spans[-1][2] == index:
+            spans[-1][2] = index + 1
+        else:
+            spans.append([pair, index, index + 1])
+    return [(pair, text[start:end]) for pair, start, end in spans]
 
 
 def _describe_text_change(before: str, after: str, context: int = 14) -> str:

@@ -258,3 +258,73 @@ class TestFigureChanges:
         result = diff(adversarial_deck, out)
         assert result.figure_deltas, "a changed multiple is a figure change"
         assert all(d.is_content for d in result.figure_deltas)
+
+
+class TestFormattingIsComparedEvenWhenTheRunsMoved:
+    """Same words, different emphasis — the case the diff used to call identical.
+
+    Runs are an implementation detail of OOXML that PowerPoint rearranges freely:
+    typing into a line merges runs, applying a style splits them. Comparing
+    formatting only when both sides happen to have the same number of runs meant
+    the single most misleading answer this product can give — "no structural
+    differences" — for two decks that read the same and look different.
+    """
+
+    def _deck(self, path, pieces):
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        frame = slide.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(8), Inches(2)
+        ).text_frame
+        for text, bold in pieces:
+            run = frame.paragraphs[0].add_run()
+            run.text = text
+            run.font.bold = bold
+            run.font.size = Pt(18)
+        prs.save(str(path))
+        return path
+
+    def test_a_lost_emphasis_is_reported_when_runs_were_merged(self, tmp_path):
+        before = self._deck(tmp_path / "a.pptx", (("Total ", False), ("42", True)))
+        after = self._deck(tmp_path / "b.pptx", (("Total 42", False),))
+
+        result = diff(before, after)
+        assert result.changed, "two decks that look different are not identical"
+        assert len(result.deltas) == 1
+        delta = result.deltas[0]
+        assert delta.kind == "formatting"
+        assert not delta.is_content, "emphasis is presentation, not content"
+        assert delta.summary == "bold True -> False"
+        assert "'42'" in delta.description, "it must name the text that changed"
+
+    def test_equal_run_counts_do_not_make_index_pairing_safe(self, tmp_path):
+        """One boundary moved by a character. Both sides have two runs."""
+        before = self._deck(tmp_path / "a.pptx", (("Total ", False), ("42", True)))
+        after = self._deck(tmp_path / "b.pptx", (("Total", False), (" 42", True)))
+
+        deltas = diff(before, after).deltas
+        assert [d.summary for d in deltas] == ["bold False -> True"], (
+            "the space did change weight; pairing run 1 with run 1 misses it"
+        )
+        assert "' '" in deltas[0].description
+
+    def test_the_same_sentence_split_two_ways_is_not_a_difference(self, tmp_path):
+        before = self._deck(tmp_path / "c.pptx", (("Tot", False), ("al 42", False)))
+        after = self._deck(tmp_path / "d.pptx", (("Total ", False), ("42", False)))
+
+        assert not diff(before, after).changed, (
+            "identical formatting at every character is no difference"
+        )
+
+    def test_one_span_is_reported_once_not_once_per_character(self, tmp_path):
+        before = self._deck(tmp_path / "a.pptx", (("Revenue and margin", True),))
+        after = self._deck(
+            tmp_path / "b.pptx", (("Revenue", True), (" and margin", False))
+        )
+
+        deltas = diff(before, after).deltas
+        assert [d.summary for d in deltas] == ["bold True -> False"]
+        assert "' and margin'" in deltas[0].description
