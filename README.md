@@ -214,13 +214,13 @@ non-conforming — the commonest font in a deck is never mistaken for the brand.
 | Result | Evidence |
 |---|---|
 | Round-trip fidelity on 3 corpus decks | **100.00%** parts byte-identical, every deck |
-| A one-object edit on 14 real third-party decks | **exactly 1 part changed** — 14 of 14 — at 96.7–99.7% identical |
+| A one-object edit on the 12 editable third-party decks | **exactly 1 part changed** — 12 of 12 — at 96.67–99.71% identical |
 | A table-cell edit, measured inside the edited slide | **2 character substitutions**; 99.95% of the slide preserved |
 | Native tables, charts, embedded workbooks, media | preserved and asserted on every edit |
 | The whole loop on a 400-slide deck | open, read, audit, plan, **apply 2,400 corrections** and diff, in **2.3 s total** |
 | The heaviest real deck — 52 slides, 55 MB | opens in 0.19 s, reads in 0.21 s, applies and verifies in 3.0 s |
 
-The hardest corpus deck carries native charts with embedded Excel workbooks, grouped shapes, native tables, custom geometry, hyperlinks and speaker notes. The largest real deck tested is 340 parts across 52 slides and 55 MB.
+The hardest corpus deck carries native charts with embedded Excel workbooks, grouped shapes, native tables, custom geometry, a picture, hyperlinks, speaker notes, and text whose runs do not divide on word boundaries. The largest real deck tested is 340 parts across 52 slides and 55 MB.
 
 Timings are `scripts/perf_report.py --large`. The largest real deck available is
 52 slides, so the 100-, 200- and 400-slide rows are synthesised — text only, so
@@ -254,7 +254,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 781 tests
+python -m pytest tests -q          # 917 tests
 ```
 
 Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
