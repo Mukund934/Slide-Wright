@@ -303,6 +303,17 @@ def read_xlsx(path: str | Path, sheet: str | None = None) -> list[SourceTable]:
     except Exception as exc:  # noqa: BLE001 - openpyxl raises many types
         raise SourceError(f"could not read {path.name}: {exc}") from exc
 
+    if sheet and not any(w.title == sheet for w in book.worksheets):
+        # Refused for the actual reason. Falling through to "contains no
+        # readable cell values" sent someone looking for a data problem in a
+        # workbook whose four sheets are all perfectly readable, when what they
+        # had was a typo in a sheet name.
+        available = ", ".join(w.title for w in book.worksheets) or "none"
+        book.close()
+        raise SourceError(
+            f"{path.name} has no sheet called {sheet!r}. It has: {available}"
+        )
+
     tables = []
     for worksheet in book.worksheets:
         if sheet and worksheet.title != sheet:

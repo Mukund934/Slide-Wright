@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from slide_wright.sources import (
+    read_xlsx,
     Citation,
     SourceError,
     SourceSet,
@@ -250,3 +251,57 @@ class TestCsvAsSpreadsheetsActuallyWriteIt:
         a refusal into a table of nonsense — a zip is not a spreadsheet."""
         table = self._read(tmp_path, "l.csv", b"PK\x03\x04\x14\x00\x00\x00\x08\x00")
         assert not table.rows or all(len(r) <= 1 for r in table.rows)
+
+
+class TestAskingForASheetThatIsNotThere:
+    """The refusal was right and its reason was wrong.
+
+    A workbook whose four sheets are all perfectly readable, asked for a fifth,
+    came back as "contains no readable cell values" — which sends someone
+    looking for a data problem when what they have is a typo in a sheet name.
+    """
+
+    def _workbook(self, tmp_path, *names):
+        openpyxl = pytest.importorskip("openpyxl")
+        path = tmp_path / "book.xlsx"
+        book = openpyxl.Workbook()
+        book.active.title = names[0]
+        book.active.append(["Company", "Multiple"])
+        book.active.append(["Alpha", "9.4x"])
+        for name in names[1:]:
+            sheet = book.create_sheet(name)
+            sheet.append(["x", "y"])
+            sheet.append(["1", "2"])
+        book.save(path)
+        return path
+
+    def test_it_says_the_sheet_is_missing(self, tmp_path):
+        path = self._workbook(tmp_path, "Summary", "Detail")
+        with pytest.raises(SourceError, match="no sheet called 'Nope'"):
+            read_xlsx(path, sheet="Nope")
+
+    def test_it_lists_the_sheets_there_are(self, tmp_path):
+        path = self._workbook(tmp_path, "Summary", "Detail")
+        with pytest.raises(SourceError) as caught:
+            read_xlsx(path, sheet="Nope")
+        assert "Summary" in str(caught.value) and "Detail" in str(caught.value)
+
+    def test_a_sheet_that_is_there_still_works(self, tmp_path):
+        path = self._workbook(tmp_path, "Summary", "Detail")
+        tables = read_xlsx(path, sheet="Detail")
+        assert [t.name for t in tables] == ["Detail"]
+
+    def test_the_name_is_matched_exactly(self, tmp_path):
+        """Sheet names are case-sensitive in Excel, and guessing which one was
+        meant is the sort of help that puts the wrong number on a slide."""
+        path = self._workbook(tmp_path, "Summary", "Detail")
+        with pytest.raises(SourceError):
+            read_xlsx(path, sheet="detail")
+
+    def test_an_empty_workbook_still_says_that_instead(self, tmp_path):
+        """The old message was correct for this case and only this one."""
+        openpyxl = pytest.importorskip("openpyxl")
+        path = tmp_path / "empty.xlsx"
+        openpyxl.Workbook().save(path)
+        with pytest.raises(SourceError, match="no readable cell values"):
+            read_xlsx(path)
