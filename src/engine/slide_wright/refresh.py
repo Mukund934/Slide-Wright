@@ -299,10 +299,59 @@ def _match_table(slide_no: int, shape: ShapeInfo, sources: SourceSet, plan: Refr
                      why or "no cell in the source has both labels")
                 )
                 continue
+            disagreement = _second_opinion(sources, source, row_label, header[c],
+                                            citation)
+            if disagreement:
+                # Not an update and not a confirmation. Either verdict would be
+                # this engine choosing between two documents the user attached,
+                # which is a judgement about their data and not a lookup.
+                plan.unmatched.append(
+                    (slide_no, f"{row_label} / {header[c]}", disagreement)
+                )
+                continue
             plan.matches.append(Match(
                 slide=slide_no, shape_id=shape.id, row=r, col=c,
                 current=current, citation=citation,
             ))
+
+
+def _second_opinion(
+    sources: SourceSet,
+    chosen: SourceTable,
+    row_label: str,
+    column_label: str,
+    citation,
+) -> str:
+    """Whether another attached source answers this lookup differently.
+
+    `_best_source` picks the table sharing the most labels and nothing else is
+    ever consulted, so a second workbook holding the same row and column was
+    simply not read. Two failures came out of that, and the second is the worse
+    one:
+
+      · two sources disagreeing produced a silent update citing whichever
+        happened to score higher;
+      · a source that *agreed with the deck* produced a **confirmation** --
+        "checked against the source and already correct" -- while another
+        attached source said the figure had moved. The product asserting a
+        figure is still right, with contradicting evidence sitting unread in
+        the same source set, is the sharpest failure this feature has.
+
+    A conflict is reported and never resolved. Choosing between two documents
+    the user attached is a judgement about their data, not a lookup.
+    """
+    for other in sources.tables:
+        if other is chosen:
+            continue
+        found, _ = other.resolve(row_label, column_label)
+        if found is None or _normalise(found.value) == _normalise(citation.value):
+            continue
+        return (
+            f"two sources disagree: {citation.reference} says "
+            f"{citation.value!r} and {found.reference} says {found.value!r}. "
+            "Nothing was changed -- deciding between them is not a lookup"
+        )
+    return ""
 
 
 def _best_source(grid: list[list[str]], sources: SourceSet) -> SourceTable | None:

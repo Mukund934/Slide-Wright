@@ -12,7 +12,7 @@ import pytest
 from slide_wright.changeset import Op
 from slide_wright.inspect import EMU_PER_INCH, DeckInfo, ShapeInfo, SlideInfo, TextRun
 from slide_wright.refresh import plan_refresh
-from slide_wright.sources import SourceSet, read_csv
+from slide_wright.sources import SourceSet, SourceTable, read_csv
 
 W, H = int(13.333 * EMU_PER_INCH), int(7.5 * EMU_PER_INCH)
 
@@ -379,3 +379,86 @@ class TestATableTheEngineCannotReadIsSaidSoOutLoud:
         plan = plan_refresh(deck_with_table(), source)
         assert not any("could not be read" in why for _, _, why in plan.unmatched)
         assert plan.updates
+
+
+class TestTwoSourcesThatDisagree:
+    """`_best_source` picks the table sharing the most labels, and nothing else
+    is ever consulted.
+
+    A second workbook holding the same row and column was simply not read. Two
+    failures came out of that, and the second is much the worse:
+
+      · two sources disagreeing produced a silent update citing whichever
+        happened to score higher;
+      · a source that *agreed with the deck* produced a **confirmation** —
+        "checked against the source and already correct" — while another
+        attached source said the figure had moved.
+
+    The second is the sharpest failure this feature has. `confirmed` exists to
+    be positive evidence a figure is still right, and it was being asserted with
+    contradicting evidence sitting unread in the same source set.
+    """
+
+    def _deck(self, current="9.4x"):
+        return deck_with_table(
+            [["Company", "Multiple"], ["Alpha Corp", current]], slide=1
+        )
+
+    def _sources(self, *pairs):
+        return SourceSet([
+            SourceTable(document=doc, name="comps",
+                        rows=[["Company", "Multiple"], ["Alpha Corp", value]])
+            for doc, value in pairs
+        ])
+
+    def test_a_disagreement_produces_no_update(self):
+        plan = plan_refresh(self._deck(),
+                            self._sources(("jan.csv", "11.8x"), ("feb.csv", "12.4x")))
+        assert not plan.updates
+
+    def test_it_names_both_sources_and_both_values(self):
+        plan = plan_refresh(self._deck(),
+                            self._sources(("jan.csv", "11.8x"), ("feb.csv", "12.4x")))
+        why = plan.unmatched[0][2]
+        assert "jan.csv" in why and "feb.csv" in why
+        assert "11.8x" in why and "12.4x" in why
+
+    def test_it_says_it_changed_nothing(self):
+        plan = plan_refresh(self._deck(),
+                            self._sources(("jan.csv", "11.8x"), ("feb.csv", "12.4x")))
+        assert "Nothing was changed" in plan.unmatched[0][2]
+
+    def test_a_figure_is_not_confirmed_while_a_source_contradicts_it(self):
+        """The deck says 9.4x, one source agrees, another says 12.4x. Reporting
+        "already correct" here is the product vouching for a number a document
+        the user attached disputes."""
+        plan = plan_refresh(self._deck(),
+                            self._sources(("old.csv", "9.4x"), ("new.csv", "12.4x")))
+        assert not plan.confirmed
+        assert not plan.updates
+        assert plan.unmatched
+
+    def test_sources_that_agree_still_refresh(self):
+        """Narrow, or attaching a second workbook disables the feature."""
+        plan = plan_refresh(self._deck(),
+                            self._sources(("jan.csv", "11.8x"), ("feb.csv", "11.8x")))
+        assert [m.replacement for m in plan.updates] == ["11.8x"]
+
+    def test_the_same_workbook_attached_twice_is_not_a_conflict(self):
+        plan = plan_refresh(self._deck(),
+                            self._sources(("comps.csv", "11.8x"), ("comps.csv", "11.8x")))
+        assert len(plan.updates) == 1
+
+    def test_agreement_is_compared_the_way_a_person_reads_it(self):
+        """`1,234` and `1234` are the same figure written twice, not a conflict
+        between two documents."""
+        plan = plan_refresh(
+            deck_with_table([["Company", "Multiple"], ["Alpha Corp", "9.4"]], slide=1),
+            self._sources(("jan.csv", "1,234"), ("feb.csv", "1234")),
+        )
+        assert not plan.unmatched
+        assert len(plan.updates) == 1
+
+    def test_a_single_source_is_untouched_by_any_of_this(self):
+        plan = plan_refresh(self._deck(), self._sources(("only.csv", "11.8x")))
+        assert [m.replacement for m in plan.updates] == ["11.8x"]
