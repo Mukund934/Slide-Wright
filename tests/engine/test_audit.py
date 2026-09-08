@@ -578,3 +578,62 @@ class TestRemediesAreTruthful:
         for observation in audit(inspect(adversarial_deck)).observations:
             if observation.area in judgement:
                 assert not observation.is_automatable, observation.message
+
+
+class TestAFindingThatDescribesItsOwnRemedyDeclaresIt:
+    """A rule that says "conforming them re-links their text" and then reports
+    itself as needing a human is contradicting itself in one sentence.
+
+    Measured on `tspptx-mixed.pptx`: the conformance planner had three
+    corrections for exactly this finding, and the finding said a person had to
+    make them. A deck whose only automatable problem was this one showed the
+    reader no way to fix it at all — the workspace gates that affordance on the
+    audit, so a misclassification here removes it from the interface.
+    """
+
+    def _deck_with_one_foreign_slide(self):
+        slides = []
+        for n in range(1, 12):
+            font = "Calibri" if n == 4 else "+mn-lt"
+            slides.append(SlideInfo(
+                number=n, part_name=f"s{n}",
+                shapes=[ShapeInfo(id="1", name="Body", kind="shape",
+                                  x=0, y=0, cx=EMU_PER_INCH, cy=EMU_PER_INCH,
+                                  runs=[TextRun(text="words", font=font)])],
+            ))
+        return DeckInfo(slide_width=W, slide_height=H, slides=slides)
+
+    def _finding(self):
+        result = audit(self._deck_with_one_foreign_slide(), "deck.pptx")
+        return next(
+            (o for o in result.observations if "hardcode a typeface" in o.message),
+            None,
+        )
+
+    def test_the_finding_is_produced(self):
+        assert self._finding() is not None
+
+    def test_it_is_marked_automatable(self):
+        assert self._finding().is_automatable
+
+    def test_it_names_the_conformance_pass_as_the_remedy(self):
+        assert self._finding().remedy is Remedy.CONFORMANCE
+
+    def test_every_finding_that_advises_conforming_says_so(self):
+        """The general form, so the next rule written this way is caught.
+
+        A suggestion that tells the reader to conform or re-link is describing
+        the conformance pass. If the finding then reports itself as needing a
+        human, the two halves of the same sentence disagree.
+        """
+        result = audit(self._deck_with_one_foreign_slide(), "deck.pptx")
+        for observation in result.observations:
+            advises_conforming = any(
+                word in observation.suggestion.lower()
+                for word in ("conform", "re-link", "relink")
+            )
+            if advises_conforming:
+                assert observation.remedy is Remedy.CONFORMANCE, (
+                    f"{observation.message!r} advises conforming and reports "
+                    "itself as needing a human"
+                )

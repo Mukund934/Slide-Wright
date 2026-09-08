@@ -432,6 +432,12 @@ def _foreign_slides(deck: DeckInfo, out: DeckAudit) -> None:
         f"({', '.join(fonts)}) where the rest inherit from the theme",
         "slides pasted in from another deck usually look like this; conforming "
         "them re-links their text to this deck's template",
+        # The advice above already describes the conformance pass, and the pass
+        # already fixes exactly this -- measured on tspptx-mixed.pptx, where the
+        # planner had three corrections for this finding and the finding said a
+        # person had to make them. A deck whose only automatable problem was
+        # this one showed no way to fix it at all.
+        remedy=Remedy.CONFORMANCE,
     ))
 
 

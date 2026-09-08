@@ -146,7 +146,15 @@ export function AuditPanel({
           />
         )}
 
-        {fixable.length > 0 && (
+        {/* Shown when *either* half has something. They are two computations —
+            the audit's rules decide what to report, the tidy planner decides
+            what to correct — and gating the action on the audit alone hid the
+            action whenever they disagreed. Measured on tspptx-mixed.pptx: three
+            corrections available, no automatable finding, and therefore no way
+            to reach them. The classification bug behind that one is fixed, but
+            the two can drift again and the reader should not be the one who
+            pays for it. */}
+        {(fixable.length > 0 || (plan && plan.typefaces + plan.nudges > 0)) && (
           <Section
             title="Slide-Wright can correct these"
             note="Deterministic, and content is locked while they are applied."

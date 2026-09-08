@@ -97,10 +97,35 @@ describe("fixable and advisory do not look alike", () => {
   });
 
   it("offers nothing at all when the engine can fix nothing", async () => {
-    mount(audit({ observations: [observation({ message: "26 slides have no title" })] }));
+    // Both halves empty. The audit alone is not enough to answer this — see
+    // the test below.
+    mount(
+      audit({ observations: [observation({ message: "26 slides have no title" })] }),
+      plan({ typefaces: 0, nudges: 0 }),
+    );
     await screen.findByText(/26 slides have no title/);
     expect(screen.queryByText(/Slide-Wright can correct these/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Propose/ })).toBeNull();
+  });
+
+  it("still offers the tidy when the plan has work the audit did not name", async () => {
+    /**
+     * Two computations: the audit's rules decide what to report, the tidy
+     * planner decides what to correct. Gated on the audit alone, the action
+     * disappeared whenever they disagreed.
+     *
+     * Measured on `tspptx-mixed.pptx`: three corrections available, no
+     * automatable finding, and therefore no way to reach them. The
+     * classification bug behind that one is fixed — but the two can drift
+     * again, and the reader should not be the one who pays for it.
+     */
+    mount(
+      audit({ observations: [observation({ message: "26 slides have no title" })] }),
+      plan({ typefaces: 3, nudges: 0 }),
+    );
+    expect(
+      await screen.findByRole("button", { name: /Propose 3 correction/ }),
+    ).toBeInTheDocument();
   });
 
   it("says plainly that the advisory ones will not be touched", async () => {
