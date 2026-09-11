@@ -78,9 +78,11 @@ byte, and whether any native object was lost. It is the guarantee, and it is
 the one that cannot be argued with.
 
 `diff` asks what a reader would notice — which shape's text changed and to
-what, what moved and by how far, what was resized. When a deck is blocked
-because something changed that nobody asked for, the report now names the
-figure that moved rather than the file that contains it:
+what, what moved and by how far, what was resized, which run lost its emphasis
+or its link, and how the lines sit: their bullets, indent, alignment, spacing,
+and how many of them a shape ends up with. When a deck is blocked because
+something changed that nobody asked for, the report now names the figure that
+moved rather than the file that contains it:
 
 ```
   Changes nobody asked for
