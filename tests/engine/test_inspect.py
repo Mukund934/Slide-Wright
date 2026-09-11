@@ -7,6 +7,8 @@ are deliberately concrete.
 
 from __future__ import annotations
 
+import pathlib
+
 from slide_wright.inspect import EMU_PER_INCH, ShapeInfo, inspect
 
 
@@ -330,3 +332,95 @@ class TestParagraphsAreNotWelded:
         cs.approve_all()
         assert not apply_changes(deck, cs, out).failed
         assert "Cash stable" in self._shape(out).text, "the third line is untouched"
+
+
+class TestSpeakerNotes:
+    """The words under the slide, which nothing here used to read.
+
+    Notes live in their own part, so an edit never touches them and `verify`
+    compares them byte for byte like everything else. What was missing was
+    meaning: the diff could not say a word had changed in them, and the
+    `wording` lock -- "leave my words exactly as written" -- was silent about
+    them.
+
+    The scale is the argument. Across the corpus 43 notes slides carry 3,212
+    words, and on `nasa-bhutan-water` there are 2,708 words of speaker script
+    against 983 on the slides: **73% of that deck's words**, in the deck this
+    project quotes for *"272 corrections, 0 change what the deck says"*.
+    """
+
+    FIXTURES = pathlib.Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "third-party"
+
+    def test_reads_the_script_under_a_slide(self, adversarial_deck):
+        deck = inspect(adversarial_deck)
+        with_notes = [s for s in deck.slides if s.has_notes]
+        assert len(with_notes) == 1
+        assert "presenter's script" in with_notes[0].notes
+
+    def test_a_slide_with_no_notes_part_says_nothing(self, adversarial_deck):
+        deck = inspect(adversarial_deck)
+        assert any(not s.has_notes for s in deck.slides)
+        assert all(s.notes == "" for s in deck.slides if not s.has_notes)
+
+    def test_the_slide_number_field_is_not_content(self, adversarial_deck):
+        """It is generated. Reporting it would make renumbering read as a rewrite."""
+        notes = next(s.notes for s in inspect(adversarial_deck).slides if s.has_notes)
+        assert not any(line.strip().isdigit() for line in notes.split("\n"))
+
+    def test_notes_are_not_counted_as_words_on_the_slide(self, adversarial_deck):
+        slide = next(s for s in inspect(adversarial_deck).slides if s.has_notes)
+        assert slide.notes_word_count > 0
+        assert slide.word_count == len(slide.text.split())
+        assert slide.notes.split()[0] not in slide.text
+
+    def test_notes_are_found_through_the_relationship_not_the_number(self):
+        """`notesSlide7` is not the notes for slide 7, on half of the real corpus.
+
+        Measured: of the 153 slides in the corpus that have notes, **71 have a
+        notes part whose number differs from their own** -- what a deck looks
+        like after anyone deletes a slide. Pairing by index would have put one
+        presenter's script under another slide and looked entirely correct.
+        """
+        import pytest
+
+        from slide_wright.inspect import _related_part
+        from slide_wright.package import Package
+
+        deck = self.FIXTURES / "eia-aeo2023-release.pptx"
+        if not deck.is_file():
+            pytest.skip("third-party corpus not present; run scripts/fetch_fixtures.py")
+
+        pkg = Package.open(deck)
+        mismatched = [
+            part for part in pkg.slides()
+            if (related := _related_part(pkg, part.name, "notesSlides"))
+            and related != f"ppt/notesSlides/notesSlide{part.slide_number}.xml"
+        ]
+        assert mismatched, "this fixture is here because its numbering does not line up"
+
+        part = mismatched[0]
+        related = _related_part(pkg, part.name, "notesSlides")
+        slide = inspect(deck).slide(part.slide_number)
+        expected = _text_of(pkg, related)
+        assert slide.notes == expected, (
+            "the notes read for a slide must be the notes its relationship names"
+        )
+
+
+def _text_of(pkg, notes_part: str) -> str:
+    """The same reading, done the long way, so the assertion is not the code."""
+    from lxml import etree
+
+    from slide_wright.inspect import NS
+
+    root = etree.fromstring(pkg.read(notes_part))
+    lines = []
+    for sp in root.iter(f"{{{NS['p']}}}sp"):
+        ph = sp.find(f".//{{{NS['p']}}}ph")
+        if ph is not None and ph.get("type") in {"sldImg", "sldNum"}:
+            continue
+        for para in sp.findall(f".//{{{NS['a']}}}p"):
+            text = "".join(t.text for t in para.findall(f".//{{{NS['a']}}}t") if t.text)
+            if text.strip():
+                lines.append(text)
+    return "\n".join(lines)

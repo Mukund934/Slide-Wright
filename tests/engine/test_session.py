@@ -705,6 +705,28 @@ class TestLocksAreEnforcedAtTheVerifier:
         assert not report.deliverable, "a deck that lost its bullets is not deliverable"
         assert any("formatting lock" in reason for reason in report.blocking_reasons)
 
+    def test_a_rewritten_script_blocks_delivery_under_a_wording_lock(
+        self, session, adversarial_deck, tmp_path
+    ):
+        """The lock's own sentence is "leave my words exactly as written".
+
+        Speaker notes are words somebody wrote -- 73% of them, on one real deck
+        -- and until the diff could see them this lock was silent about every
+        one. Constructed by hand because nothing in this engine writes a notes
+        part, which is the same reason the gap survived: there was no operation
+        whose output would have exposed it.
+        """
+        from test_diff import rewrite_notes
+
+        out = rewrite_notes(
+            adversarial_deck, tmp_path / "rescripted.pptx", b"presenter", b"narrator"
+        )
+        report = session.verify(
+            adversarial_deck, out, self._locked(adversarial_deck, "wording")
+        )
+        assert not report.deliverable, "a deck whose script was rewritten is not deliverable"
+        assert any("wording lock" in reason for reason in report.blocking_reasons)
+
     def test_a_moved_shape_blocks_delivery_under_a_layout_lock(
         self, session, adversarial_deck, tmp_path
     ):

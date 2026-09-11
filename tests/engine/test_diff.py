@@ -794,3 +794,86 @@ class TestCapitalsAreReadAndCompared:
         assert _off("none", "none") is None
         assert _off(None, "none") is None
         assert _off("all", "none") == "all"
+
+
+def rewrite_notes(deck, out, replace: bytes, with_: bytes):
+    """The same deck with one word changed in one notes part. Nothing else moves.
+
+    Built by hand rather than by the applier because nothing in this engine
+    writes a notes part -- which is exactly why the diff could not see one
+    change. A second line of defence never fires on anything the first line
+    produces.
+    """
+    import re
+    import zipfile
+
+    target = None
+    with zipfile.ZipFile(deck) as z:
+        for name in sorted(z.namelist()):
+            if re.match(r"^ppt/notesSlides/notesSlide\d+\.xml$", name) and replace in z.read(name):
+                target = name
+                break
+        assert target, f"no notes part in {deck.name} contains {replace!r}"
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+            for item in z.infolist():
+                data = z.read(item.filename)
+                if item.filename == target:
+                    data = data.replace(replace, with_, 1)
+                dst.writestr(item, data)
+    return out
+
+
+class TestSpeakerNotesAreCompared:
+    """A third of a real deck's words lived where no comparison could reach.
+
+    Notes are in their own part, so they survive an edit and `verify` compares
+    them byte for byte. Meaning was the gap: change a word of the presenter's
+    script and this module said *"No structural differences."* It reaches
+    further than a report, because every verifier-side lock is a question put
+    to the diff.
+
+    Measured before building: 43 notes slides across the corpus carry 3,212
+    words, and on `nasa-bhutan-water` the script is 2,708 words against 983 on
+    the slides.
+    """
+
+    def test_a_word_changed_in_the_script_is_reported(self, adversarial_deck, tmp_path):
+        out = rewrite_notes(
+            adversarial_deck, tmp_path / "o.pptx", b"presenter", b"narrator"
+        )
+        result = diff(adversarial_deck, out)
+        assert result.changed, "changing the script must not read as no difference"
+        assert any(d.kind == "notes" for d in result.deltas)
+
+    def test_it_is_what_the_deck_says(self, adversarial_deck, tmp_path):
+        out = rewrite_notes(
+            adversarial_deck, tmp_path / "o.pptx", b"presenter", b"narrator"
+        )
+        delta = next(d for d in diff(adversarial_deck, out).deltas if d.kind == "notes")
+        assert delta.is_content, "a presenter's script is words somebody wrote"
+        assert "speaker notes" in delta.description
+
+    def test_it_names_the_slide_and_claims_no_shape(self, adversarial_deck, tmp_path):
+        out = rewrite_notes(
+            adversarial_deck, tmp_path / "o.pptx", b"presenter", b"narrator"
+        )
+        delta = next(d for d in diff(adversarial_deck, out).deltas if d.kind == "notes")
+        assert delta.slide > 0
+        assert delta.shape_id == "", "notes belong to the slide, not to an object on it"
+
+    def test_a_figure_changed_in_the_script_is_flagged(self, adversarial_deck, tmp_path):
+        """`changes_figures` is the sharpest claim here, and it must cover notes.
+
+        A number in the script is a number somebody will read aloud.
+        """
+        out = rewrite_notes(
+            adversarial_deck, tmp_path / "o.pptx", b"presenter", b"2026 presenter"
+        )
+        assert diff(adversarial_deck, out).figure_deltas
+
+    def test_an_identical_deck_still_reports_nothing(self, adversarial_deck, tmp_path):
+        import shutil
+
+        copy = tmp_path / "copy.pptx"
+        shutil.copy(adversarial_deck, copy)
+        assert not diff(adversarial_deck, copy).changed
