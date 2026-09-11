@@ -30,7 +30,7 @@ Measured over **17 deck(s)** on this machine.
 | --- | --- | --- | --- |
 | Text runs | 17 of 17 decks | PRESERVED | not refused |
 | Shapes | 17 of 17 decks | PRESERVED | not refused |
-| Pictures | 7 of 17 decks | PRESERVED | not refused |
+| Pictures | 8 of 17 decks | PRESERVED | not refused |
 | Groups | 8 of 17 decks | PRESERVED | not refused |
 | Connectors | 8 of 17 decks | PRESERVED | not refused |
 | Native tables | 10 of 17 decks | PRESERVED | not refused |
@@ -40,7 +40,7 @@ Measured over **17 deck(s)** on this machine.
 | Charts | 6 of 17 decks | PRESERVED | REFUSED |
 | SmartArt | 6 of 17 decks | PRESERVED | REFUSED |
 | Embedded workbooks | 8 of 17 decks | PRESERVED | not refused |
-| Media files | 10 of 17 decks | PRESERVED | not refused |
+| Media files | 11 of 17 decks | PRESERVED | not refused |
 | Video | no deck measured here | UNKNOWN — nothing to measure | UNKNOWN |
 | Audio | no deck measured here | UNKNOWN — nothing to measure | UNKNOWN |
 | OLE objects | 2 of 17 decks | PRESERVED | not refused |
