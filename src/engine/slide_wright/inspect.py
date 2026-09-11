@@ -61,6 +61,33 @@ class TextRun:
 
 
 @dataclass
+class ParagraphInfo:
+    """How one line of a shape sits, as distinct from what it says.
+
+    Four properties, chosen because they are the four a reviewer names out
+    loud: *the bullet went*, *it is not indented any more*, *that is centred
+    now*, *the lines are tighter*. Each is kept as OOXML states it, with the
+    inherited case as None -- a paragraph with no `<a:pPr>` takes all of this
+    from its layout, and recording a default here would report a change the
+    first time one was written explicitly with the same value.
+
+    Deliberately absent: `marL`/`indent`, which move a line the same way `lvl`
+    does and would report the same change twice, and `spcBef`/`spcAft`, which
+    no operation here can alter and which vary by a hundredth of a point
+    through an ordinary save.
+    """
+
+    #: Outline depth. `lvl` is absent for the first level, which is level 0.
+    level: int = 0
+    #: `algn` -- "l", "ctr", "r", "just"...  None means inherited.
+    alignment: str | None = None
+    #: "none", "char <c>", or "auto <type>". None means inherited.
+    bullet: str | None = None
+    #: Line spacing as written: "90%" or "12pt". None means inherited.
+    line_spacing: str | None = None
+
+
+@dataclass
 class ShapeInfo:
     """One object on a slide, described structurally."""
 
@@ -92,7 +119,7 @@ class ShapeInfo:
     #: draws its bullet. Counting them is what lets the diff tell a shape whose
     #: four lines became one from a shape whose four lines became one line and
     #: three blanks.
-    paragraph_count: int = 0
+    paragraphs: list[ParagraphInfo] = field(default_factory=list)
     # True when x/y/cx/cy came from the layout or master rather than the slide.
     # The shape really is there; it just has no position of its own, which is
     # why the applier refuses to move it.
@@ -100,6 +127,10 @@ class ShapeInfo:
     # How this placeholder addresses its slot, most specific first. Internal to
     # geometry resolution; None for anything that is not a placeholder.
     placeholder_key: list[str] | None = None
+
+    @property
+    def paragraph_count(self) -> int:
+        return len(self.paragraphs)
 
     @property
     def text(self) -> str:
@@ -417,6 +448,39 @@ def _inherit_geometry(pkg: Package, part_name: str, slide: SlideInfo) -> None:
             break
 
 
+def _paragraph(para) -> ParagraphInfo:
+    """Read one paragraph's properties, leaving anything inherited as None."""
+    info = ParagraphInfo()
+    pPr = para.find("a:pPr", NS)
+    if pPr is None:
+        return info
+
+    level = pPr.get("lvl")
+    if level and level.isdigit():
+        info.level = int(level)
+    info.alignment = pPr.get("algn")
+
+    if pPr.find("a:buNone", NS) is not None:
+        info.bullet = "none"
+    else:
+        char = pPr.find("a:buChar", NS)
+        auto = pPr.find("a:buAutoNum", NS)
+        if char is not None:
+            info.bullet = f"char {char.get('char', '')}"
+        elif auto is not None:
+            info.bullet = f"auto {auto.get('type', '')}"
+
+    spacing = pPr.find("a:lnSpc", NS)
+    if spacing is not None:
+        percent = spacing.find("a:spcPct", NS)
+        points = spacing.find("a:spcPts", NS)
+        if percent is not None and percent.get("val"):
+            info.line_spacing = f"{int(percent.get('val')) / 1000:g}%"
+        elif points is not None and points.get("val"):
+            info.line_spacing = f"{int(points.get('val')) / 100:g}pt"
+    return info
+
+
 def _read_cells(rows) -> dict[str, str]:
     """Cell text keyed as the applier addresses it.
 
@@ -528,7 +592,7 @@ def _read_shape(el, links: dict[str, str] | None = None) -> ShapeInfo | None:
         )
 
     paragraphs = el.findall(".//a:p", NS)
-    shape.paragraph_count = len(paragraphs)
+    shape.paragraphs = [_paragraph(para) for para in paragraphs]
     for index, para in enumerate(paragraphs):
         for r in para.findall(".//a:r", NS):
             t = r.find("a:t", NS)
