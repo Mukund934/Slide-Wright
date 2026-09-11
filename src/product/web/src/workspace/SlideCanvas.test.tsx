@@ -11,18 +11,31 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { Shape, Slide } from "../api/types";
+import type { Run, Shape, Slide } from "../api/types";
 import { SlideCanvas } from "./SlideCanvas";
 
 const WIDTH = 12192000;
 const HEIGHT = 6858000;
 
+function run(over: Partial<Run> = {}): Run {
+  return {
+    text: "hello", size_pt: 18, bold: false, italic: false, font: null,
+    color: null, paragraph: 0, underline: null, strike: null, baseline: null,
+    caps: null,
+    ...over,
+  };
+}
+
 function shape(over: Partial<Shape> = {}): Shape {
+  const runs = over.runs ?? [run()];
   return {
     id: "1", name: "Rectangle 1", kind: "shape", placeholder_type: null,
     x: 914400, y: 914400, cx: 1828800, cy: 914400,
     rotation_deg: null, geometry_inherited: false, geometry: "rect",
-    runs: [{ text: "hello", size_pt: 18, bold: false, italic: false, font: null, color: null, paragraph: 0 }],
+    runs,
+    // Defaults to "as many paragraphs as the runs name", so a test that cares
+    // about blank lines is the only one that has to say so.
+    paragraph_count: runs.reduce((most, r) => Math.max(most, r.paragraph + 1), 0),
     table_rows: 0, table_cols: 0, table_cells: {}, child_count: 0, text: "hello",
     ...over,
   };
@@ -109,7 +122,7 @@ describe("what it draws", () => {
     // which reads as the object being absent rather than unrendered.
     const { container } = draw([
       shape({
-        runs: [{ text: "hi", size_pt: 18, bold: false, italic: false, font: null, color: "FFFFFF" , paragraph: 0 }],
+        runs: [run({ text: "hi", color: "FFFFFF" })],
       }),
     ]);
     const span = container.querySelector("[data-shape-id] span") as HTMLElement;
@@ -148,13 +161,9 @@ describe("a shape's lines", () => {
    * follows from: runs of one paragraph share one block, and a new paragraph
    * starts a new one.
    */
-  const sentence = (text: string, paragraph: number, bold = false) => ({
+  const sentence = (text: string, paragraph: number, bold = false) => run({
     text,
-    size_pt: 18,
     bold,
-    italic: false,
-    font: null,
-    color: null,
     paragraph,
   });
 
@@ -205,5 +214,94 @@ describe("a shape's lines", () => {
     ]);
     const lines = container.querySelectorAll("[data-shape-id] p");
     expect([...lines].map((l) => l.querySelectorAll("span").length)).toEqual([2, 1]);
+  });
+});
+
+describe("what a run actually looks like", () => {
+  /**
+   * The canvas claims accuracy and nothing else, and it was drawing five of a
+   * run's ten attributes. A struck-through line came back un-struck, an
+   * underlined one un-underlined, a footnote marker sitting on the baseline,
+   * and — loudest of all — a header reading DIVIDER drawn as "divider",
+   * because ALL CAPS is a property of the run and not of the text.
+   *
+   * Measured across the 26 real decks: 50 underlined runs, 24 with a baseline,
+   * 6 struck through. `cap` is in the corpus 363 times and every one is the off
+   * state, which is why the adversarial deck had to be given a run that is
+   * genuinely capitalised before any of this could be checked.
+   */
+  const styled = (over: Partial<Run>) =>
+    draw([shape({ runs: [run({ text: "Section divider", ...over })] })])
+      .container.querySelector("[data-shape-id] span") as HTMLElement;
+
+  it("draws ALL CAPS in capitals", () => {
+    expect(styled({ caps: "all" }).style.textTransform).toBe("uppercase");
+  });
+
+  it("leaves a run with no capitals setting alone", () => {
+    expect(styled({}).style.textTransform).toBe("");
+  });
+
+  it("draws an underline", () => {
+    expect(styled({ underline: "sng" }).style.textDecorationLine).toContain("underline");
+  });
+
+  it("tells a double underline from a single one", () => {
+    expect(styled({ underline: "dbl" }).style.textDecorationStyle).toBe("double");
+  });
+
+  it("draws a strikethrough", () => {
+    expect(styled({ strike: "sngStrike" }).style.textDecorationLine).toContain(
+      "line-through",
+    );
+  });
+
+  it("draws both at once, since CSS takes them on one property", () => {
+    const decoration = styled({ underline: "sng", strike: "sngStrike" })
+      .style.textDecorationLine;
+    expect(decoration).toContain("underline");
+    expect(decoration).toContain("line-through");
+  });
+
+  it("lifts a superscript and drops a subscript", () => {
+    expect(styled({ baseline: 30000 }).style.verticalAlign).toBe("super");
+    expect(styled({ baseline: -25000 }).style.verticalAlign).toBe("sub");
+  });
+});
+
+describe("a line with nothing on it", () => {
+  /**
+   * `runs` carries only runs with text, so grouping by adjacency drew a shape
+   * with a gap in it as a shape without one: everything below the gap moved a
+   * line up. 77 of the 768 text shapes in the corpus already have a blank line,
+   * and until the applier was fixed every whole-shape edit created more.
+   */
+  it("keeps the gap a deck has", () => {
+    const { container } = draw([
+      shape({
+        runs: [run({ text: "Above", paragraph: 0 }), run({ text: "Below", paragraph: 2 })],
+        paragraph_count: 3,
+      }),
+    ]);
+    const lines = [...container.querySelectorAll("[data-shape-id] p")];
+    expect(lines).toHaveLength(3);
+    expect(lines.map((l) => l.textContent)).toEqual(["Above", "\u00a0", "Below"]);
+  });
+
+  it("keeps a blank line at the end, which no run can imply", () => {
+    const { container } = draw([
+      shape({ runs: [run({ text: "Only", paragraph: 0 })], paragraph_count: 3 }),
+    ]);
+    expect(container.querySelectorAll("[data-shape-id] p")).toHaveLength(3);
+  });
+
+  it("draws nothing extra when the shape has no blank lines", () => {
+    const { container } = draw([
+      shape({
+        runs: [run({ text: "One", paragraph: 0 }), run({ text: "Two", paragraph: 1 })],
+        paragraph_count: 2,
+      }),
+    ]);
+    expect(container.querySelectorAll("[data-shape-id] p")).toHaveLength(2);
   });
 });

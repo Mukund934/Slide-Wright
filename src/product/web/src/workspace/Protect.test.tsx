@@ -19,7 +19,7 @@ function shape(over: Partial<Shape> = {}): Shape {
   return {
     id: "7", name: "Comparables", kind: "table", placeholder_type: null,
     x: 0, y: 0, cx: 100, cy: 100, rotation_deg: null,
-    geometry_inherited: false, geometry: null, runs: [],
+    geometry_inherited: false, geometry: null, runs: [], paragraph_count: 0,
     table_rows: 2, table_cols: 2, table_cells: {}, child_count: 0, text: "",
     ...over,
   };
