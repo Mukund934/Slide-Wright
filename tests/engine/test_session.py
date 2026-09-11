@@ -657,6 +657,54 @@ class TestLocksAreEnforcedAtTheVerifier:
         assert not report.deliverable, "a broken guarantee has to stop the deck"
         assert any("formatting lock" in reason for reason in report.blocking_reasons)
 
+    def test_a_deck_whose_bullets_went_blocks_under_a_formatting_lock(
+        self, session, adversarial_deck, tmp_path
+    ):
+        """*Leave my styling exactly as it is* has to cover the bullet.
+
+        Nothing in the engine takes a bullet off, which is why this output is
+        built by hand: a second line of defence never fires on anything the
+        first line admits. What it proves is that the sentence the lock prints
+        is now a property of the file, and the diff that answers it can see the
+        paragraph a run sits in -- which until today it could not.
+        """
+        import re
+        import zipfile
+
+        from lxml import etree
+
+        A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        part = next(
+            name for name in sorted(zipfile.ZipFile(adversarial_deck).namelist())
+            if re.match(r"^ppt/slides/slide\d+\.xml$", name)
+            and b"Margin held" in zipfile.ZipFile(adversarial_deck).read(name)
+        )
+
+        out = tmp_path / "unbulleted.pptx"
+        with zipfile.ZipFile(adversarial_deck) as src, \
+                zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+            for item in src.infolist():
+                data = src.read(item.filename)
+                if item.filename == part:
+                    root = etree.fromstring(data)
+                    for para in root.iter(f"{A}p"):
+                        if not para.findall(f".//{A}t"):
+                            continue
+                        pPr = para.find(f"{A}pPr")
+                        if pPr is None:
+                            pPr = etree.Element(f"{A}pPr")
+                            para.insert(0, pPr)
+                        etree.SubElement(pPr, f"{A}buNone")
+                    data = etree.tostring(root, xml_declaration=True,
+                                          encoding="UTF-8", standalone=True)
+                dst.writestr(item, data)
+
+        report = session.verify(
+            adversarial_deck, out, self._locked(adversarial_deck, "formatting")
+        )
+        assert not report.deliverable, "a deck that lost its bullets is not deliverable"
+        assert any("formatting lock" in reason for reason in report.blocking_reasons)
+
     def test_a_moved_shape_blocks_delivery_under_a_layout_lock(
         self, session, adversarial_deck, tmp_path
     ):
