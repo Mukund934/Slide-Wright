@@ -1314,3 +1314,219 @@ class TestEveryLockIsAPropertyOfTheWrittenDeck:
             s for s in after.slides[slide_number - 1].shapes if s.id == picture.id
         )
         assert (held.x, held.y) == (picture.x, picture.y)
+
+
+class TestAShapeEndsWithTheLinesItWasAskedFor:
+    """The line a reader counts, not the line a run walk can see.
+
+    A replacement crossing paragraphs used to write the whole new string into
+    the first run and empty every other one. That is right about the words and
+    wrong about the shape: the emptied paragraphs stay, each still drawing the
+    bullet it inherits from the layout, so a four-line placeholder set to one
+    line came back as one line and three blank bullets.
+
+    Nothing could see it. `runs` holds only runs with text, so `ShapeInfo.text`
+    read back clean and the diff said *0 change how it looks*. And it is the
+    ordinary path, not a corner: `SetSpec` carries no `before`, so every typed
+    edit in the workspace replaces the whole shape.
+    """
+
+    A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+
+    def _shape(self, *lines: str, bullet: bool = False):
+        from lxml import etree
+
+        pPr = '<a:pPr><a:buChar char="\u2022"/></a:pPr>' if bullet else ""
+        paras = "".join(
+            f"<a:p>{pPr}<a:r><a:rPr/><a:t>{line}</a:t></a:r></a:p>" for line in lines
+        )
+        return etree.fromstring(
+            '<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+            f' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">{paras}</p:sp>'
+        )
+
+    def _lines(self, shape) -> list[str]:
+        return [
+            "".join(t.text or "" for t in para.findall(f".//{self.A}t"))
+            for para in shape.findall(f"{self.A}p")
+        ]
+
+    def test_four_lines_set_to_one_leaves_one(self):
+        from slide_wright.apply import _set_text
+
+        shape = self._shape("Alpha", "Beta", "Gamma", "Delta")
+        assert _set_text(shape, "Alpha\nBeta\nGamma\nDelta", "One line")
+        assert self._lines(shape) == ["One line"], (
+            "the paragraphs the replacement no longer needs must go, not be emptied"
+        )
+
+    def test_a_newline_in_the_replacement_becomes_a_paragraph(self):
+        """The same mistake facing the other way.
+
+        A newline character inside `<a:t>` is not a line break in OOXML, and
+        reading it back gives a string the engine cannot tell from two
+        paragraphs -- so the engine could not distinguish its own two outcomes.
+        """
+        from slide_wright.apply import _set_text
+
+        shape = self._shape("Alpha", "Beta", "Gamma")
+        assert _set_text(shape, "Alpha\nBeta\nGamma", "First\nSecond")
+        assert self._lines(shape) == ["First", "Second"]
+        assert not any(
+            "\n" in (t.text or "") for t in shape.findall(f".//{self.A}t")
+        ), "a line break must be a paragraph, never a character in a run"
+
+    def test_a_line_added_keeps_the_bullet_of_the_line_above(self):
+        from slide_wright.apply import _set_text
+
+        shape = self._shape("Alpha", "Beta", bullet=True)
+        assert _set_text(shape, "Alpha\nBeta", "Alpha\nBeta\nGamma")
+        assert self._lines(shape) == ["Alpha", "Beta", "Gamma"]
+        assert all(
+            para.find(f"{self.A}pPr/{self.A}buChar") is not None
+            for para in shape.findall(f"{self.A}p")
+        ), "a line added to a bulleted list means a bullet"
+
+    def test_a_line_the_span_never_reached_keeps_its_own_text(self):
+        from slide_wright.apply import _set_text
+
+        shape = self._shape("Alpha", "Beta", "Gamma", "Delta")
+        assert _set_text(shape, "Alpha\nBeta\nGamma", "One")
+        assert self._lines(shape) == ["One", "Delta"]
+
+    def test_the_tail_of_the_last_line_survives_the_paragraphs_below_it(self):
+        from slide_wright.apply import _set_text
+
+        shape = self._shape("one two", "three four")
+        assert _set_text(shape, "two\nthree", "TWO")
+        assert self._lines(shape) == ["one TWO four"]
+
+    def test_a_tail_travels_with_the_last_line_when_lines_are_added(self):
+        from slide_wright.apply import _set_text
+
+        shape = self._shape("one two", "three four")
+        assert _set_text(shape, "two\nthree", "TWO\nMID\nTHREE")
+        assert self._lines(shape) == ["one TWO", "MID", "THREE four"]
+
+    def test_a_replacement_starting_on_a_boundary_is_not_dropped(self):
+        """`lo == hi` is an insertion point, not a span of nothing.
+
+        Mine, from the first version of this fix: a replacement covering no
+        character of the paragraph it starts in wrote nothing and then removed
+        the paragraph below, so the deck lost a line and gained no replacement.
+        """
+        from slide_wright.apply import _set_text
+
+        shape = self._shape("abc", "def")
+        assert _set_text(shape, "\ndef", "X")
+        assert self._lines(shape) == ["abcX"]
+
+    def test_the_only_paragraph_is_emptied_rather_than_removed(self):
+        """A text body must hold at least one paragraph, or the deck is broken."""
+        from slide_wright.apply import _replace_across_paragraphs
+        from lxml import etree
+
+        shape = self._shape("Alpha")
+        paragraphs = shape.findall(f"{self.A}p")
+        assert _replace_across_paragraphs(paragraphs, "Alpha", "")
+        assert len(shape.findall(f"{self.A}p")) == 1
+        assert self._lines(shape) == [""]
+
+
+class TestBlankLinesAreVisibleEndToEnd:
+    """On a real package, because XML in memory is not a deck.
+
+    The shape this needs -- a body placeholder with bullets in it -- was not in
+    the corpus until this defect was found. It had a table, whose cells are
+    paragraphs, and a group, whose children hold one each. Neither is a text
+    body with lines in it, so the question had never been put to a deck.
+    """
+
+    def _bulleted(self, deck):
+        """The first ordinary text shape holding more than one line.
+
+        A group is excluded on purpose: its lines live in separate text bodies,
+        one per child, and what happens to those is a different guarantee --
+        recorded below.
+        """
+        info = inspect(deck)
+        return next(
+            (s, sl) for sl in info.slides for s in sl.shapes
+            if s.kind not in {"table", "group"}
+            and len({r.paragraph for r in s.runs}) >= 2
+        )
+
+    def _edit(self, deck, out, shape, slide, after: str):
+        apply_changes(deck, approved(deck, Change(
+            id="c", op=Op.SET_TEXT, slide=slide.number, target=shape.id,
+            before=shape.text, after=after,
+        )), out)
+        return next(
+            s for s in inspect(out).slides[slide.number - 1].shapes if s.id == shape.id
+        )
+
+    def test_a_whole_shape_edit_leaves_no_blank_line_behind(self, adversarial_deck, tmp_path):
+        shape, slide = self._bulleted(adversarial_deck)
+        blank_before = shape.paragraph_count - len({r.paragraph for r in shape.runs})
+
+        after = self._edit(
+            adversarial_deck, tmp_path / "out.pptx", shape, slide, "Only this line now"
+        )
+
+        blank_after = after.paragraph_count - len({r.paragraph for r in after.runs})
+        assert after.text == "Only this line now"
+        assert blank_after == blank_before, (
+            f"the edit left {blank_after - blank_before} blank line(s) on the slide"
+        )
+
+    def test_the_lines_asked_for_are_the_lines_that_arrive(self, adversarial_deck, tmp_path):
+        shape, slide = self._bulleted(adversarial_deck)
+        after = self._edit(
+            adversarial_deck, tmp_path / "out.pptx", shape, slide, "First\nSecond\nThird"
+        )
+        assert after.text == "First\nSecond\nThird"
+        assert len({r.paragraph for r in after.runs}) == 3, (
+            "three lines means three paragraphs, not one run holding two newlines"
+        )
+
+    def test_the_diff_reports_a_line_that_went(self, adversarial_deck, tmp_path):
+        """The second line of defence: the instrument has to be able to see it.
+
+        Fixing the applier is not enough on its own. Every verifier-side lock is
+        a question put to the diff, so a property the diff cannot compute is a
+        property no lock can protect.
+        """
+        from slide_wright.diff import diff
+
+        shape, slide = self._bulleted(adversarial_deck)
+        out = tmp_path / "out.pptx"
+        self._edit(adversarial_deck, out, shape, slide, "Only this line now")
+
+        deltas = [d for d in diff(adversarial_deck, out).deltas if "lines" in d.summary]
+        assert deltas, "a shape that lost lines must produce a delta saying so"
+        assert not deltas[0].is_content, "a blank line is how it looks, not what it says"
+
+    def test_a_groups_child_keeps_its_one_paragraph(self, adversarial_deck, tmp_path):
+        """A group's lines are separate text bodies, and each must keep one.
+
+        Setting a group's text to one line genuinely leaves its other children
+        saying nothing; there is no way to express that without deleting shapes,
+        which a text edit may not do. So they are emptied, and the diff reports
+        the blank lines that result -- which is the truth about the slide.
+        """
+        from slide_wright.diff import diff
+
+        info = inspect(adversarial_deck)
+        group, slide = next(
+            (s, sl) for sl in info.slides for s in sl.shapes if s.kind == "group"
+        )
+        out = tmp_path / "out.pptx"
+        after = self._edit(adversarial_deck, out, group, slide, "Only this line now")
+
+        assert after.paragraph_count == group.paragraph_count, (
+            "emptying is the only safe answer; a text body must keep a paragraph"
+        )
+        assert after.text == "Only this line now"
+        assert [d.summary for d in diff(adversarial_deck, out).deltas if "blank" in d.summary], (
+            "the empty text boxes it now carries must be reported, not hidden"
+        )
