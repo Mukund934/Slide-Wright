@@ -1609,18 +1609,33 @@ class TestEveryMultiLineShapeEndsWithTheLinesAskedFor:
     Adding a bulleted body to the corpus caught nothing on its own -- the same
     thing the split-run slide did -- because every test that could see it asks
     about a shape it chose. So this asks the question of every text body in
-    reach: replace all of its lines with two, and it must hold two, and it must
-    not have gained a blank one.
+    reach, five ways: the lines it ends with must be the lines it was asked
+    for, it must not have gained a blank one, it must not have invented a link,
+    a field or a line break, and no text body may come out with no paragraph at
+    all.
 
     Swept on the elements rather than through `apply_changes`: rewriting the
     package once per shape costs about a second on a 350-part deck, which is
     fifty seconds of suite for arithmetic that lives entirely in the element.
-    The package round trip is covered end to end above.
+    965 (shape, replacement) pairs over the real corpus run in 0.3s. The package
+    round trip is covered end to end above.
     """
 
     A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
     P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
-    REPLACEMENT = "Replaced line one\nReplaced line two"
+
+    #: Five shapes of replacement, because the arithmetic branches on how many
+    #: lines arrive against how many were covered: fewer means paragraphs are
+    #: removed, more means they are cloned, equal means neither, and empty is
+    #: the edge where a text body must still keep one. `None` is "as many lines
+    #: as it had", filled per shape.
+    REPLACEMENTS = {
+        "one line": "Only this",
+        "two lines": "Replaced line one\nReplaced line two",
+        "eight lines": "\n".join(f"Line {i}" for i in range(1, 9)),
+        "empty": "",
+        "the same count": None,
+    }
 
     def _shapes(self, path):
         """Every text body on every slide, groups included -- each holds its own."""
@@ -1644,29 +1659,56 @@ class TestEveryMultiLineShapeEndsWithTheLinesAskedFor:
             out.append(text)
         return out
 
+    def _count(self, sp, tag: str) -> int:
+        return len(sp.findall(f".//{self.A}{tag}"))
+
     def _sweep(self, path) -> int:
+        import copy
+
         from slide_wright.apply import _set_text
 
         swept = 0
-        for part, sp in self._shapes(path):
-            lines = self._lines(sp)
+        for part, original in self._shapes(path):
+            lines = self._lines(original)
             written = [line for line in lines if line]
             if len(written) < 2:
                 continue
             blank_before = len(lines) - len(written)
-            assert _set_text(sp, "\n".join(written), self.REPLACEMENT), (
-                f"{path.name} {part}: the joined text could not be found in the "
-                "shape it was read from"
-            )
-            after = self._lines(sp)
-            assert [line for line in after if line] == self.REPLACEMENT.split("\n"), (
-                f"{path.name} {part}: asked for two lines, got {after}"
-            )
-            assert len(after) - 2 == blank_before, (
-                f"{path.name} {part}: the edit left "
-                f"{len(after) - 2 - blank_before} blank line(s) behind"
-            )
-            swept += 1
+
+            for label, replacement in self.REPLACEMENTS.items():
+                sp = copy.deepcopy(original)
+                after = replacement
+                if after is None:
+                    after = "\n".join(f"New {i}" for i in range(len(written)))
+                where = f"{path.name} {part} ({label})"
+                carried = {
+                    tag: self._count(sp, tag) for tag in ("hlinkClick", "fld", "br")
+                }
+
+                assert _set_text(sp, "\n".join(written), after), (
+                    f"{where}: the joined text could not be found in the shape it "
+                    "was read from"
+                )
+
+                got = self._lines(sp)
+                expected = after.split("\n")
+                assert [x for x in got if x] == [x for x in expected if x], (
+                    f"{where}: asked for {expected[:3]}, got {got[:3]}"
+                )
+                assert len(got) == len(expected) + blank_before, (
+                    f"{where}: {len(got)} lines where "
+                    f"{len(expected) + blank_before} belong"
+                )
+                for tag, was in carried.items():
+                    assert self._count(sp, tag) <= was, (
+                        f"{where}: an edit invented a {tag} -- "
+                        f"{was} -> {self._count(sp, tag)}"
+                    )
+                for body in sp.iter(f"{self.A}txBody"):
+                    assert body.findall(f"{self.A}p"), (
+                        f"{where}: a text body was left with no paragraph at all"
+                    )
+                swept += 1
         return swept
 
     def test_the_adversarial_deck(self, adversarial_deck):
@@ -1681,4 +1723,4 @@ class TestEveryMultiLineShapeEndsWithTheLinesAskedFor:
         if not decks:
             pytest.skip("third-party corpus not present; run scripts/fetch_fixtures.py")
         swept = sum(self._sweep(deck) for deck in decks)
-        assert swept >= 100, f"only {swept} multi-line shapes swept; expected the corpus"
+        assert swept >= 500, f"only {swept} (shape, replacement) pairs swept"
