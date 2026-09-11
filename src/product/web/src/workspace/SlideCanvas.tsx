@@ -194,27 +194,31 @@ function TextBody({ shape }: { shape: Shape }) {
     // Any sentence with a bold word, an emphasised figure or a hyperlink in it
     // was drawn broken, on the view whose only claim is that it is accurate.
     <div className="flex size-full flex-col justify-start overflow-hidden px-1 leading-tight">
-      {paragraphsOf(shape.runs).map((runs, line) => (
-        <p key={line}>{runs.map(renderRun)}</p>
+      {paragraphsOf(shape.runs, shape.paragraph_count).map((runs, line) => (
+        // A line with no runs still needs height, or the lines below it move
+        // up. `\u00a0` rather than an empty <p>, because an empty block
+        // collapses.
+        <p key={line}>{runs.length ? runs.map(renderRun) : "\u00a0"}</p>
       ))}
     </div>
   );
 }
 
-/** Runs grouped into the lines they belong to, in order. */
-function paragraphsOf(runs: Run[]): Run[][] {
-  const lines: Run[][] = [];
-  let current: number | null = null;
-  let line: Run[] = [];
-  for (const run of runs) {
-    if (current !== null && run.paragraph !== current) {
-      lines.push(line);
-      line = [];
-    }
-    current = run.paragraph;
-    line.push(run);
-  }
-  if (line.length) lines.push(line);
+/**
+ * Runs grouped into the lines they belong to, in order — blank lines included.
+ *
+ * `runs` carries only runs with text, so grouping by adjacency drew a shape
+ * with a gap in it as a shape without one: three paragraphs, two lines, and
+ * everything below the gap a line too high. 77 of the 768 text shapes in the
+ * corpus already have a blank line, and until the applier was fixed every
+ * whole-shape edit created more. `paragraph` is an index into *all* the
+ * paragraphs, so the empty ones are exactly the indices no run claims.
+ */
+function paragraphsOf(runs: Run[], paragraphCount: number): Run[][] {
+  const highest = runs.reduce((most, run) => Math.max(most, run.paragraph), -1);
+  const total = Math.max(paragraphCount, highest + 1);
+  const lines: Run[][] = Array.from({ length: total }, () => []);
+  for (const run of runs) lines[run.paragraph]?.push(run);
   return lines;
 }
 
@@ -228,6 +232,24 @@ function renderRun(run: Run, index: number) {
             fontWeight: run.bold ? 600 : undefined,
             fontStyle: run.italic ? "italic" : undefined,
             fontFamily: run.font ?? undefined,
+            // Underline, strikethrough, capitals and baseline are all things a
+            // reader sees and this view used to drop. ALL CAPS is the loudest:
+            // it is a property of the run, so a header reading DIVIDER is
+            // stored as "divider" and drew in lower case here.
+            textDecorationLine: decoration(run) || undefined,
+            textDecorationStyle: run.underline === "dbl" ? "double" : undefined,
+            textTransform:
+              run.caps === "all"
+                ? "uppercase"
+                : run.caps === "small"
+                  ? "lowercase"
+                  : undefined,
+            fontVariantCaps: run.caps === "small" ? "small-caps" : undefined,
+            verticalAlign: run.baseline
+              ? run.baseline > 0
+                ? "super"
+                : "sub"
+              : undefined,
             // Deliberately no colour. This view resolves no fills, so a slide
             // with white text on a dark photograph would render white on white
             // and simply vanish -- the object would look absent rather than
@@ -239,6 +261,14 @@ function renderRun(run: Run, index: number) {
           {run.text}
         </span>
   );
+}
+
+/** Underline and strikethrough together, since CSS takes them on one property. */
+function decoration(run: Run): string {
+  const lines = [];
+  if (run.underline) lines.push("underline");
+  if (run.strike) lines.push("line-through");
+  return lines.join(" ");
 }
 
 function TableBody({ shape }: { shape: Shape }) {
