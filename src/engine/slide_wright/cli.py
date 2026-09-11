@@ -55,7 +55,15 @@ def cmd_inspect(args) -> int:
             kinds[shape.kind] = kinds.get(shape.kind, 0) + 1
         census = " ".join(f"{k}:{v}" for k, v in sorted(kinds.items())) or "empty"
         title = slide.title or "(untitled)"
-        print(f"  {slide.number:>3}  {title[:48]:<48} {slide.word_count:>4}w  {census}")
+        # The notes count is separate and stated, never folded into the slide's.
+        # `word_count` answers "how much is on this page", which every density
+        # rule depends on. But printing only that over a deck like
+        # nasa-bhutan-water -- 983 words on the slides and 2,708 underneath --
+        # describes a sparse deck, and it is not one.
+        script = f" +{slide.notes_word_count}w notes" if slide.has_notes else ""
+        print(
+            f"  {slide.number:>3}  {title[:48]:<48} {slide.word_count:>4}w{script:<14}  {census}"
+        )
         if args.verbose:
             for shape in slide.shapes:
                 pos = ""
