@@ -632,6 +632,25 @@ function useDerived(state: WorkspaceState) {
   }, [state.changeset, state.comparison]);
 
   /**
+   * Slides whose speaker notes differ between the two versions being compared.
+   *
+   * The canvas outlines changed *shapes*, and notes belong to no shape — so
+   * without this a reviewer comparing two versions would see an unmarked slide
+   * and read it as untouched while the script under it had been rewritten.
+   * That is the failure this whole surface exists to prevent, arriving through
+   * the one part of a slide the canvas cannot draw.
+   */
+  const changedNotes = useMemo(
+    () =>
+      new Set(
+        (state.comparison?.deltas ?? [])
+          .filter((d) => d.kind === "notes")
+          .map((d) => d.slide),
+      ),
+    [state.comparison],
+  );
+
+  /**
    * Shapes the user has protected, resolved for the slide on screen.
    *
    * A `slide` lock protects everything on it, so it expands here rather than
@@ -659,6 +678,7 @@ function useDerived(state: WorkspaceState) {
     slide,
     changedSlides,
     changedShapes,
+    changedNotes,
     protectedShapes,
     pending,
     approved,
