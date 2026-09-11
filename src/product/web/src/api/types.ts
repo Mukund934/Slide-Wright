@@ -98,6 +98,14 @@ export interface Slide {
   title: string | null;
   word_count: number;
   shapes: Shape[];
+  /**
+   * What the presenter wrote under the slide.
+   *
+   * Not decoration: on one real deck in the corpus the script is 2,708 words
+   * against 983 on the slides, so a reviewer who has read the canvas has read
+   * 27% of what the deck says.
+   */
+  notes: string;
 }
 
 export interface Deck {

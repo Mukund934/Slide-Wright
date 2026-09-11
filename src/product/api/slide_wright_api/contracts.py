@@ -124,6 +124,12 @@ class SlideOut(BaseModel):
     title: str | None = None
     word_count: int = 0
     shapes: list[ShapeOut] = Field(default_factory=list)
+    #: The presenter's script, paragraphs kept apart.
+    #:
+    #: A reviewer looking at the canvas sees the slide and concludes they have
+    #: seen the slide. On `nasa-bhutan-water` that is 27% of the words on the
+    #: page they are reviewing, and the other 73% are here.
+    notes: str = ""
 
     @classmethod
     def of(cls, slide: SlideInfo) -> SlideOut:
@@ -131,6 +137,7 @@ class SlideOut(BaseModel):
             number=slide.number, part_name=slide.part_name, layout=slide.layout,
             title=slide.title, word_count=slide.word_count,
             shapes=[ShapeOut.of(s) for s in slide.shapes],
+            notes=slide.notes,
         )
 
 
