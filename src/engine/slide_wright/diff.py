@@ -218,7 +218,49 @@ def _diff_shape(number: int, old: ShapeInfo, new: ShapeInfo, result: DeckDiff) -
             (old.table_rows, old.table_cols), (new.table_rows, new.table_cols))
 
     _diff_geometry(old, new, add)
+    _diff_paragraphs(old, new, add)
     _diff_formatting(old, new, add)
+
+
+def _diff_paragraphs(old: ShapeInfo, new: ShapeInfo, add) -> None:
+    """Compare the shape's line structure, which no comparison here could see.
+
+    `runs` holds only runs with text, so `ShapeInfo.text` cannot distinguish a
+    shape whose four bullets became one from a shape whose four bullets became
+    one bullet and three blank ones. Both read back as the same string, and the
+    diff said *0 change how it looks* over a slide that had grown three empty
+    bullet points.
+
+    That is not a hypothetical: a typed edit in the workspace carries no
+    `before`, so it replaces the whole shape, and `_replace_slots` empties every
+    run the replaced span covered. On a four-line placeholder in a real deck
+    that left three blank paragraphs behind, each still drawing the bullet it
+    inherits from the layout.
+
+    Counted rather than paired: a scalar needs no run correspondence, so unlike
+    the formatting comparison this one is meaningful *precisely* when the text
+    changed, which is the only case it exists for.
+    """
+    if "table" in (old.kind, new.kind):
+        # `.//a:p` inside a graphicFrame finds every cell's paragraphs, so this
+        # count would describe the grid rather than a line of text. The table
+        # delta already reports shape changes there.
+        return
+
+    before, after = old.paragraph_count, new.paragraph_count
+    blank_before = before - len({r.paragraph for r in old.runs})
+    blank_after = after - len({r.paragraph for r in new.runs})
+    if (before, blank_before) == (after, blank_after):
+        return
+
+    if before != after and blank_before != blank_after:
+        summary = (f"text lines {before} -> {after}, "
+                   f"blank {blank_before} -> {blank_after}")
+    elif before != after:
+        summary = f"text lines {before} -> {after}"
+    else:
+        summary = f"blank lines {blank_before} -> {blank_after}"
+    add("formatting", summary, (before, blank_before), (after, blank_after))
 
 
 def _diff_geometry(old: ShapeInfo, new: ShapeInfo, add) -> None:

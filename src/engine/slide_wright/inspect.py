@@ -83,6 +83,16 @@ class ShapeInfo:
     # it was replacing, and a `numbers` lock could not see the figures inside.
     table_cells: dict[str, str] = field(default_factory=dict)
     child_count: int = 0
+    #: Every `<a:p>` in the shape, including the ones holding no text.
+    #:
+    #: `runs` carries only runs with text, so a paragraph left empty is absent
+    #: from `text` and from every comparison built on it. That is the right
+    #: reading for "what does this shape say" and the wrong one for "what does
+    #: this shape look like": an empty paragraph in a body placeholder still
+    #: draws its bullet. Counting them is what lets the diff tell a shape whose
+    #: four lines became one from a shape whose four lines became one line and
+    #: three blanks.
+    paragraph_count: int = 0
     # True when x/y/cx/cy came from the layout or master rather than the slide.
     # The shape really is there; it just has no position of its own, which is
     # why the applier refuses to move it.
@@ -517,7 +527,9 @@ def _read_shape(el, links: dict[str, str] | None = None) -> ShapeInfo | None:
             1 for c in el if etree.QName(c).localname in {"sp", "pic", "grpSp", "graphicFrame", "cxnSp"}
         )
 
-    for index, para in enumerate(el.findall(".//a:p", NS)):
+    paragraphs = el.findall(".//a:p", NS)
+    shape.paragraph_count = len(paragraphs)
+    for index, para in enumerate(paragraphs):
         for r in para.findall(".//a:r", NS):
             t = r.find("a:t", NS)
             if t is None or not t.text:
