@@ -12,7 +12,9 @@
  *
  *   · **content** — what the deck says. Text, table shape, slides added or
  *     removed. A tidy that produces one of these has failed.
- *   · **presentation** — how it looks. Typeface, colour, position, size.
+ *   · **presentation** — how it looks. Typeface, colour, position, size,
+ *     and the line a sentence sits on: its bullet, indent, alignment,
+ *     spacing, and how many lines the shape ends up with.
  *
  * That split is the engine's (`ShapeDelta.is_content`), not this component's.
  * A surface that decided for itself which changes were "real" would be a second
@@ -145,7 +147,7 @@ export function DiffPanel({
           {presentation.length > 0 && (
             <Group
               title="Changes how it looks"
-              note="Typeface, colour, position, size."
+              note="Typeface, colour, position, size, and how the lines sit."
               deltas={presentation}
               onGoTo={onGoTo}
             />
