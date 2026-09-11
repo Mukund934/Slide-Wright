@@ -497,15 +497,19 @@ def _paragraph_like(template, text: str):
     list means a bullet, and a paragraph assembled from nothing would arrive
     unstyled in a deck whose whole promise is that it still looks like itself.
 
-    The hyperlink does not carry, and it is the one thing here that must not.
-    Cloning a linked line made the new line point at the same target: an edit
-    creating a link nobody asked for, which is the same category of wrong as an
-    edit destroying one, arriving from the other direction. Styling describes
-    the line; a link is what the deck *does*.
+    Three things do not carry, and they are the three that must not. A
+    **hyperlink** would make the new line point at a target nobody named. A
+    **field** -- a slide number, a date, a footer -- would put a second copy of
+    it on the slide, and it is not rare: 156 paragraphs across 6 of the 26 real
+    decks contain one. An explicit **line break** would leave a gap the user
+    never typed. All three are things the deck *does*, as against how it looks,
+    and an edit that invents one is the same category of wrong as an edit that
+    destroys one.
     """
     clone = copy.deepcopy(template)
-    for link in clone.findall(f".//a:hlinkClick", NS):
-        link.getparent().remove(link)
+    for tag in ("hlinkClick", "fld", "br"):
+        for element in clone.findall(f".//a:{tag}", NS):
+            element.getparent().remove(element)
     runs = clone.findall("a:r", NS)
     for extra in runs[1:]:
         clone.remove(extra)
