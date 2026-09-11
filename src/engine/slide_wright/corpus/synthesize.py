@@ -165,6 +165,18 @@ def _slide_split_runs(prs: Presentation) -> None:
         run.font.bold = bold
         run.font.size = Pt(14)
 
+    caps = s.shapes.add_textbox(Inches(1), Inches(5), Inches(11), Inches(0.6)).text_frame
+    for text, all_caps in (("Section ", False), ("divider", True)):
+        run = caps.paragraphs[0].add_run()
+        run.text = text
+        run.font.size = Pt(18)
+        if all_caps:
+            # python-pptx has no accessor for `cap`, and this is the point of
+            # the fixture: a run that says one thing on the slide and another in
+            # the XML. Every `cap` in the 26 real decks is `cap="none"`, so a
+            # comparison written against them could never fire.
+            run.font._rPr.set("cap", "all")
+
     _source_note(s, "Source: synthetic, for run-boundary coverage")
 
 
