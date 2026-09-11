@@ -17,7 +17,7 @@ class TestInspect:
     def test_lists_slides_and_constructs(self, adversarial_deck, capsys):
         assert main(["inspect", str(adversarial_deck)]) == EXIT_OK
         out = capsys.readouterr().out
-        assert "7 slides" in out
+        assert "8 slides" in out
         assert "Trading comparables" in out
         assert "table:1" in out and "chart:1" in out
 

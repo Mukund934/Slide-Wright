@@ -21,7 +21,7 @@ from slide_wright.package import (
 class TestOpen:
     def test_reads_parts_and_slides(self, adversarial_deck):
         pkg = Package.open(adversarial_deck)
-        assert pkg.slide_count == 7
+        assert pkg.slide_count == 8
         assert pkg.part_count > 40
         assert "[Content_Types].xml" in pkg.parts
 

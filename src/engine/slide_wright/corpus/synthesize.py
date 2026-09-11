@@ -46,6 +46,7 @@ def build_adversarial(out_path: str | Path) -> Path:
     _slide_custom_geometry(prs)       # <a:custGeom>
     _slide_hyperlinks_and_notes(prs)  # <a:hlinkClick> + notesSlide
     _slide_split_runs(prs)            # one sentence, several <a:r>
+    _slide_bulleted_body(prs)         # several <a:p> in one placeholder
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(out_path))
@@ -165,6 +166,39 @@ def _slide_split_runs(prs: Presentation) -> None:
         run.font.size = Pt(14)
 
     _source_note(s, "Source: synthetic, for run-boundary coverage")
+
+
+def _slide_bulleted_body(prs: Presentation) -> None:
+    """A body placeholder holding several bullets. The most ordinary shape there is.
+
+    The corpus had no such shape. It had a table whose cells are paragraphs and
+    a group whose children each hold one, and neither is a text body with lines
+    in it -- so the question "what happens to the other lines when this shape is
+    edited" had never been asked of a deck.
+
+    The answer was that they stayed, emptied: a four-line placeholder set to one
+    line came back as one line and three blank paragraphs, each still drawing
+    the bullet it inherits from the layout. `ShapeInfo.text` reads runs, an
+    emptied run is not one, so the text read back clean and the diff said *0
+    change how it looks*.
+
+    It is the ordinary path and not a corner. `SetSpec` carries no `before`, so
+    every typed edit in the workspace replaces the whole shape, and a bulleted
+    body is what a professional deck is mostly made of.
+    """
+    s = prs.slides.add_slide(prs.slide_layouts[1])
+    s.shapes.title.text = "Bulleted body (several paragraphs, one shape)"
+
+    frame = s.placeholders[1].text_frame
+    lines = (
+        "Margin held at 42% through the period",
+        "Headcount fell to 310 from 344",
+        "Cash runway 18 months at the current burn",
+        "Renewal rate unchanged year on year",
+    )
+    frame.text = lines[0]
+    for line in lines[1:]:
+        frame.add_paragraph().text = line
 
 
 def _slide_grouped_shapes(prs: Presentation) -> None:
