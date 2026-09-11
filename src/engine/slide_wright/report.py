@@ -274,7 +274,10 @@ def _slide_part_count(f: FidelityReport) -> int:
 #: Which delta kinds each scope forbids in the output. `slide`, `shape` and the
 #: three exhibit scopes are matched by location instead, below.
 _FORBIDDEN_KINDS = {
-    "wording": {"text", "table", "added", "removed"},
+    # `notes` belongs here for the plainest possible reason: the lock's own
+    # sentence is "leave my words exactly as written", and a presenter's script
+    # is words they wrote. On one real deck it is 73% of them.
+    "wording": {"text", "notes", "table", "added", "removed"},
     "layout": {"geometry", "size"},
     "formatting": {"formatting"},
 }

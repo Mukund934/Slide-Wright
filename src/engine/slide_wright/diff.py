@@ -43,7 +43,7 @@ class ShapeDelta:
 
     slide: int
     shape_id: str
-    kind: str            # text | geometry | size | formatting | link | table | added | removed
+    kind: str            # text | notes | geometry | size | formatting | link | table | added | removed
     description: str
     before: object = None
     after: object = None
@@ -62,8 +62,13 @@ class ShapeDelta:
 
     @property
     def is_content(self) -> bool:
-        """Content changes alter what the deck says. Everything else is presentation."""
-        return self.kind in {"text", "table", "added", "removed", "link"}
+        """Content changes alter what the deck says. Everything else is presentation.
+
+        `notes` counts. A presenter's script is words somebody wrote, and the
+        question this property answers is whether the deck still says what it
+        said -- not whether the change is visible from the back of the room.
+        """
+        return self.kind in {"text", "notes", "table", "added", "removed", "link"}
 
     @property
     def changes_figures(self) -> bool:
@@ -187,6 +192,38 @@ def _diff_slide(number: int, before, after, result: DeckDiff) -> None:
         ))
     for shape_id in sorted(set(old) & set(new)):
         _diff_shape(number, old[shape_id], new[shape_id], result)
+
+    _diff_notes(number, before, after, result)
+
+
+def _diff_notes(number: int, before, after, result: DeckDiff) -> None:
+    """What the presenter wrote under the slide.
+
+    Notes live in their own part, so an edit never touches them and `verify`
+    already compares them byte for byte. What nothing could do was say *what*
+    changed in them, and that gap reached further than it looks: every
+    verifier-side lock is a question put to this module, so `wording` --
+    "leave my words exactly as written" -- was silent about a third of the
+    words in a real deck.
+
+    On `nasa-bhutan-water`, the deck this project quotes for *"272 corrections,
+    0 change what the deck says"*, there are 2,708 words of speaker script
+    against 983 on the slides. The claim was true and measured over 27% of what
+    the deck says.
+
+    Its own kind, rather than `text`: a reviewer needs to know the change is in
+    the script and not on the page, and a delta that said "text" with no shape
+    to point at would read as a shape edit. It is content all the same -- words
+    a person wrote, which is the test `is_content` applies.
+    """
+    if before.notes == after.notes:
+        return
+    result.deltas.append(ShapeDelta(
+        slide=number, shape_id="", kind="notes",
+        description=f"speaker notes {_describe_text_change(before.notes, after.notes)}",
+        summary=f"speaker notes {_describe_text_change(before.notes, after.notes)}",
+        before=before.notes, after=after.notes,
+    ))
 
 
 def _diff_shape(number: int, old: ShapeInfo, new: ShapeInfo, result: DeckDiff) -> None:
