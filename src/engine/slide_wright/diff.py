@@ -250,17 +250,57 @@ def _diff_paragraphs(old: ShapeInfo, new: ShapeInfo, add) -> None:
     before, after = old.paragraph_count, new.paragraph_count
     blank_before = before - len({r.paragraph for r in old.runs})
     blank_after = after - len({r.paragraph for r in new.runs})
-    if (before, blank_before) == (after, blank_after):
-        return
+    if (before, blank_before) != (after, blank_after):
+        if before != after and blank_before != blank_after:
+            summary = (f"text lines {before} -> {after}, "
+                       f"blank {blank_before} -> {blank_after}")
+        elif before != after:
+            summary = f"text lines {before} -> {after}"
+        else:
+            summary = f"blank lines {blank_before} -> {blank_after}"
+        add("formatting", summary, (before, blank_before), (after, blank_after))
 
-    if before != after and blank_before != blank_after:
-        summary = (f"text lines {before} -> {after}, "
-                   f"blank {blank_before} -> {blank_after}")
-    elif before != after:
-        summary = f"text lines {before} -> {after}"
-    else:
-        summary = f"blank lines {blank_before} -> {blank_after}"
-    add("formatting", summary, (before, blank_before), (after, blank_after))
+    if before == after:
+        _diff_paragraph_properties(old, new, add)
+
+
+#: How a line sits, and what to call each of them in a sentence a reviewer reads.
+PARAGRAPH_ATTRIBUTES = (("bullet", "bullet"), ("level", "indent level"),
+                        ("alignment", "alignment"), ("line_spacing", "line spacing"))
+
+
+def _diff_paragraph_properties(old: ShapeInfo, new: ShapeInfo, add) -> None:
+    """Compare how each line sits, when the two shapes still have the same lines.
+
+    Paired by index, which is sound only while the counts agree -- and when they
+    do not, the delta above has already said so, so nothing is passed over in
+    silence. That is the difference from the run comparison, where returning
+    early on a count mismatch produced *"no structural differences"* over a deck
+    whose figure had lost its bold.
+
+    Measured across the corpus, these are not rare: 1,635 explicitly aligned
+    paragraphs in 10 of 26 decks, 1,137 that declare a bullet in 8, 707 that set
+    their own line spacing, 212 indented. Nothing in the engine writes any of
+    them today. An edit *moves text between* them -- a replacement spanning two
+    bullets leaves its tail under the first one's bullet and indent -- so the
+    line a sentence sits on can change without the sentence changing.
+    """
+    for index, (a, b) in enumerate(zip(old.paragraphs, new.paragraphs)):
+        for attribute, label in PARAGRAPH_ATTRIBUTES:
+            was, now = getattr(a, attribute), getattr(b, attribute)
+            if was == now:
+                continue
+            add("formatting", f"{label} {_shown(was)} -> {_shown(now)}",
+                was, now, where=f" line {index + 1}")
+
+
+def _shown(value: object) -> str:
+    """A paragraph property as a reader would see it named.
+
+    None is *inherited*, not *absent*: a line with no `<a:pPr>` takes the
+    property from its layout, and printing "None" would read as "nothing".
+    """
+    return "inherited" if value is None else str(value)
 
 
 def _diff_geometry(old: ShapeInfo, new: ShapeInfo, add) -> None:
