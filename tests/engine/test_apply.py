@@ -1388,6 +1388,39 @@ class TestAShapeEndsWithTheLinesItWasAskedFor:
             for para in shape.findall(f"{self.A}p")
         ), "a line added to a bulleted list means a bullet"
 
+    def test_a_line_added_after_a_linked_one_points_nowhere(self):
+        """Mine, from this fix: an edit must not invent a hyperlink either.
+
+        The new paragraph is cloned from the line above so the bullet and the
+        styling carry. A link is not styling -- it is what the deck *does* --
+        and cloning one made a line the user typed point at a target they never
+        named. The same category of wrong as an edit destroying a link, from the
+        other direction.
+        """
+        from lxml import etree
+
+        from slide_wright.apply import _set_text
+
+        shape = etree.fromstring(
+            '<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+            ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+            ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            "<a:p><a:r><a:rPr/><a:t>Alpha</a:t></a:r></a:p>"
+            '<a:p><a:r><a:rPr><a:hlinkClick r:id="rId9"/></a:rPr>'
+            "<a:t>Beta</a:t></a:r></a:p></p:sp>"
+        )
+        assert _set_text(shape, "Alpha\nBeta", "Alpha\nBeta\nGamma")
+        paragraphs = shape.findall(f"{self.A}p")
+        assert [p.find(f".//{self.A}t").text for p in paragraphs] == [
+            "Alpha", "Beta", "Gamma",
+        ]
+        assert paragraphs[1].find(f".//{self.A}hlinkClick") is not None, (
+            "the line that had the link keeps it"
+        )
+        assert paragraphs[2].find(f".//{self.A}hlinkClick") is None, (
+            "the line that was added must not have acquired one"
+        )
+
     def test_a_line_the_span_never_reached_keeps_its_own_text(self):
         from slide_wright.apply import _set_text
 
