@@ -339,6 +339,7 @@ RUN_ATTRIBUTES = (("size_pt", "size", "formatting"), ("bold", "bold", "formattin
                   ("underline", "underline", "formatting"),
                   ("strike", "strikethrough", "formatting"),
                   ("baseline", "baseline", "formatting"),
+                  ("caps", "capitals", "formatting"),
                   ("font", "font", "formatting"),
                   ("color", "colour", "formatting"), ("link", "link", "link"))
 

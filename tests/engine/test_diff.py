@@ -731,3 +731,66 @@ class TestInheritedIsNotAbsent:
             "<a:r><a:t>Alpha</a:t></a:r></a:p>"
         )
         assert _paragraph(para).bullet == "none"
+
+
+class TestCapitalsAreReadAndCompared:
+    """A run that says one thing on the slide and another in the XML.
+
+    `cap="all"` is the ninth attribute on the same element as `bold` and
+    `italic`, and like the three found on 8 Sep it was not read. It is the one
+    with the loudest effect: a section header reading DIVIDER is stored as
+    "divider", so a text edit that moves its words into a neighbouring run
+    changes what a reader sees while changing no character of the text.
+
+    Measured first, and the measurement is why the corpus had to change: every
+    one of the 363 `cap` attributes across the 26 real decks is `cap="none"`,
+    the off state. A comparison written against them could never fire, which
+    reads as coverage and is not -- so the adversarial deck now carries a run
+    that is genuinely ALL CAPS.
+    """
+
+    def _caps_run(self, deck):
+        return next(
+            (sl.number, sh)
+            for sl in inspect(deck).slides
+            for sh in sl.shapes
+            if any(r.caps for r in sh.runs)
+        )
+
+    def test_the_corpus_carries_a_run_that_is_actually_capitalised(
+        self, adversarial_deck
+    ):
+        _, shape = self._caps_run(adversarial_deck)
+        assert [r.caps for r in shape.runs] == [None, "all"], (
+            "the fixture is the whole point; without it nothing below can fail"
+        )
+
+    def test_an_edit_that_takes_the_capitals_off_says_so(
+        self, adversarial_deck, tmp_path
+    ):
+        number, shape = self._caps_run(adversarial_deck)
+        out = tmp_path / "o.pptx"
+        apply_changes(adversarial_deck, approved(adversarial_deck, Change(
+            id="c", op=Op.SET_TEXT, slide=number, target=shape.id,
+            before=shape.text, after="Section header",
+        )), out)
+
+        summaries = [d.summary for d in diff(adversarial_deck, out).deltas]
+        assert any("capitals" in x for x in summaries), (
+            f"the deck lost its ALL CAPS and the diff said {summaries}"
+        )
+
+    def test_an_off_state_is_not_a_difference(self):
+        """`cap="none"` renders identically to no attribute at all.
+
+        363 runs in the corpus carry it. Reporting the two apart would produce a
+        difference nobody can see, which is the reasoning already written down
+        for underline, strikethrough and baseline.
+        """
+        from lxml import etree
+
+        from slide_wright.inspect import _off
+
+        assert _off("none", "none") is None
+        assert _off(None, "none") is None
+        assert _off("all", "none") == "all"
