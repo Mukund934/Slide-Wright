@@ -28,6 +28,7 @@ import { History } from "./workspace/History";
 import { OpenDeck } from "./workspace/OpenDeck";
 import { Protect, ProtectedList } from "./workspace/Protect";
 import { SlideCanvas } from "./workspace/SlideCanvas";
+import { SpeakerNotes } from "./workspace/SpeakerNotes";
 import { SourcesPanel } from "./workspace/SourcesPanel";
 import { VerificationPanel } from "./workspace/VerificationPanel";
 
@@ -108,6 +109,13 @@ export default function App() {
             be doing on a small screen anyway. */}
         <main className="hidden min-w-0 flex-1 flex-col md:flex">
           <Stage workspace={workspace} />
+          {/* Under the slide, where PowerPoint puts them and where a reviewer
+              looks for them. Absent when the slide has none, so the region
+              never becomes something people learn to skip. */}
+          <SpeakerNotes
+            notes={workspace.slide?.notes ?? ""}
+            changed={workspace.changedNotes.has(workspace.selectedSlide)}
+          />
         </main>
 
         <aside className="flex min-w-0 flex-1 flex-col border-l border-line bg-panel md:w-64 md:flex-none lg:w-72 xl:w-80 2xl:w-96">
