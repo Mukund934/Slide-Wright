@@ -49,6 +49,13 @@ class TextRun:
     underline: str | None = None
     strike: str | None = None
     baseline: int | None = None
+    #: Capitalisation as OOXML states it -- "all" or "small". A run set to ALL
+    #: CAPS says one thing on the slide and another in the XML, so a text edit
+    #: that moves its words into a neighbouring run changes what a reader sees
+    #: while changing no character of the text. "none" normalises to None for
+    #: the same reason the other off states do: it renders identically to an
+    #: absent attribute, and every one of the 363 in the corpus is that.
+    caps: str | None = None
     #: Which paragraph of the shape this run belongs to. Only `ShapeInfo.text`
     #: uses it, and only to know where one line ends and the next begins.
     paragraph: int = 0
@@ -611,6 +618,7 @@ def _read_shape(el, links: dict[str, str] | None = None) -> ShapeInfo | None:
                 clr = rpr.find(".//a:srgbClr", NS)
                 if clr is not None:
                     run.color = clr.get("val")
+                run.caps = _off(rpr.get("cap"), "none")
                 run.underline = _off(rpr.get("u"), "none")
                 run.strike = _off(rpr.get("strike"), "noStrike")
                 baseline = rpr.get("baseline")
