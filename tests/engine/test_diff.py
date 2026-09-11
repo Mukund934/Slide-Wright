@@ -568,3 +568,166 @@ class TestEmphasisLostToATextEdit:
         lost = [d for d in self._rewrite(src, tmp_path, "Revenue grew 20%").deltas
                 if "no longer used" in d.summary]
         assert lost and all(not d.is_content for d in lost)
+
+
+class TestHowALineSitsIsCompared:
+    """Bullets, indent, alignment and line spacing — none of them were read.
+
+    The diff compared eight run attributes and nothing at all about the
+    paragraph a run sits in, so a deck whose bullets had been taken off, whose
+    body had been centred, or whose lines had been tightened came back *"no
+    structural differences"*. Every verifier-side lock is a question put to this
+    module, so a property it cannot compute is a property no lock can protect --
+    including `formatting`, whose whole sentence is *leave my styling exactly as
+    it is*.
+
+    Measured across the corpus before building it: 1,635 explicitly aligned
+    paragraphs in 10 of 26 decks, 1,137 declaring a bullet in 8, 707 setting
+    their own line spacing, 212 indented.
+    """
+
+    A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+
+    def _bulleted_part(self, deck) -> str:
+        import re
+        import zipfile
+
+        with zipfile.ZipFile(deck) as z:
+            for name in sorted(z.namelist()):
+                if re.match(r"^ppt/slides/slide\d+\.xml$", name) and b"Margin held" in z.read(name):
+                    return name
+        raise AssertionError("the corpus has no bulleted body to ask about")
+
+    def _variant(self, deck, out, mutate):
+        """The same deck with one slide part rewritten. Nothing else moves."""
+        import zipfile
+
+        from lxml import etree
+
+        part = self._bulleted_part(deck)
+        with zipfile.ZipFile(deck) as src, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+            for item in src.infolist():
+                data = src.read(item.filename)
+                if item.filename == part:
+                    root = etree.fromstring(data)
+                    paragraph = next(
+                        para for para in root.iter(f"{self.A}p")
+                        if para.findall(f".//{self.A}t")
+                    )
+                    mutate(paragraph, etree)
+                    data = etree.tostring(root, xml_declaration=True, encoding="UTF-8",
+                                          standalone=True)
+                dst.writestr(item, data)
+        return out
+
+    def _pPr(self, paragraph, etree):
+        existing = paragraph.find(f"{self.A}pPr")
+        if existing is not None:
+            return existing
+        created = etree.Element(f"{self.A}pPr")
+        paragraph.insert(0, created)
+        return created
+
+    def _summaries(self, deck, out):
+        return [d.summary for d in diff(deck, out).deltas]
+
+    def test_a_bullet_taken_off_is_reported(self, adversarial_deck, tmp_path):
+        out = self._variant(
+            adversarial_deck, tmp_path / "o.pptx",
+            lambda para, etree: etree.SubElement(self._pPr(para, etree), f"{self.A}buNone"),
+        )
+        assert "bullet inherited -> none" in self._summaries(adversarial_deck, out)
+
+    def test_a_line_centred_is_reported(self, adversarial_deck, tmp_path):
+        out = self._variant(
+            adversarial_deck, tmp_path / "o.pptx",
+            lambda para, etree: self._pPr(para, etree).set("algn", "ctr"),
+        )
+        assert "alignment inherited -> ctr" in self._summaries(adversarial_deck, out)
+
+    def test_an_indent_level_is_reported(self, adversarial_deck, tmp_path):
+        out = self._variant(
+            adversarial_deck, tmp_path / "o.pptx",
+            lambda para, etree: self._pPr(para, etree).set("lvl", "2"),
+        )
+        assert "indent level 0 -> 2" in self._summaries(adversarial_deck, out)
+
+    def test_tighter_line_spacing_is_reported(self, adversarial_deck, tmp_path):
+        def tighten(para, etree):
+            spacing = etree.SubElement(self._pPr(para, etree), f"{self.A}lnSpc")
+            etree.SubElement(spacing, f"{self.A}spcPct").set("val", "80000")
+
+        out = self._variant(adversarial_deck, tmp_path / "o.pptx", tighten)
+        assert "line spacing inherited -> 80%" in self._summaries(adversarial_deck, out)
+
+    def test_it_is_how_the_deck_looks_not_what_it_says(self, adversarial_deck, tmp_path):
+        out = self._variant(
+            adversarial_deck, tmp_path / "o.pptx",
+            lambda para, etree: self._pPr(para, etree).set("algn", "ctr"),
+        )
+        result = diff(adversarial_deck, out)
+        assert result.deltas and not result.content_deltas, (
+            "moving a line is presentation; it changes nothing the deck says"
+        )
+
+    def test_the_line_is_named(self, adversarial_deck, tmp_path):
+        out = self._variant(
+            adversarial_deck, tmp_path / "o.pptx",
+            lambda para, etree: self._pPr(para, etree).set("algn", "ctr"),
+        )
+        delta = next(d for d in diff(adversarial_deck, out).deltas if "alignment" in d.summary)
+        assert " line 1 " in delta.description, (
+            "a shape with four lines needs to say which one moved"
+        )
+
+    def test_properties_are_not_paired_when_the_lines_changed(
+        self, adversarial_deck, tmp_path
+    ):
+        """Index pairing is only sound while the counts agree.
+
+        When they do not, the count delta has already said so -- which is the
+        difference from the run comparison, where an early return on a count
+        mismatch produced *"no structural differences"* over a deck whose figure
+        had lost its bold.
+        """
+        def drop(para, etree):
+            self._pPr(para, etree).set("algn", "ctr")
+            para.getparent().remove(para)
+
+        out = self._variant(adversarial_deck, tmp_path / "o.pptx", drop)
+        summaries = self._summaries(adversarial_deck, out)
+        assert any("text lines" in x for x in summaries), "the lost line must be reported"
+        assert not any("alignment" in x for x in summaries), (
+            "lines cannot be paired by index once one of them has gone"
+        )
+
+
+class TestInheritedIsNotAbsent:
+    """A line with no properties of its own takes them from its layout."""
+
+    def test_a_paragraph_with_no_properties_reads_as_inherited(self):
+        from lxml import etree
+
+        from slide_wright.inspect import _paragraph
+
+        A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        para = etree.fromstring(
+            f'<a:p xmlns:a="{A[1:-1]}"><a:r><a:t>Alpha</a:t></a:r></a:p>'
+        )
+        info = _paragraph(para)
+        assert (info.level, info.alignment, info.bullet, info.line_spacing) == (
+            0, None, None, None,
+        )
+
+    def test_an_off_state_is_a_value_not_an_absence(self):
+        """`buNone` is a decision. It is not the same as saying nothing."""
+        from lxml import etree
+
+        from slide_wright.inspect import _paragraph
+
+        A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+        para = etree.fromstring(
+            f'<a:p xmlns:a="{A[1:-1]}"><a:pPr><a:buNone/></a:pPr>'
+            "<a:r><a:t>Alpha</a:t></a:r></a:p>"
+        )
+        assert _paragraph(para).bullet == "none"
