@@ -17,6 +17,7 @@ silently widening its blast radius.
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 import shutil
@@ -349,18 +350,166 @@ def _set_text(shape, before: str, after: str) -> bool:
     # 3. The span crosses paragraphs. The joined view puts a newline between
     #    them, exactly as `ShapeInfo.text` does -- the two have to agree, or a
     #    `before` read off the deck could not be found in it.
-    slots: list[tuple] = []
-    previous: int | None = None
-    for index, para in enumerate(paragraphs):
-        for run in para.findall("a:r", NS):
-            element = run.find("a:t", NS)
-            if element is None or not element.text:
-                continue
-            if previous is not None and index != previous:
-                slots.append((None, "\n"))
-            slots.append((element, element.text))
-            previous = index
-    return _replace_slots(slots, before, after)
+    return _replace_across_paragraphs(paragraphs, before, after)
+
+
+def _replace_across_paragraphs(paragraphs, before: str, after: str) -> bool:
+    """Replace a span that crosses paragraphs, and end with the lines it asks for.
+
+    A newline in this view is a paragraph boundary, so a replacement's newlines
+    have to become paragraphs and a replacement with fewer of them has to leave
+    fewer behind. Writing the whole thing into one run and emptying the rest is
+    right about the words and wrong about the shape: a four-line placeholder set
+    to one line came back as one line plus **three empty paragraphs**, each
+    still drawing the bullet it inherits from the layout, and `ShapeInfo.text`
+    could not see them because it reads runs and an emptied run is not one.
+
+    It matters because every typed edit in the workspace arrives here. `SetSpec`
+    carries no `before`, so the API fills it with the shape's whole text, and a
+    body placeholder is the most ordinary shape in a deck.
+
+    The other half is the same mistake facing the other way: a literal newline
+    written into an `<a:t>` is not a line break in OOXML, and reading it back
+    gives a string indistinguishable from two paragraphs. The engine could not
+    tell its own two outcomes apart.
+
+    Formatting is preserved run by run wherever the structure allows it. Text
+    that has to *move* between paragraphs -- the tail of the last covered
+    paragraph, when the paragraphs under it are being removed or added -- keeps
+    its words and not its styling, which is the same trade `_set_text` has
+    always documented for a span that crosses differently formatted runs.
+    """
+    entries = []          # [a:p element, [writable (a:t, text)], joined text]
+    for para in paragraphs:
+        slots = [
+            (t, t.text)
+            for t in (r.find("a:t", NS) for r in para.findall("a:r", NS))
+            if t is not None and t.text
+        ]
+        if slots:
+            entries.append([para, slots, "".join(text for _, text in slots)])
+    if not entries:
+        return False
+
+    joined = "\n".join(text for _, _, text in entries)
+    start = joined.find(before) if before else -1
+    if start < 0:
+        return False
+    end = start + len(before)
+
+    # Which entries the span touches, and where inside them it begins and ends.
+    offsets, cursor = [], 0
+    for _, _, text in entries:
+        offsets.append(cursor)
+        cursor += len(text) + 1          # +1 for the separator after it
+    first = max(i for i, off in enumerate(offsets) if off <= start)
+    last = max(i for i, off in enumerate(offsets) if off <= end)
+    head_at = start - offsets[first]
+    tail_at = end - offsets[last]
+    tail = entries[last][2][tail_at:]
+
+    lines = after.split("\n")
+    covered = last - first + 1
+    reused = min(len(lines), covered)
+
+    # A tail that cannot stay where it is has to travel with the last line.
+    carry = len(lines) > covered and bool(tail)
+    template = copy.deepcopy(entries[last][0]) if len(lines) > covered else None
+
+    for k in range(reused):
+        _, slots, text = entries[first + k]
+        lo = head_at if k == 0 else 0
+        at_last_covered = first + k == last
+        hi = tail_at if at_last_covered and not carry else len(text)
+        payload = lines[k]
+        if k == reused - 1 and not at_last_covered and not carry:
+            payload += tail          # the paragraphs below are about to go
+        _write_span(slots, lo, hi, payload)
+
+    if len(lines) < covered:
+        for element, _, _ in entries[first + reused:last + 1]:
+            _drop_paragraph(element)
+    elif len(lines) > covered:
+        extra = lines[covered:]
+        if carry:
+            extra = extra[:-1] + [extra[-1] + tail]
+        anchor = entries[last][0]
+        for line in extra:
+            anchor.addnext(_paragraph_like(template, line))
+            anchor = anchor.getnext()
+    return True
+
+
+def _write_span(slots, lo: int, hi: int, after: str) -> bool:
+    """Replace `[lo, hi)` of a run sequence's joined text, run by run.
+
+    The run holding the start keeps its prefix and receives `after`; the run
+    holding the end keeps its suffix; runs entirely inside are emptied. A run
+    the span does not reach keeps its text and its formatting, which is what
+    makes the promise checkable at run granularity rather than only at slide
+    granularity.
+
+    `lo == hi` is an insertion, not a no-op. It arrives whenever a replacement
+    begins on a paragraph boundary -- "\ndef" covers no character of the
+    paragraph above it -- and the first version of this dropped the replacement
+    on the floor and removed the paragraph below, so a deck lost a line and
+    gained nothing.
+    """
+    offset, written = 0, False
+    for element, text in slots:
+        slot_start, slot_end = offset, offset + len(text)
+        offset = slot_end
+        if element is None:
+            continue
+        covers = slot_start < hi and slot_end > lo
+        if not covers and not (lo == hi and slot_start <= lo <= slot_end):
+            continue
+        prefix = text[: lo - slot_start] if slot_start < lo else ""
+        suffix = text[hi - slot_start:] if slot_end > hi else ""
+        element.text = prefix + after + suffix if not written else prefix + suffix
+        written = True
+    return written
+
+
+def _drop_paragraph(para) -> None:
+    """Remove a paragraph, unless it is the only one its body has.
+
+    A `<a:txBody>` and a table cell both require at least one `<a:p>`, and a
+    deck that opens is the floor everything else here stands on. Emptying is the
+    fallback, and it is the right answer when it is the last one: a shape with
+    one line set to nothing is a shape with one empty line.
+    """
+    parent = para.getparent()
+    if parent is None:
+        return
+    if len(parent.findall("a:p", NS)) <= 1:
+        for t in para.findall(".//a:t", NS):
+            t.text = ""
+        return
+    parent.remove(para)
+
+
+def _paragraph_like(template, text: str):
+    """A new paragraph carrying `template`'s properties and one run of `text`.
+
+    Cloned rather than built, so the bullet, indent, alignment and run styling
+    of the line it follows all carry -- a user who adds a line to a bulleted
+    list means a bullet, and a paragraph assembled from nothing would arrive
+    unstyled in a deck whose whole promise is that it still looks like itself.
+    """
+    clone = copy.deepcopy(template)
+    runs = clone.findall("a:r", NS)
+    for extra in runs[1:]:
+        clone.remove(extra)
+    if runs:
+        t = runs[0].find("a:t", NS)
+        if t is None:
+            t = etree.SubElement(runs[0], "{%s}t" % NS["a"])
+        t.text = text
+    else:
+        run = etree.SubElement(clone, "{%s}r" % NS["a"])
+        etree.SubElement(run, "{%s}t" % NS["a"]).text = text
+    return clone
 
 
 def _replace_within(runs, before: str, after: str) -> bool:
@@ -385,14 +534,11 @@ def _replace_within(runs, before: str, after: str) -> bool:
 
 
 def _replace_slots(slots, before: str, after: str) -> bool:
-    """Replace `before` across a sequence of writable and unwritable pieces.
+    """Find `before` in a run sequence's joined text and replace it in place.
 
-    A slot is `(element, text)`. An element of None is a piece that exists in
-    the joined view and not in the document -- the newline between paragraphs --
-    so it contributes its length to the arithmetic and is never written to. That
-    is the whole reason this is separate from the run walk: the span has to be
-    located in the string the caller was reading, which has separators in it,
-    and written back to the runs, which do not.
+    A slot is `(element, text)`. Locating and writing are separate because the
+    span has to be found in the string the caller was reading and written back
+    to the runs that string was assembled from.
     """
     if not slots:
         return False
@@ -401,20 +547,7 @@ def _replace_slots(slots, before: str, after: str) -> bool:
     start = joined.find(before) if before else -1
     if start < 0:
         return False
-    end = start + len(before)
-
-    offset = 0
-    written = False
-    for element, text in slots:
-        slot_start, slot_end = offset, offset + len(text)
-        offset = slot_end
-        if element is None or slot_end <= start or slot_start >= end:
-            continue
-        head = text[: start - slot_start] if slot_start < start else ""
-        tail = text[end - slot_start :] if slot_end > end else ""
-        element.text = head + after + tail if not written else head + tail
-        written = True
-    return written
+    return _write_span(slots, start, start + len(before), after)
 
 
 def _set_table_cell(shape, change: Change) -> bool:
