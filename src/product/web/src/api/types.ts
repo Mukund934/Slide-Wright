@@ -54,6 +54,16 @@ export interface Run {
    * canvas needs both to draw a shape the way PowerPoint does.
    */
   paragraph: number;
+  /** OOXML's own values — "sng", "dbl", "sngStrike", "all", "small". */
+  underline: string | null;
+  strike: string | null;
+  /** Thousandths of a percent: positive is superscript, negative subscript. */
+  baseline: number | null;
+  /**
+   * Capitalisation. A run set to `all` reads DIVIDER on the slide and is
+   * stored as "divider", so a canvas that ignores it draws the wrong letters.
+   */
+  caps: string | null;
 }
 
 export interface Shape {
@@ -71,6 +81,8 @@ export interface Shape {
   geometry_inherited: boolean;
   geometry: string | null;
   runs: Run[];
+  /** Every paragraph, including ones with no text. `runs` holds neither. */
+  paragraph_count: number;
   table_rows: number;
   table_cols: number;
   /** Keyed "r0/c0", zero-based, matching the suffix a change target carries. */

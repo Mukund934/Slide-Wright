@@ -41,13 +41,30 @@ class RunOut(BaseModel):
     #: know where a line ends: without it, runs were laid out as a column and a
     #: sentence containing one bold word drew as three stacked lines.
     paragraph: int = 0
+    #: The four attributes a reader sees that this contract used to drop.
+    #:
+    #: The canvas claims accuracy and nothing else, and it was drawing five of a
+    #: run's ten attributes: a struck-through line came back un-struck, an
+    #: underlined one un-underlined, a footnote marker down off its baseline,
+    #: and a header reading DIVIDER drew as "divider" because ALL CAPS is a
+    #: property of the run and not of the text.
+    #:
+    #: The hyperlink is still not sent, on purpose: PowerPoint colours a link
+    #: from the theme's `hlink` slot, this view resolves no theme colours, and
+    #: an approximation of a link is worse than no link at all in a view whose
+    #: whole claim is that what it shows is really there.
+    underline: str | None = None
+    strike: str | None = None
+    baseline: int | None = None
+    caps: str | None = None
 
     @classmethod
     def of(cls, run: TextRun) -> RunOut:
         return cls(
             text=run.text, size_pt=run.size_pt, bold=run.bold,
             italic=run.italic, font=run.font, color=run.color,
-            paragraph=run.paragraph,
+            paragraph=run.paragraph, underline=run.underline,
+            strike=run.strike, baseline=run.baseline, caps=run.caps,
         )
 
 
@@ -76,6 +93,12 @@ class ShapeOut(BaseModel):
     table_cells: dict[str, str] = Field(default_factory=dict)
     child_count: int = 0
     text: str = ""
+    #: Every paragraph the shape has, including ones holding no text. `runs`
+    #: carries only runs with text, so without this the canvas cannot draw a
+    #: blank line -- and 77 of the 768 text shapes in the corpus already have
+    #: one. A view that silently closes a gap the deck has is not a simpler
+    #: view, it is a wrong one.
+    paragraph_count: int = 0
 
     @classmethod
     def of(cls, shape: ShapeInfo) -> ShapeOut:
@@ -90,6 +113,7 @@ class ShapeOut(BaseModel):
             table_rows=shape.table_rows, table_cols=shape.table_cols,
             table_cells=dict(shape.table_cells),
             child_count=shape.child_count, text=shape.text,
+            paragraph_count=shape.paragraph_count,
         )
 
 
