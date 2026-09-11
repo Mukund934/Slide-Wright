@@ -10,6 +10,7 @@ from __future__ import annotations
 import difflib
 import re
 import zipfile
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,7 @@ import pytest
 from slide_wright.apply import ApplyError, apply_changes
 from slide_wright.changeset import Change, ChangeSet, Op, Status
 from slide_wright.fidelity import compare
-from slide_wright.inspect import inspect
+from slide_wright.inspect import TextRun, inspect
 from slide_wright.package import Package
 
 
@@ -830,7 +831,14 @@ class TestNarrownessAskedOfEveryShape:
     a fixture added later is covered by the question the day it lands.
     """
 
-    FIELDS = ("text", "size_pt", "bold", "italic", "font", "color")
+    #: Every attribute `TextRun` records. The list used to be six of them, and
+    #: was written when six was all there were -- so as underline, strikethrough,
+    #: baseline, capitals and the hyperlink arrived, the sweep that asks "did
+    #: anything else about this run change" quietly stopped asking about half of
+    #: what a run is. Read off the dataclass rather than listed, so the next
+    #: attribute is covered the day it lands instead of the day someone
+    #: remembers this line.
+    FIELDS = tuple(f.name for f in fields(TextRun) if f.name != "paragraph")
 
     def _fingerprint(self, shape):
         return [tuple(getattr(r, f) for f in self.FIELDS) for r in shape.runs]
@@ -1419,6 +1427,35 @@ class TestAShapeEndsWithTheLinesItWasAskedFor:
         )
         assert paragraphs[2].find(f".//{self.A}hlinkClick") is None, (
             "the line that was added must not have acquired one"
+        )
+
+    def test_a_line_added_after_a_footer_does_not_copy_the_slide_number(self):
+        """Also mine: a field is a second thing a clone must not carry.
+
+        A slide number, a date, a footer -- 156 paragraphs across 6 of the 26
+        real decks hold one. Cloning a line that has one puts a second copy of
+        it on the slide, and an explicit line break comes with it. Both are
+        things the deck *does* rather than how it looks.
+        """
+        from lxml import etree
+
+        from slide_wright.apply import _set_text
+
+        shape = etree.fromstring(
+            '<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+            ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+            "<a:p><a:r><a:rPr/><a:t>Alpha</a:t></a:r></a:p>"
+            "<a:p><a:r><a:rPr/><a:t>Beta</a:t></a:r><a:br/>"
+            '<a:fld id="{1}" type="slidenum"><a:t>7</a:t></a:fld></a:p></p:sp>'
+        )
+        assert _set_text(shape, "Alpha\nBeta", "Alpha\nBeta\nGamma")
+        paragraphs = shape.findall(f"{self.A}p")
+        assert paragraphs[1].find(f"{self.A}fld") is not None, "the footer keeps its field"
+        assert paragraphs[2].find(f"{self.A}fld") is None, (
+            "the line that was added must not carry a second slide number"
+        )
+        assert paragraphs[2].find(f"{self.A}br") is None, (
+            "nor a line break the user never typed"
         )
 
     def test_a_line_the_span_never_reached_keeps_its_own_text(self):
