@@ -44,7 +44,7 @@ function shape(over: Partial<Shape> = {}): Shape {
 function slide(shapes: Shape[]): Slide {
   return {
     number: 12, part_name: "slide12.xml", layout: "Title and Content",
-    title: "Comparables", word_count: 4, shapes,
+    title: "Comparables", word_count: 4, shapes, notes: "",
   };
 }
 

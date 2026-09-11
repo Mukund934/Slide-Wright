@@ -53,8 +53,8 @@ function document(over: Partial<SlideDocument> = {}): SlideDocument {
     deck: {
       slide_width: 12192000, slide_height: 6858000, theme_fonts: {},
       slides: [
-        { number: 1, part_name: "s1.xml", layout: null, title: "One", word_count: 3, shapes: [] },
-        { number: 3, part_name: "s3.xml", layout: null, title: "Three", word_count: 9, shapes: [] },
+        { number: 1, part_name: "s1.xml", layout: null, title: "One", word_count: 3, shapes: [], notes: "" },
+        { number: 3, part_name: "s3.xml", layout: null, title: "Three", word_count: 9, shapes: [], notes: "" },
       ],
     },
     versions: [
@@ -77,7 +77,7 @@ describe("opening", () => {
   it("selects the deck's first slide, not slide 1 by assumption", () => {
     const doc = document({
       deck: { ...document().deck, slides: [
-        { number: 7, part_name: "s7.xml", layout: null, title: "Seven", word_count: 1, shapes: [] },
+        { number: 7, part_name: "s7.xml", layout: null, title: "Seven", word_count: 1, shapes: [], notes: "" },
       ] },
     });
     expect(reducer(initial, { type: "opened", document: doc }).selectedSlide).toBe(7);
@@ -333,6 +333,7 @@ describe("the canvas follows the selection", () => {
       title: `Slide ${number}`,
       word_count: 1,
       shapes: [],
+      notes: "",
     })),
   };
 
