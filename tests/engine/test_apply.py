@@ -10,6 +10,7 @@ from __future__ import annotations
 import difflib
 import re
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -1530,3 +1531,84 @@ class TestBlankLinesAreVisibleEndToEnd:
         assert [d.summary for d in diff(adversarial_deck, out).deltas if "blank" in d.summary], (
             "the empty text boxes it now carries must be reported, not hidden"
         )
+
+
+class TestEveryMultiLineShapeEndsWithTheLinesAskedFor:
+    """The property, swept over whatever the decks happen to contain.
+
+    Adding a bulleted body to the corpus caught nothing on its own -- the same
+    thing the split-run slide did -- because every test that could see it asks
+    about a shape it chose. So this asks the question of every text body in
+    reach: replace all of its lines with two, and it must hold two, and it must
+    not have gained a blank one.
+
+    Swept on the elements rather than through `apply_changes`: rewriting the
+    package once per shape costs about a second on a 350-part deck, which is
+    fifty seconds of suite for arithmetic that lives entirely in the element.
+    The package round trip is covered end to end above.
+    """
+
+    A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+    REPLACEMENT = "Replaced line one\nReplaced line two"
+
+    def _shapes(self, path):
+        """Every text body on every slide, groups included -- each holds its own."""
+        from lxml import etree
+
+        with zipfile.ZipFile(path) as z:
+            for name in sorted(z.namelist()):
+                if not re.match(r"^ppt/slides/slide\d+\.xml$", name):
+                    continue
+                root = etree.fromstring(z.read(name))
+                for sp in root.iter(f"{self.P}sp"):
+                    yield name, sp
+
+    def _lines(self, sp) -> list[str]:
+        """Paragraph texts, in order, the way `ShapeInfo.text` assembles them."""
+        out = []
+        for para in sp.findall(f".//{self.A}p"):
+            text = "".join(
+                t.text for t in para.findall(f".//{self.A}t") if t.text
+            )
+            out.append(text)
+        return out
+
+    def _sweep(self, path) -> int:
+        from slide_wright.apply import _set_text
+
+        swept = 0
+        for part, sp in self._shapes(path):
+            lines = self._lines(sp)
+            written = [line for line in lines if line]
+            if len(written) < 2:
+                continue
+            blank_before = len(lines) - len(written)
+            assert _set_text(sp, "\n".join(written), self.REPLACEMENT), (
+                f"{path.name} {part}: the joined text could not be found in the "
+                "shape it was read from"
+            )
+            after = self._lines(sp)
+            assert [line for line in after if line] == self.REPLACEMENT.split("\n"), (
+                f"{path.name} {part}: asked for two lines, got {after}"
+            )
+            assert len(after) - 2 == blank_before, (
+                f"{path.name} {part}: the edit left "
+                f"{len(after) - 2 - blank_before} blank line(s) behind"
+            )
+            swept += 1
+        return swept
+
+    def test_the_adversarial_deck(self, adversarial_deck):
+        assert self._sweep(adversarial_deck) >= 1, (
+            "the corpus has no multi-line text body; the question cannot fail"
+        )
+
+    @pytest.mark.fixtures
+    def test_the_real_corpus(self):
+        fixtures = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "third-party"
+        decks = sorted(fixtures.glob("*.pptx"))
+        if not decks:
+            pytest.skip("third-party corpus not present; run scripts/fetch_fixtures.py")
+        swept = sum(self._sweep(deck) for deck in decks)
+        assert swept >= 100, f"only {swept} multi-line shapes swept; expected the corpus"
