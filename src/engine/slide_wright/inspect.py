@@ -199,6 +199,22 @@ class SlideInfo:
     part_name: str
     shapes: list[ShapeInfo] = field(default_factory=list)
     layout: str | None = None
+    #: What the presenter wrote under the slide, paragraphs kept apart.
+    #:
+    #: Notes live in their own part, so they survive an edit and `verify`
+    #: compares them byte for byte like everything else. What was missing is
+    #: *meaning*: nothing here read them, so the diff could not say a word had
+    #: changed in them, and the `wording` lock -- whose UI string is "no text
+    #: may change, anywhere" -- was silent about them.
+    #:
+    #: It is not a rounding error. Across the corpus 43 notes slides carry
+    #: 3,212 words, and on `nasa-bhutan-water` -- the deck this project quotes
+    #: for *"272 corrections, 0 change what the deck says"* -- there are 2,708
+    #: words of speaker script against 983 on the slides. **73% of that deck's
+    #: words were in a place no guarantee could see.**
+    #:
+    #: The slide-number field is excluded: it is generated, not written.
+    notes: str = ""
 
     @property
     def text(self) -> str:
@@ -206,7 +222,22 @@ class SlideInfo:
 
     @property
     def word_count(self) -> int:
+        """Words on the slide. Notes are deliberately not counted here.
+
+        Every density and evidence rule in the audit is about what an audience
+        sees on a page, and a slide is not less readable because its presenter
+        wrote a paragraph under it. `notes_word_count` answers the other
+        question where it is actually wanted.
+        """
         return len(self.text.split())
+
+    @property
+    def notes_word_count(self) -> int:
+        return len(self.notes.split())
+
+    @property
+    def has_notes(self) -> bool:
+        return bool(self.notes.strip())
 
     @property
     def title(self) -> str | None:
@@ -414,7 +445,45 @@ def _read_slide(pkg: Package, part_name: str, number: int) -> SlideInfo:
         if info is not None:
             slide.shapes.append(info)
     _inherit_geometry(pkg, part_name, slide)
+    slide.notes = _read_notes(pkg, part_name)
     return slide
+
+
+def _read_notes(pkg: Package, part_name: str) -> str:
+    """The presenter's script for this slide, or "" if there is none.
+
+    Resolved through the slide's relationships, never by number: `notesSlide7`
+    is not the notes for slide 7 in any deck that has had a slide deleted, and
+    pairing them by index would attribute one presenter's script to another
+    slide while looking entirely correct.
+
+    Two placeholders are skipped. `sldImg` is the thumbnail of the slide itself,
+    which carries no text. `sldNum` is a generated field, and reporting it as
+    content would make every renumbering read as a change to what was written.
+
+    110 of the corpus's 153 notes parts hold nothing but those two, which is why
+    "the deck has notes parts" is not the same question as "the deck has notes".
+    """
+    notes_part = _related_part(pkg, part_name, "notesSlides")
+    if notes_part is None:
+        return ""
+    try:
+        root = etree.fromstring(pkg.read(notes_part))
+    except etree.XMLSyntaxError:
+        return ""
+
+    lines: list[str] = []
+    for sp in root.iter(f"{{{NS['p']}}}sp"):
+        ph = sp.find(f".//{{{NS['p']}}}ph")
+        if ph is not None and ph.get("type") in {"sldImg", "sldNum"}:
+            continue
+        for para in sp.findall(f".//{{{NS['a']}}}p"):
+            text = "".join(
+                t.text for t in para.findall(f".//{{{NS['a']}}}t") if t.text
+            )
+            if text.strip():
+                lines.append(text)
+    return "\n".join(lines)
 
 
 def _inherit_geometry(pkg: Package, part_name: str, slide: SlideInfo) -> None:
