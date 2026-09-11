@@ -200,6 +200,8 @@ export interface Audit {
   deck: string;
   slide_count: number;
   word_count: number;
+  /** Words the presenter wrote underneath, counted apart from the slides. */
+  notes_word_count: number;
   words_per_slide: number;
   observations: Observation[];
   gate: Gate;

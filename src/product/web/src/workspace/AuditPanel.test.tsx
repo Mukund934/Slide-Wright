@@ -30,7 +30,8 @@ function observation(over: Partial<Observation> = {}): Observation {
 
 function audit(over: Partial<Audit> = {}): Audit {
   return {
-    deck: "d.pptx", slide_count: 26, word_count: 950, words_per_slide: 36.5,
+    deck: "d.pptx", slide_count: 26, word_count: 950, notes_word_count: 0,
+    words_per_slide: 36.5,
     observations: [], automatable_count: 0, rendered: "",
     gate: { passed: true, error_count: 0, warning_count: 0, findings: [] },
     ...over,
@@ -53,6 +54,36 @@ function mount(nextAudit: Audit, nextPlan: TidyPlan = plan(), onTidy = vi.fn()) 
 }
 
 beforeEach(() => vi.clearAllMocks());
+
+describe("the deck's own numbers", () => {
+  /**
+   * A deck that reads as 983 words and carries 2,708 more underneath is being
+   * described wrongly by the first number alone. Counted apart rather than
+   * summed, because every density rule here is about how much an audience is
+   * asked to read on one page.
+   */
+  const header = async () =>
+    (await screen.findByText(/per slide/)).parentElement as HTMLElement;
+
+  it("says how much is in the notes when there is any", async () => {
+    mount(audit({ notes_word_count: 2708 }));
+    expect((await header()).textContent).toContain("2708");
+    expect((await header()).textContent).toContain("in notes");
+  });
+
+  it("says nothing about notes on a deck that has none", async () => {
+    mount(audit({ notes_word_count: 0 }));
+    expect((await header()).textContent).not.toContain("in notes");
+  });
+
+  it("keeps them apart, so a thorough script is not a crowded deck", async () => {
+    mount(audit({ word_count: 983, notes_word_count: 2708 }));
+    const text = (await header()).textContent;
+    expect(text).toContain("983");
+    expect(text).not.toContain("3691");
+  });
+});
+
 
 describe("there is no score", () => {
   it("states the measurements and grades none of them", async () => {

@@ -131,6 +131,19 @@ export function AuditPanel({
           {Math.round(audit.words_per_slide)}
         </span>{" "}
         per slide
+        {/* Said only when there is a script, and said apart from the slide
+            count rather than added to it. One real deck here reads as 983
+            words and carries 2,708 more underneath; a reader told only the
+            first number is being described a deck that does not exist. */}
+        {audit.notes_word_count > 0 && (
+          <>
+            {" · "}
+            <span className="text-evidence text-ink-muted">
+              {audit.notes_word_count}
+            </span>{" "}
+            in notes
+          </>
+        )}
       </PanelContext>
 
       <motion.div

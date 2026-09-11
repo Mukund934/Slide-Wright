@@ -115,7 +115,15 @@ class Observation:
 class DeckAudit:
     deck: str
     slide_count: int = 0
+    #: Words on the slides. Every density rule here is about how much an
+    #: audience is asked to read on a page, so notes are counted apart rather
+    #: than added in -- folding them together would make a deck with a thorough
+    #: script look like a crowded deck.
     word_count: int = 0
+    #: Words the presenter wrote underneath. Stated because leaving it out
+    #: describes some decks wrongly: `nasa-bhutan-water` reads as 983 words
+    #: and carries 2,708 more.
+    notes_word_count: int = 0
     observations: list[Observation] = field(default_factory=list)
     gate: GateResult | None = None
 
@@ -167,6 +175,7 @@ def audit(deck: DeckInfo, name: str = "") -> DeckAudit:
         deck=name or "deck",
         slide_count=deck.slide_count,
         word_count=sum(s.word_count for s in deck.slides),
+        notes_word_count=sum(s.notes_word_count for s in deck.slides),
         gate=check(deck),
     )
     for rule in (

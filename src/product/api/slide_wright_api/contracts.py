@@ -309,6 +309,7 @@ class AuditOut(BaseModel):
     deck: str
     slide_count: int
     word_count: int
+    notes_word_count: int = 0
     words_per_slide: float
     observations: list[ObservationOut] = Field(default_factory=list)
     gate: GateOut
@@ -321,6 +322,7 @@ class AuditOut(BaseModel):
             deck=result.deck,
             slide_count=result.slide_count,
             word_count=result.word_count,
+            notes_word_count=result.notes_word_count,
             words_per_slide=result.words_per_slide,
             observations=[ObservationOut.of(o) for o in result.observations],
             gate=GateOut.of(result.gate) if result.gate else GateOut(
