@@ -709,3 +709,29 @@ class TestTidyOnARealDeck:
         """Running it again finds nothing left to do."""
         _, out, _ = tidied_eia
         assert main(["tidy", str(out), "--workspace", str(tmp_path / "ws2")]) == EXIT_OK
+
+
+class TestInspectSaysWhenThereIsAScript:
+    """A slide's word count describes the page, and sometimes that is the smaller half.
+
+    On `nasa-bhutan-water` the slides carry 983 words and the speaker notes
+    carry 2,708. Printing only the first describes a sparse deck, and it is not
+    one — so the two counts are stated separately rather than summed. Folding
+    them would break every density rule in the audit, which is about how much
+    an audience is being asked to read on a page.
+    """
+
+    def test_a_slide_with_a_script_says_how_much(self, adversarial_deck, capsys):
+        assert main(["inspect", str(adversarial_deck)]) == EXIT_OK
+        lines = [l for l in capsys.readouterr().out.split("\n") if "notes" in l]
+        assert len(lines) == 1, "one slide of the corpus has a script"
+        assert "w notes" in lines[0]
+
+    def test_a_slide_with_no_script_says_nothing_about_one(self, adversarial_deck, capsys):
+        assert main(["inspect", str(adversarial_deck)]) == EXIT_OK
+        body = capsys.readouterr().out
+        numbered = [l for l in body.split("\n") if l.strip()[:1].isdigit()]
+        assert len(numbered) > 1
+        assert sum("notes" in l for l in numbered) == 1, (
+            "a count of zero would be noise on every other slide"
+        )
