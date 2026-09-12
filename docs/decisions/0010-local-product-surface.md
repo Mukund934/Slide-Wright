@@ -57,6 +57,16 @@ engine, and a TypeScript client that talks to it over loopback.**
 5. **Long work streams.** Ingest and apply take minutes on a real deck. Progress is
    narrated over Server-Sent Events rather than hidden behind a spinner, because the
    UX architecture requires honest progress and a request/response API cannot give it.
+
+   > **Corrected 12 Sep 2026.** "Minutes" was wrong, and was never measured.
+   > End to end over the third-party corpus — inspect, open, apply, verify — the
+   > worst real deck available (52 slides, 57.5 MB) takes **5.3 s**; the median
+   > is under 4. The decision stands and the reason narrows: five seconds still
+   > deserves honest narration, so SSE remains right on UX grounds, but it is a
+   > choice rather than a necessity. The consequence that matters is elsewhere —
+   > a hosted surface would not need the job queue this ADR declines, because
+   > the workload fits inside an ordinary request. See
+   > `docs/architecture/08-deployment-models.md` §3.
 6. **ADR-0005 stands for a hosted surface**, if one is ever built. Its queue and its
    TypeScript API are the right shape for that. This ADR does not delete that path;
    it declines to pay for it before there is a hosted product to pay for.
