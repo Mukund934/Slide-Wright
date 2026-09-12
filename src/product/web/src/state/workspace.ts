@@ -368,6 +368,38 @@ export function useWorkspace() {
     [fail],
   );
 
+  /**
+   * Put this deck down and go back to the open screen.
+   *
+   * Every piece of this existed and nothing joined them up: the API has had
+   * `DELETE /api/documents/{id}` throughout, `api.close` has been in the
+   * service layer unused, and `closed` was dispatched from exactly one place --
+   * the *failure* path of `restore`. So there was no way to open a second deck.
+   * Not by reloading either: the id is remembered, and a reload restored it.
+   * Opening the wrong file was a dead end until the server forgot it.
+   *
+   * The server call is best-effort. If it has already forgotten this document
+   * -- restarted, or the workspace removed -- that is the state being asked
+   * for, and refusing to leave the screen because the leaving failed would be
+   * the same dead end with an error on it.
+   *
+   * Nothing on disk is touched. Versions live in the workspace beside the deck
+   * and outlive this, which is why the control says `open another` rather than
+   * anything that sounds like discarding work.
+   */
+  const close = useCallback(async () => {
+    const id = state.document?.id;
+    forget();
+    dispatch({ type: "closed" });
+    if (id) {
+      try {
+        await api.close(id);
+      } catch {
+        // Already gone, or never there. Either way the screen is correct.
+      }
+    }
+  }, [state.document?.id]);
+
   const restore = useCallback(async () => {
     const id = remembered();
     if (!id) return;
@@ -568,6 +600,7 @@ export function useWorkspace() {
     propose,
     tidy,
     refresh,
+    close,
     review,
     apply,
     revert,
