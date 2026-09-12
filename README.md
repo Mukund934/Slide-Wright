@@ -256,7 +256,7 @@ Five mechanisms, all deterministic:
 
 ```bash
 pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 987 tests
+python -m pytest tests -q          # 997 tests
 ```
 
 Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
@@ -406,7 +406,7 @@ src/product/web/            the workspace client — React, TypeScript, Motion
   workspace/                filmstrip · canvas · audit · sources · changes
                             diff · result · history · export
 docs/                       architecture, 10 ADRs, guides
-tests/                      987 engine and API tests, plus 225 in the client
+tests/                      997 engine and API tests, plus 227 in the client
 scripts/                    benchmark, exit check, engine vendoring
 private/                    project intelligence — gitignored, never committed
 ```
