@@ -415,7 +415,7 @@ npm --prefix src/product/web install
 npm --prefix src/product/web run build
 python -m pytest tests -q                    # 1,019, of which 7 need
                                              # scripts/fetch_fixtures.py
-npm --prefix src/product/web test            # 227
+npm --prefix src/product/web test            # 233
 python -m slide_wright_api
 ```
 
@@ -467,7 +467,7 @@ src/product/web/            the workspace client — React, TypeScript, Motion
   workspace/                filmstrip · canvas · audit · sources · changes
                             diff · result · history · export
 docs/                       architecture, 10 ADRs, guides
-tests/                      1,019 engine and API tests, plus 227 in the client
+tests/                      1,019 engine and API tests, plus 233 in the client
 scripts/                    benchmark, exit check, release checks, vendoring
 private/                    project intelligence — gitignored, never committed
 ```
