@@ -13,11 +13,23 @@ on:
 jobs:
   engine:
     name: Engine tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # Every supported Python on Linux, plus one run each on the platforms
+        # the users are on. This engine opens zip archives, writes next to the
+        # user's deck and holds file handles across a save -- all three behave
+        # differently on Windows, and nothing had ever run there. The analyst
+        # this product is for is on Windows; so is the person who wrote it,
+        # which is how a green tick on Linux stayed convincing for so long.
+        os: [ubuntu-latest]
         python-version: ["3.11", "3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
 
     steps:
       - uses: actions/checkout@v4
@@ -65,9 +77,6 @@ jobs:
           pip install -e "src/product/api[dev]"
           npm --prefix src/product/web ci
 
-      - name: API tests
-        run: python -m pytest tests/product -v --tb=short
-
       - name: Client typecheck
         run: npm --prefix src/product/web run typecheck
 
@@ -76,6 +85,14 @@ jobs:
 
       - name: Client builds
         run: npm --prefix src/product/web run build
+
+      # After the client build, deliberately. tests/product/test_packaging.py
+      # builds a wheel and asserts the client is inside it, which it can only
+      # do once there is a client to package -- run earlier, those tests skip,
+      # and a skipped test is not a guard. The step below makes that
+      # unskippable regardless of what this file is reordered into.
+      - name: API tests
+        run: python -m pytest tests/product -v --tb=short
 
       # ADR-0008: the client must load with the network unplugged. A build that
       # fetches from an external origin breaks that silently -- the page still
@@ -92,6 +109,19 @@ jobs:
             exit 1
           fi
           echo "client is self-contained"
+
+      # The release artifact, checked as an artifact rather than as a checkout.
+      # `pip install` shipped an API and no interface for the whole life of the
+      # product surface while every test stayed green, because every test runs
+      # from the source tree -- the one place the bug does not reproduce.
+      #
+      # Deliberately not a pytest skip. The equivalent tests skip when no client
+      # has been built, which is right on a dev machine and useless as a release
+      # gate; this step cannot skip.
+      - name: Assert the wheel a user installs contains the interface
+        run: |
+          python -m pip wheel --no-deps --no-build-isolation -w wheelout src/product/api
+          python scripts/assert_wheel_has_client.py wheelout
 
       # ADR-0010: bound to loopback, with no flag to change it. Matched on the
       # argparse call rather than the string, because the module's own docstring
