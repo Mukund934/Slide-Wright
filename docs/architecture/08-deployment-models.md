@@ -200,33 +200,27 @@ That is model A plus a website, and it is covered below.
 Model **B** is the smallest architectural change that produces a genuinely
 deployed frontend and backend without weakening the promise. Concretely:
 
-1. **Make the bind address a deployment mode, not a constant.** One setting with
-   two values. `local` — the default, and what happens when nothing is
-   configured — keeps the loopback pin, the Host allowlist and no
-   authentication. `self-hosted` binds a configured interface and **refuses to
-   start** without authentication configured. The safety property becomes *the
-   local mode cannot be configured away*, which is stronger than today's *no
-   code may bind publicly*, because it survives the feature existing.
-2. **Authentication, required in `self-hosted` and forbidden in `local`.** Not
-   optional, not defaulted-on: absent means the process does not start.
-3. **Per-principal session isolation.** `Workspace` keys documents by a hash of
-   the path; it would key by `(principal, path)` and acquire a per-document lock
-   around mutation. Small, local change.
-4. **An upload path, additive.** `POST /api/documents` keeps taking a path for
-   local use and gains a multipart form for hosted use. The engine is unchanged:
-   it wants a file on a filesystem either way.
-5. **No queue.** §3 measured why.
-6. **A container image**, which is the actual deliverable of a hosted mode.
+| # | The change | State |
+|---|---|---|
+| 1 | **The bind address becomes a deployment mode, not a constant.** `local` is the default and what happens when nothing is configured; `self-hosted` binds a configured interface and refuses to start unauthenticated. The safety property becomes *the local mode cannot be configured away*, which survives the feature existing where *no code may bind publicly* only survived while it did not | **BUILT** — ADR-0011 |
+| 2 | **Authentication, required in `self-hosted` and impossible in `local`.** Absent means the process does not start | **BUILT** |
+| 3 | **A container image**, the actual deliverable of a hosted mode | **BUILT** — `Dockerfile`, built and driven in CI |
+| 4 | **Per-principal session isolation.** `Workspace` keys documents by a hash of the path and holds no lock. With one shared token there is one principal, so this is not yet wrong — it becomes wrong the moment there are two identities | not built |
+| 5 | **An upload path, additive.** `POST /api/documents` keeps taking a path and gains a multipart form. The engine is unchanged: it wants a file on a filesystem either way | not built |
+| 6 | **No queue** | not needed — §3 measured why |
 
-What this explicitly does **not** do: add a database, add object storage, add
-accounts we manage, add billing, or add telemetry. In model B the customer's own
-infrastructure supplies identity and storage, and the trust boundary never
-moves.
+**What is built is the mode, not a product.** A team can run this on their own
+server today: `docker run` with a mode, a hostname and a token, and a volume
+holding their decks. Twelve checks drive that deployment in CI — including that
+an unauthenticated caller is refused, that a valid token does not excuse a
+forged Host, and that a version is written to the mounted volume.
 
-**Cost of doing this now, honestly:** it is real work — probably a week — and it
-is work no one has asked for. Phase 2b's gate exists for exactly this reason,
-and the 33 prior studio campaigns died of building the next thing because it was
-buildable.
+**What is deliberately still absent:** a database, object storage, accounts we
+manage, billing, telemetry, and per-user identity. In model B the customer's own
+infrastructure supplies identity and storage, and the trust boundary never moves.
+Items 4 and 5 above are the honest boundary of what one shared token buys; both
+become necessary the moment somebody asks for per-user access, and neither is
+worth guessing at before then.
 
 ---
 
@@ -260,8 +254,12 @@ conversation that has not happened.
 | "We upload files like this to outside services today" | **C** is open, and ADR-0008 should be revised with the citation |
 | Nothing, because nobody was asked | **A**, because it is the only one that is true today |
 
-Until then the status is: **A is built and shippable; B is specified and not
-built; C is gated and correctly untouched.**
+Until then the status is: **A is built and shippable; B is built as far as one
+shared token goes, and deployable today; C is gated and correctly untouched.**
+
+What B still lacks is per-user identity, and that is the right place for it to
+stop. A team's own server with one shared token is a coherent product. Accounts
+are a different product, and nobody has asked for it.
 
 ---
 
