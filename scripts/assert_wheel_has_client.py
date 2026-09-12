@@ -28,13 +28,23 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
 
-    wheels = sorted(Path(argv[0]).glob("*.whl"))
-    if not wheels:
+    built = sorted(Path(argv[0]).glob("*.whl"))
+    if not built:
         print(f"FAIL no wheel in {argv[0]} -- nothing was built to check")
         return 1
+
+    # The engine wheel is expected to be here too: building both into one
+    # directory is what the README tells people to do, and demanding exactly
+    # one wheel made that documented command fail. Only the API wheel carries
+    # an interface, so only the API wheel is the one to ask about.
+    wheels = [w for w in built if w.name.startswith("slide_wright_api-")]
+    if not wheels:
+        print(f"FAIL no slide_wright_api wheel in {argv[0]}. Found: "
+              f"{[w.name for w in built]}")
+        return 1
     if len(wheels) > 1:
-        print(f"FAIL {len(wheels)} wheels in {argv[0]}; expected one: "
-              f"{[w.name for w in wheels]}")
+        print(f"FAIL {len(wheels)} API wheels in {argv[0]}, so it is not clear "
+              f"which would be released: {[w.name for w in wheels]}")
         return 1
 
     wheel = wheels[0]
