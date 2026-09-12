@@ -128,3 +128,62 @@ def test_the_installed_layout_is_the_one_the_app_looks_for() -> None:
         encoding="utf-8"
     ), "setup.py no longer copies into slide_wright_api/client"
     assert packaged.name == "client"
+
+
+class TestTheClientSurvivesAnUpgrade:
+    """Cache headers on the files the browser holds on to.
+
+    Starlette sends `ETag` and `Last-Modified` and no `Cache-Control`. With no
+    stated freshness a browser may invent one -- commonly a tenth of the file's
+    age -- and serve `index.html` from cache without asking. Observed while
+    doing this work: the client was rebuilt, the bundle's content hash changed,
+    and the page went on loading the previous bundle because the entry point
+    never went back to the server.
+
+    For something people install with `pip install -U`, that is the upgrade path
+    failing silently: they restart the app and get the version they had, or a
+    blank page if the asset the stale entry point names is gone.
+    """
+
+    @pytest.fixture(scope="class")
+    def client(self):
+        from fastapi.testclient import TestClient
+
+        from slide_wright_api.app import create_app
+
+        with TestClient(create_app(), base_url="http://127.0.0.1:8787") as c:
+            yield c
+
+    @needs_built_client
+    def test_the_entry_point_is_revalidated_every_time(self, client) -> None:
+        response = client.get("/")
+        assert response.status_code == 200
+        assert response.headers.get("cache-control") == "no-cache", (
+            "index.html may be served from cache without asking, so an upgraded "
+            "install can keep running the version it replaced"
+        )
+
+    @needs_built_client
+    def test_hashed_assets_are_cached_hard(self, client) -> None:
+        """They are safe to cache forever: the name changes when the bytes do."""
+        import re
+
+        page = client.get("/").text
+        assets = re.findall(r'(?:src|href)="(/assets/[^"]+)"', page)
+        assert assets, "the page references nothing under /assets"
+
+        for asset in assets:
+            headers = client.get(asset).headers
+            assert "immutable" in headers.get("cache-control", ""), (
+                f"{asset} is content-hashed and is not cached as immutable"
+            )
+
+    @needs_built_client
+    def test_the_entry_point_still_revalidates_cheaply(self, client) -> None:
+        """`no-cache` must not mean `no-store`: a 304 is the point."""
+        first = client.get("/")
+        etag = first.headers.get("etag")
+        assert etag, "no ETag, so revalidation would re-send the whole page"
+
+        again = client.get("/", headers={"If-None-Match": etag})
+        assert again.status_code == 304
