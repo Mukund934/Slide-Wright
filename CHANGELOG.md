@@ -31,7 +31,6 @@ is public with none, which means nobody may legally use what it publishes. See
 - **A token screen** for shared deployments, which verifies the token against a
   real request before accepting it rather than storing it and letting the next
   call fail.
-
 - **The wheel carries the interface.** `pip install` used to produce an API and
   no client: the app looked for it at a path that only resolves inside a source
   checkout, so an installed copy served `/api` and reported "the client is not
@@ -70,7 +69,6 @@ is public with none, which means nobody may legally use what it publishes. See
   shared request helper — and it built its own headers, without the token. The
   operation the whole product exists to perform would have returned 401 while
   everything around it worked.
-
 - An empty `dist/` satisfied the client's presence check, mounting a static
   handler over nothing and serving 404s from the product's own root. Presence
   is now decided by `index.html`.
