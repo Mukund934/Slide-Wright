@@ -65,7 +65,14 @@ def call(
             raw = response.read()
             return response.status, json.loads(raw) if raw else {}
     except urllib.error.HTTPError as error:
-        return error.code, {}
+        # The body is the whole diagnostic. This runs in CI, where nobody can
+        # attach a debugger to the container -- a bare status code turns a
+        # permissions problem and a routing problem into the same 500.
+        body = error.read().decode("utf-8", "replace")[:400]
+        try:
+            return error.code, json.loads(body)
+        except ValueError:
+            return error.code, {"detail": body}
     except OSError as error:
         print(f"        transport failure: {error}", file=sys.stderr)
         return 0, {}
@@ -102,7 +109,8 @@ def main() -> int:
     status, document = call("/api/documents", method="POST", body={"path": DECK},
                             token=TOKEN)
     if not say(status == 200 and "id" in document,
-               "a deck opens from the mounted volume", f"HTTP {status}"):
+               "a deck opens from the mounted volume",
+               f"HTTP {status} {document.get('detail', document)}"):
         return 1
 
     doc_id = document["id"]
@@ -125,7 +133,8 @@ def main() -> int:
         body={"sets": [{"slide": slide_number, "target": target["id"],
                         "op": "set_text", "after": "Container proof"}]},
     )
-    say(status == 200 and proposed.get("proposed_count") == 1, "propose a typed edit")
+    say(status == 200 and proposed.get("proposed_count") == 1, "propose a typed edit",
+        f"HTTP {status} {proposed.get('detail', '')}")
 
     status, reviewed = call(f"/api/documents/{doc_id}/review", method="POST",
                             token=TOKEN, body={"approve_all": True})
@@ -134,7 +143,9 @@ def main() -> int:
     status, verification = call(f"/api/documents/{doc_id}/apply", method="POST",
                                 token=TOKEN, body={})
     say(status == 200 and verification.get("deliverable") is not False,
-        "apply and verify", f"deliverable={verification.get('deliverable')}")
+        "apply and verify",
+        f"HTTP {status} deliverable={verification.get('deliverable')} "
+        f"{verification.get('detail', '')}")
 
     # The version the engine wrote lives on the volume, which is the customer's
     # filesystem. If this is empty the container edited something it invented.

@@ -308,7 +308,14 @@ jobs:
 
       - name: Run
         run: |
+          # --user, because the image runs as uid 10001 and the volume
+          # belongs to the runner. The engine keeps versions in a
+          # .slidewright folder *beside the deck*, so a deck directory the
+          # process cannot write to opens and then fails to save. An
+          # operator mounting a directory owned by somebody else hits the
+          # same wall, which is why it is in the guide and not only here.
           docker run -d --name sw -p 8787:8787 \
+            --user "$(id -u):$(id -g)" \
             -e SLIDE_WRIGHT_MODE=self-hosted \
             -e SLIDE_WRIGHT_HOSTNAME=slidewright.ci \
             -e SLIDE_WRIGHT_TOKEN="$SW_TOKEN" \
@@ -324,6 +331,15 @@ jobs:
 
       - name: What it serves, and what it refuses
         run: python scripts/assert_container_enforces.py
+
+      - name: What the container said, if it did not
+        if: failure()
+        run: |
+          echo "-- container log --"
+          docker logs sw 2>&1 | tail -60
+          echo "-- the volume it was given --"
+          ls -la decks
+          id
 
       - name: The health check the orchestrator will run
         run: docker inspect --format '{{.State.Health.Status}}' sw || true

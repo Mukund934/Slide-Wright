@@ -72,6 +72,27 @@ version in a `.slidewright` folder beside each deck, which is what makes
 
 A read-only mount will open decks and fail to save.
 
+### It must be writable *by the user the container runs as*
+
+The image runs as uid `10001`, not root, so that a file-handling bug stops at
+the deck directory rather than at the host. That means a volume owned by
+somebody else is not writable by it — the deck opens, and the first apply fails
+when the engine tries to create `.slidewright` beside it.
+
+Two ways round it, and the first is usually right:
+
+```bash
+# run as whoever owns the decks
+docker run --user "$(id -u):$(id -g)" ...
+
+# or give the image's user the directory
+sudo chown -R 10001:10001 /srv/decks
+```
+
+This is not a container quirk to work around quietly — it is the same wall a
+deck on a read-only share hits, and it is worth knowing about before the first
+edit rather than during it.
+
 ## What your users see
 
 The first time they open the URL they are asked for the access token. It is kept
