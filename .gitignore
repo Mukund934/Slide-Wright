@@ -49,6 +49,8 @@ venv/
 .mypy_cache/
 dist/
 build/
+# CI builds a wheel into the repository root to inspect what a user receives.
+wheelout/
 
 # ── Node ─────────────────────────────────────────────────────────────────────
 node_modules/
