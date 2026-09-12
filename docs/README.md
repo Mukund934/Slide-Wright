@@ -26,6 +26,7 @@ Engineering documentation, safe to share. Strategy, pricing, customer research a
 |---|---|
 | [development](guides/development.md) | Conventions, non-negotiables, manual verification snippets |
 | [testing-strategy](guides/testing-strategy.md) | The fidelity benchmark and corpus requirements |
+| [self-hosting](guides/self-hosting.md) | Running it on your own server, and what that mode does not give you |
 
 ## Reading order
 

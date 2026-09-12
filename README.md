@@ -273,6 +273,14 @@ slide-wright inspect deck.pptx
 
 Python 3.11, 3.12 or 3.13, on Windows, macOS or Linux. All three are tested.
 
+For a team that wants one shared instance rather than an install per laptop,
+there is a container and a mode for it — see
+[running it on your own server](docs/guides/self-hosting.md). The promise is
+unchanged there and the reason is worth stating: the server is *yours*. A
+default install cannot be configured to listen anywhere but loopback; choosing
+otherwise is explicit, requires a token, and refuses to start without one
+([ADR-0011](docs/decisions/0011-deployment-modes.md)).
+
 > **Where the wheels come from.** A tagged commit builds them, checks that the
 > interface is inside the wheel, installs both into a clean environment and
 > runs the core workflow against them before publishing. Until a licence is

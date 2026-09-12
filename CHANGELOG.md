@@ -18,6 +18,20 @@ is public with none, which means nobody may legally use what it publishes. See
 
 ### Added
 
+- **A mode that can actually be deployed.** The bind address was a constant
+  guarded by three CI greps, which protected the promise by making a legitimate
+  server impossible to express — so the first time one was needed, the only move
+  was to delete the guard. It is now an explicit deployment mode. `local` stays
+  the default and became *stronger*: it refuses a bind address rather than
+  ignoring one, so it cannot be configured on to a public interface at all.
+  `self-hosted` requires a token and the hostnames it answers to, and refuses to
+  start without either. See ADR-0011 and `docs/guides/self-hosting.md`.
+- **A container image**, built and driven in CI, with a health check that
+  addresses the server by a name it will actually answer to.
+- **A token screen** for shared deployments, which verifies the token against a
+  real request before accepting it rather than storing it and letting the next
+  call fail.
+
 - **The wheel carries the interface.** `pip install` used to produce an API and
   no client: the app looked for it at a path that only resolves inside a source
   checkout, so an installed copy served `/api` and reported "the client is not
@@ -50,6 +64,12 @@ is public with none, which means nobody may legally use what it publishes. See
   Vite build that the wheel makes unnecessary.
 
 ### Fixed
+
+- **Apply was the one route that would have failed on a shared deployment.**
+  `applyStreaming` reads a Server-Sent Events body, so it cannot go through the
+  shared request helper — and it built its own headers, without the token. The
+  operation the whole product exists to perform would have returned 401 while
+  everything around it worked.
 
 - An empty `dist/` satisfied the client's presence check, mounting a static
   handler over nothing and serving 404s from the product's own root. Presence
