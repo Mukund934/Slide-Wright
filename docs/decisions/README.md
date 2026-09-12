@@ -34,3 +34,4 @@ Never delete an ADR. Supersede it and link forward — the record of changing ou
 | [0008](0008-local-first-deployment.md) | The document does not leave the machine — local execution is the primary delivery model | Accepted |
 | [0009](0009-chart-data-read-only.md) | Chart data is read-only; charts and their workbooks are preserved | Accepted |
 | [0010](0010-local-product-surface.md) | The product surface is a local application over the Python engine | Accepted |
+| [0011](0011-deployment-modes.md) | The bind address is a deployment mode, not a constant | Accepted |
