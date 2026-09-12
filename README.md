@@ -254,12 +254,32 @@ Five mechanisms, all deterministic:
 
 ## Install
 
+Slide-Wright is two Python packages and no build step. The engine is the
+command line; the product surface adds the workspace, and carries its own
+interface inside the wheel — there is no Node toolchain to install and nothing
+to compile.
+
 ```bash
-pip install -e "src/engine[dev]"
-python -m pytest tests -q          # 1,001 tests
+pip install slide_wright_engine-*.whl slide_wright_api-*.whl
+slide-wright-app                      # opens http://127.0.0.1:8787
 ```
 
-Python 3.11+. **No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
+For the command line alone, the engine is enough and stands by itself:
+
+```bash
+pip install slide_wright_engine-*.whl
+slide-wright inspect deck.pptx
+```
+
+Python 3.11, 3.12 or 3.13, on Windows, macOS or Linux. All three are tested.
+
+> **Where the wheels come from.** A tagged commit builds them, checks that the
+> interface is inside the wheel, installs both into a clean environment and
+> runs the core workflow against them before publishing. Until a licence is
+> chosen there is no published release, so build them yourself — see
+> [From source](#from-source) below. Nothing about the install differs.
+
+**No API key is required.** With none set the planner falls back to an offline stub, and every deterministic layer — ingest, gate, apply, verify, audit, refresh, brand, SmartArt — runs unchanged.
 
 For plain-language instructions, copy `.env.example` to `.env` and set `GEMINI_API_KEY` (the free tier is sufficient), then:
 
@@ -276,9 +296,7 @@ The same loop, with the deck on screen. It runs entirely on your machine
 no flag that would let it listen anywhere else.
 
 ```bash
-pip install -e "src/product/api"
-npm --prefix src/product/web install && npm --prefix src/product/web run build
-python -m slide_wright_api
+slide-wright-app
 ```
 
 That opens `http://127.0.0.1:8787`. Point it at a `.pptx` **by path** — the deck
@@ -375,6 +393,49 @@ nothing, and with no key configured nothing is sent at all.
 Develop against it with `npm --prefix src/product/web run dev` (port 5173,
 proxying `/api` to the engine).
 
+## From source
+
+The engine alone, which is the whole command line:
+
+```bash
+pip install -e "src/engine[dev]"
+python -m pytest tests -q                    # 880; product tests skip
+```
+
+The product tests skip rather than erroring, because engine-only is a supported
+arrangement and not a broken one — ADR-0008 makes the deterministic engine a
+delivery surface in its own right.
+
+Everything, including the workspace. The client is built once and the wheel
+carries it thereafter, so Node is a build dependency and never a run one:
+
+```bash
+pip install -e "src/engine[dev]" -e "src/product/api[dev]"
+npm --prefix src/product/web install
+npm --prefix src/product/web run build
+python -m pytest tests -q                    # 1,019, of which 7 need
+                                             # scripts/fetch_fixtures.py
+npm --prefix src/product/web test            # 227
+python -m slide_wright_api
+```
+
+To build the wheels a release would publish, and check them the way the release
+workflow checks them:
+
+```bash
+npm --prefix src/product/web run build
+python -m build --outdir dist src/engine
+python -m build --outdir dist src/product/api
+python scripts/assert_wheel_has_client.py dist
+```
+
+`assert_wheel_has_client.py` refuses a wheel whose interface is missing, whose
+page has no script, or that picked up a deck on the way past. It exists because
+the product surface shipped without its client and every test stayed green —
+they all run from this checkout, which is the one place that defect cannot
+reproduce. `scripts/release_smoke_test.py` is the other half: install the wheels
+into an empty environment and it drives the real loop against them.
+
 ## Repository layout
 
 ```
@@ -406,8 +467,8 @@ src/product/web/            the workspace client — React, TypeScript, Motion
   workspace/                filmstrip · canvas · audit · sources · changes
                             diff · result · history · export
 docs/                       architecture, 10 ADRs, guides
-tests/                      1,001 engine and API tests, plus 227 in the client
-scripts/                    benchmark, exit check, engine vendoring
+tests/                      1,019 engine and API tests, plus 227 in the client
+scripts/                    benchmark, exit check, release checks, vendoring
 private/                    project intelligence — gitignored, never committed
 ```
 
