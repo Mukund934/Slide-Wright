@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import queue
+import secrets
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -40,6 +41,11 @@ from slide_wright.sources import SourceError, SourceSet, load
 from slide_wright.session import Session, SessionError
 
 from slide_wright_api import __version__
+from slide_wright_api.deployment import (
+    LOOPBACK_HOSTS,
+    Deployment,
+    resolve,
+)
 from slide_wright_api.contracts import (
     ApplyRequest,
     AuditOut,
@@ -87,7 +93,6 @@ DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 # It matters more here than for most local servers. The promise is that the
 # document does not leave this machine (ADR-0008), and a rebinding attack is
 # precisely a way to make it leave.
-LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
 
 
 def _find_client() -> Path | None:
@@ -164,7 +169,12 @@ class ClientFiles(StaticFiles):
         return response
 
 
-def create_app(*, workspace: Workspace | None = None, serve_client: bool = True) -> FastAPI:
+def create_app(
+    *,
+    workspace: Workspace | None = None,
+    serve_client: bool = True,
+    deployment: Deployment | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="Slide-Wright",
         version=__version__,
@@ -172,36 +182,108 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
     )
     space = workspace or Workspace()
     app.state.workspace = space
+    # Resolved once. A deployment that can change while running is one whose
+    # guarantees are true only of the moment they were checked.
+    here = deployment or resolve()
+    app.state.deployment = here
 
+    # The dev server's origin is allowed in local mode and nowhere else. On a
+    # deployment other people can reach, permitting http://localhost:5173 means
+    # a page served from any developer's machine can drive somebody's editor --
+    # and the production client is same-origin, so it needs no entry at all.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=list(DEV_ORIGINS),
+        allow_origins=list(DEV_ORIGINS) if here.is_local else [],
         allow_methods=["GET", "POST", "DELETE"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "Authorization"],
     )
 
     @app.middleware("http")
-    async def only_answer_to_loopback(request, call_next):
-        """Refuse a request addressed to a name this machine does not have.
+    async def only_answer_to_its_own_name(request, call_next):
+        """Refuse a request addressed to a name this server does not have.
 
         Runs before every route, including the static client, because the
         attack does not care which URL it lands on.
+
+        The set of acceptable names comes from the deployment rather than from
+        a constant, but the *mechanism* is unchanged and so is the reason for
+        it: a rebinding attack cannot forge the Host header, because the
+        browser still sends the name the page was loaded from. In local mode
+        the set is the loopback names and nothing can add to it.
         """
         host = request.headers.get("host", "")
-        if _host_name(host) not in LOOPBACK_HOSTS:
+        if _host_name(host) not in here.answers_to:
+            expected = ", ".join(sorted(here.answers_to))
             # 421 is the honest code: the request reached a server that is not
             # the one it was addressed to.
             return JSONResponse(
                 status_code=421,
                 content={
                     "detail": (
-                        f"this server answers only to localhost, not to {host!r}. "
-                        "A request addressed elsewhere did not come from your "
-                        "own client."
+                        f"this server answers to {expected}, not to {host!r}. "
+                        "A request addressed elsewhere did not come from a "
+                        "client of this deployment."
                     )
                 },
             )
         return await call_next(request)
+
+    @app.middleware("http")
+    async def require_the_token_when_there_is_one(request, call_next):
+        """Bearer authentication, in self-hosted mode only.
+
+        Local mode has one user on their own machine and no token exists to
+        check (ADR-0010), so this is inert there -- not "configured off", but
+        with nothing to compare against.
+
+        Two things are deliberately left unauthenticated, and both are reasoned
+        rather than convenient:
+
+        `/api/ping` says whether a token is needed and nothing else. A client
+        that must know whether to ask for credentials cannot be required to
+        present them first.
+
+        The built client is static files -- a script, a stylesheet, a page with
+        an empty div. It contains no document, no deck name and no workspace
+        path, and every route that returns any of those is behind this check.
+        Serving it is what gives the operator's users somewhere to type the
+        token.
+
+        `compare_digest` because a token checked with `==` leaks its length and
+        then its bytes to anyone patient enough to measure.
+        """
+        if here.token is None or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        if request.url.path == "/api/ping":
+            return await call_next(request)
+
+        offered = request.headers.get("authorization", "")
+        scheme, _, presented = offered.partition(" ")
+        if scheme.lower() != "bearer" or not secrets.compare_digest(
+            presented.strip(), here.token
+        ):
+            return JSONResponse(
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+                content={
+                    "detail": (
+                        "this deployment requires a token. Send it as "
+                        "'Authorization: Bearer <token>'."
+                    )
+                },
+            )
+        return await call_next(request)
+
+    @app.get("/api/ping")
+    def ping() -> dict[str, Any]:
+        """Whether this deployment wants a token. Deliberately says nothing else.
+
+        `/api/health` reports the engine version and how many documents are
+        open, which is a description of somebody's activity, so it is behind
+        the token. This is what an unauthenticated client is allowed to learn,
+        and it is the least that lets it decide whether to ask for one.
+        """
+        return {"ok": True, "auth": "required" if here.requires_auth else "none"}
 
     # ── health ───────────────────────────────────────────────────────────────
 
@@ -847,4 +929,13 @@ def _stream_apply(session: Session, note: str) -> Iterator[str]:
         yield f"event: {kind}\ndata: {json.dumps(payload)}\n\n"
 
 
-app = create_app()
+# Deliberately no module-level `app = create_app()`.
+#
+# There was one, and it meant the deployment was resolved at *import* time --
+# so a misconfiguration raised a traceback out of an import, before
+# `__main__.main()` could catch it and print the sentence that says how to fix
+# it. It also made merely importing this module read the environment, which is
+# a surprising thing for an import to do.
+#
+# `--reload` needs an import string rather than an object, so it is given the
+# factory instead: `uvicorn.run("slide_wright_api.app:create_app", factory=True)`.
