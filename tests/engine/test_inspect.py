@@ -470,7 +470,7 @@ class TestWhatTheFileNames:
         assert provenance.organisations == ["HPES ACES"]
         assert "HPES ACES" not in provenance.people
 
-    def test_a_generated_deck_names_nobody(self, adversarial_deck):
+    def test_a_generated_deck_names_nobody(self, minimal_deck):
         """The fixture must assert only what it was built to assert.
 
         python-pptx's default template names its own author, so every deck
@@ -481,6 +481,6 @@ class TestWhatTheFileNames:
         than committing them is that a generated deck raises no confidentiality
         question.
         """
-        provenance = inspect(adversarial_deck).provenance
+        provenance = inspect(minimal_deck).provenance
         assert provenance.people == []
         assert provenance.organisations == []

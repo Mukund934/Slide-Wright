@@ -32,6 +32,7 @@ from slide_wright.compatibility import (
     measure,
 )
 from slide_wright.inspect import inspect
+from slide_wright.package import Package
 
 
 class TestUnknownStaysUnknown:
@@ -185,3 +186,82 @@ class TestTheConstructListItself:
     def test_names_are_unique(self):
         names = [c.name for c in CONSTRUCTS]
         assert len(names) == len(set(names))
+
+
+class TestTheCommentsRowIsEarned:
+    """`Comments` read UNKNOWN for the life of the table. Now it is measured.
+
+    "Adding a deck that contains one is the only way to change it" is the
+    module's own rule, and no deck in the corpus had a comment: three of the
+    real fixtures carry `ppt/commentAuthors.xml` with nothing beside it, which
+    is what usually happens to comments before a deck is published.
+
+    python-pptx cannot write one, so the part is assembled by hand after the
+    save -- the only fixture here that is. These tests check the two things that
+    makes it worth having: that the package still holds together, and that the
+    part survives an edit rather than being quietly dropped.
+    """
+
+    def test_the_corpus_carries_a_comment(self, adversarial_deck):
+        pkg = Package.open(adversarial_deck)
+        assert "ppt/comments/comment1.xml" in pkg.parts
+        assert "ppt/commentAuthors.xml" in pkg.parts
+
+    def test_every_relationship_it_adds_resolves(self, adversarial_deck):
+        """A part nothing points at is not in the deck, whatever the zip holds."""
+        import posixpath
+        import zipfile
+
+        from lxml import etree
+
+        with zipfile.ZipFile(adversarial_deck) as z:
+            names = set(z.namelist())
+            dangling = []
+            for entry in names:
+                if not entry.endswith(".rels"):
+                    continue
+                base = entry.rsplit("_rels/", 1)[0].rstrip("/")
+                for rel in etree.fromstring(z.read(entry)).iter():
+                    target = rel.get("Target")
+                    if not target or rel.get("TargetMode") == "External":
+                        continue
+                    resolved = (
+                        posixpath.normpath(posixpath.join(base, target)) if base else target
+                    )
+                    if resolved not in names:
+                        dangling.append((entry, target))
+        assert dangling == []
+
+    def test_both_parts_are_declared_in_the_content_types(self, adversarial_deck):
+        import zipfile
+
+        with zipfile.ZipFile(adversarial_deck) as z:
+            declared = z.read("[Content_Types].xml").decode()
+        assert "/ppt/comments/comment1.xml" in declared
+        assert "/ppt/commentAuthors.xml" in declared
+
+    def test_a_comment_survives_an_edit_byte_for_byte(self, adversarial_deck, tmp_path):
+        """The measurement the compatibility row is actually making."""
+        from slide_wright.apply import apply_changes
+        from slide_wright.changeset import Change, ChangeSet, Op
+        from slide_wright.fidelity import compare
+        from slide_wright.inspect import inspect
+
+        deck = inspect(adversarial_deck)
+        slide, shape = next(
+            (sl, sh) for sl in deck.slides for sh in sl.shapes if sh.runs
+        )
+        changes = ChangeSet(deck=str(adversarial_deck))
+        changes.add(Change(
+            id="c", op=Op.SET_TEXT, slide=slide.number, target=shape.id,
+            before=shape.runs[0].text, after=shape.runs[0].text + ".",
+        ))
+        changes.approve_all()
+        out = tmp_path / "edited.pptx"
+        apply_changes(adversarial_deck, changes, out)
+
+        moved = [
+            d for d in compare(adversarial_deck, out).deltas
+            if "comment" in d.name.lower() and d.status != "identical"
+        ]
+        assert moved == [], "an edit must not touch a comment it was never asked about"

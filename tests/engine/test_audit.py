@@ -54,9 +54,14 @@ class TestNoFalsePositives:
 
     def test_the_corpus_deck_is_broadly_clean(self, adversarial_deck):
         result = audit(inspect(adversarial_deck), "corpus")
-        # It legitimately lacks source lines on its data slides; nothing else.
+        # It legitimately lacks source lines on its data slides, and it carries
+        # a review comment on purpose -- so it names its reviewer, and saying so
+        # is the disclosure rule working rather than a false positive.
         areas = {o.area for o in result.observations}
-        assert areas <= {Area.EVIDENCE}, result.render()
+        assert areas <= {Area.EVIDENCE, Area.DISCLOSURE}, result.render()
+        assert not [o for o in result.faults if o.area is not Area.EVIDENCE], (
+            result.render()
+        )
 
     def test_two_typefaces_is_not_sprawl(self):
         result = audit(deck(
@@ -743,8 +748,9 @@ class TestWhatTravelsWithTheFile:
         assert "Allison Coyle" in message
         assert "Kline, Mala M." in message
 
-    def test_a_deck_naming_nobody_says_nothing(self, adversarial_deck):
-        assert audit(inspect(adversarial_deck), "corpus").by_area(Area.DISCLOSURE) == []
+    def test_a_deck_naming_nobody_says_nothing(self, minimal_deck):
+        """The control deck, which carries no comment and therefore no reviewer."""
+        assert audit(inspect(minimal_deck), "control").by_area(Area.DISCLOSURE) == []
 
     def test_a_roster_with_no_comments_left_is_its_own_finding(self):
         found = self._audit("nasa-bhutan-water.pptx").by_area(Area.DISCLOSURE)
