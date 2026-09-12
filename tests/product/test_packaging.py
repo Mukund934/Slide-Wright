@@ -36,14 +36,24 @@ needs_built_client = pytest.mark.skipif(
 def wheel(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A wheel built the way a release is built."""
     out = tmp_path_factory.mktemp("wheel")
-    subprocess.run(
+    built_by = subprocess.run(
         [
             sys.executable, "-m", "pip", "wheel",
             "--no-deps", "--no-build-isolation", "--wheel-dir", str(out), str(API),
         ],
-        check=True,
         capture_output=True,
+        text=True,
     )
+    if built_by.returncode != 0:
+        # `--no-build-isolation` keeps this offline and quick, at the cost of
+        # needing setuptools in *this* environment. A venv on Python 3.12+ has
+        # none, and pip reports that as a bare exit 2 -- so say it out loud
+        # rather than leaving a CalledProcessError to be guessed at.
+        pytest.fail(
+            f"could not build the wheel (pip exit {built_by.returncode}).\n"
+            'If setuptools is missing: pip install -e "src/product/api[dev]"\n'
+            f"stdout:\n{built_by.stdout}\nstderr:\n{built_by.stderr}"
+        )
     built = list(out.glob("*.whl"))
     assert len(built) == 1, f"expected one wheel, got {built}"
     return built[0]
