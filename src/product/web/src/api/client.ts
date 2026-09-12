@@ -1,10 +1,13 @@
 /**
  * The only place this client talks to anything.
  *
- * Every call goes to the local engine on the same origin. There is no second
- * base URL and no configuration for one: ADR-0008 says the document does not
- * leave the machine, and the cheapest way to keep that true is to have nowhere
- * else to send it.
+ * Every call goes to the engine on the same origin. There is no second base URL
+ * and no configuration for one: ADR-0008 says the document does not leave the
+ * machine, and the cheapest way to keep that true is to have nowhere else to
+ * send it. That is still exactly true under ADR-0011 -- a self-hosted
+ * deployment serves this client from the same origin as its API, so "the same
+ * origin" continues to mean "wherever this page came from" and never a second
+ * host we were configured to trust.
  */
 
 import type {
@@ -24,6 +27,48 @@ import type {
 } from "./types";
 
 const BASE = "/api";
+
+/**
+ * The token for a self-hosted deployment, for this tab only.
+ *
+ * `sessionStorage`, not `localStorage`, and the difference is the point: a
+ * shared token that outlives the browser session sits on the disk of every
+ * machine that ever opened the deployment, including the borrowed one and the
+ * one in the meeting room. Closing the tab is a logout, which is the behaviour
+ * somebody handed a team token would expect.
+ *
+ * A local deployment never reaches this code: there is no token to hold,
+ * because there is nothing to authenticate to (ADR-0010).
+ *
+ * Every access is guarded. Storage throws in a private window, and a token that
+ * cannot be remembered is a reason to ask for it again, never a reason to fail
+ * to start.
+ */
+const TOKEN = "slide-wright.token";
+
+export function token(): string | null {
+  try {
+    return window.sessionStorage.getItem(TOKEN);
+  } catch {
+    return null;
+  }
+}
+
+export function remember(value: string): void {
+  try {
+    window.sessionStorage.setItem(TOKEN, value);
+  } catch {
+    // The session still works; it just will not survive a reload.
+  }
+}
+
+export function forget(): void {
+  try {
+    window.sessionStorage.removeItem(TOKEN);
+  } catch {
+    // As above.
+  }
+}
 
 /**
  * A refusal the engine explained, as opposed to a transport failure.
@@ -48,12 +93,36 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * What every request to this API carries.
+ *
+ * One function rather than an object literal per call site, because there were
+ * two call sites and only one of them had the token: `applyStreaming` reads a
+ * Server-Sent Events body and so cannot go through `request`, and it built its
+ * own headers. On a self-hosted deployment that made *apply* -- the operation
+ * the whole product exists to perform -- the one route that returned 401,
+ * while everything around it worked.
+ *
+ * Any future call that bypasses `request` for a streaming body has the same
+ * shape of bug available to it. This is the thing to spread.
+ */
+function headers(): Record<string, string> {
+  const held = token();
+  return {
+    "Content-Type": "application/json",
+    // Only when there is one. A local deployment has no token and must not
+    // start sending an empty Authorization header to find out.
+    ...(held ? { Authorization: `Bearer ${held}` } : {}),
+  };
+}
+
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${BASE}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
+      headers: { ...headers(), ...init?.headers },
     });
   } catch {
     // A local API that is not answering is the one failure mode a user can
@@ -86,6 +155,14 @@ const post = <T>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) });
 
 export const api = {
+  /**
+   * Whether this deployment wants a token, asked without holding one.
+   *
+   * The only route that answers unauthenticated. It says that and nothing
+   * else -- `health` reports the engine version and how many decks are open,
+   * which is a description of somebody's activity, so it is behind the token.
+   */
+  ping: () => request<{ ok: boolean; auth: "required" | "none" }>("/ping"),
   health: () => request<Health>("/health"),
 
   /** Open a deck already on this machine. A path, never an upload. */
@@ -174,7 +251,7 @@ export async function applyStreaming(
 ): Promise<Verification> {
   const response = await fetch(`${BASE}/documents/${id}/apply/stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: headers(),
     body: JSON.stringify({ note }),
     signal,
   });
