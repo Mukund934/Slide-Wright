@@ -89,7 +89,7 @@ def cmd_audit(args) -> int:
     if report.gate and report.gate.findings:
         print()
         print(report.gate.render())
-    clean = not report.observations and (report.gate is None or report.gate.passed)
+    clean = not report.faults and (report.gate is None or report.gate.passed)
     return EXIT_OK if clean else EXIT_FINDINGS
 
 
