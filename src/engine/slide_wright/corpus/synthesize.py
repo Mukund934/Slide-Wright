@@ -49,8 +49,34 @@ def build_adversarial(out_path: str | Path) -> Path:
     _slide_bulleted_body(prs)         # several <a:p> in one placeholder
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    _anonymise(prs)
     prs.save(str(out_path))
     return out_path
+
+
+def _anonymise(prs: Presentation) -> None:
+    """Strip the identity python-pptx's default template arrives with.
+
+    Its `docProps/core.xml` names its author, so every deck generated here was
+    carrying **"Steve Canny"** into the corpus -- found by the disclosure rule
+    the day it was written, on the fixture built to be adversarial.
+
+    Two reasons it matters beyond tidiness. A fixture should assert only what it
+    was built to assert, and one that names an unrelated person makes any
+    identity rule measured against it meaningless. And the whole argument for
+    generating these decks rather than committing them is that a generated deck
+    carries no confidentiality question; a name is exactly the kind of thing
+    that argument is supposed to rule out.
+    """
+    core = prs.core_properties
+    core.author = ""
+    core.last_modified_by = ""
+    core.title = "Slide-Wright synthetic corpus"
+    core.subject = ""
+    core.comments = ""
+    core.category = ""
+    core.keywords = ""
+    core.revision = 1
 
 
 # ── slides ───────────────────────────────────────────────────────────────────
@@ -337,6 +363,7 @@ def build_minimal(out_path: str | Path) -> Path:
     s.shapes.title.text = "Minimal control deck"
     s.placeholders[1].text = "Text and placeholders only"
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    _anonymise(prs)
     prs.save(str(out_path))
     return out_path
 
@@ -381,6 +408,7 @@ def build_untidy(out_path: str | Path) -> Path:
     _untidy_nearly_aligned(prs)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    _anonymise(prs)
     prs.save(str(out_path))
     return out_path
 
