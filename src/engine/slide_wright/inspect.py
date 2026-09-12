@@ -251,11 +251,64 @@ class SlideInfo:
 
 
 @dataclass
+class Provenance:
+    """Who and what the *file* names, as against what the deck shows.
+
+    A deck is not only its slides. Every one of the 26 third-party decks in this
+    corpus names the person who last edited it; 25 name whoever created it; six
+    name a company; and three carry a roster of reviewers -- 26 people in all --
+    whose comments have been deleted while their names were not.
+
+    None of that is on a slide, and none of it is visible to anyone reading the
+    deck. It travels with the file, which for this product's customers is the
+    problem: a pitchbook sent to a client should not arrive naming the analyst
+    who drafted it, the partner who reviewed it, and the firm whose template it
+    was built from.
+
+    Read, reported, and deliberately **not** corrected. Removing a part or
+    rewriting `docProps` changes the shape of the package, which is the thing
+    verification exists to refuse -- so it needs its own decision rather than
+    arriving as a side effect of an audit.
+    """
+
+    creator: str = ""
+    last_modified_by: str = ""
+    company: str = ""
+    manager: str = ""
+    revision: str = ""
+    #: Everyone `ppt/commentAuthors.xml` names, in file order.
+    comment_authors: list[str] = field(default_factory=list)
+    #: How many comment parts survive. Zero with a non-empty roster above means
+    #: the comments were deleted and the names were left behind.
+    comment_parts: int = 0
+
+    @property
+    def people(self) -> list[str]:
+        """Every distinct person the file names, in the order they appear."""
+        seen: list[str] = []
+        for name in [self.creator, self.last_modified_by, *self.comment_authors]:
+            cleaned = name.strip()
+            if cleaned and cleaned not in seen:
+                seen.append(cleaned)
+        return seen
+
+    @property
+    def organisations(self) -> list[str]:
+        seen: list[str] = []
+        for name in (self.company, self.manager):
+            cleaned = name.strip()
+            if cleaned and cleaned not in seen:
+                seen.append(cleaned)
+        return seen
+
+
+@dataclass
 class DeckInfo:
     slide_width: int = 0
     slide_height: int = 0
     slides: list[SlideInfo] = field(default_factory=list)
     theme_fonts: dict[str, str] = field(default_factory=dict)
+    provenance: Provenance = field(default_factory=Provenance)
 
     @property
     def slide_count(self) -> int:
@@ -289,9 +342,67 @@ def inspect(pkg: Package | str) -> DeckInfo:
             if el is not None:
                 deck.theme_fonts[key] = el.get("typeface", "")
 
+    deck.provenance = _read_provenance(pkg)
+
     for part in pkg.slides():
         deck.slides.append(_read_slide(pkg, part.name, part.slide_number or 0))
     return deck
+
+
+#: Namespaces of the two property parts. They are OPC, not PresentationML, so
+#: they do not appear in `NS` -- which is part of why nothing here had read them.
+DC = "http://purl.org/dc/elements/1.1/"
+CP = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+EP = "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
+
+
+def _read_provenance(pkg: Package) -> Provenance:
+    """What the file says about who made it.
+
+    Three parts, none of which is a slide: `docProps/core.xml`,
+    `docProps/app.xml` and `ppt/commentAuthors.xml`. A malformed or absent one
+    contributes nothing rather than raising -- this is a description of the
+    file, and a deck that cannot state its author is still a deck.
+    """
+    out = Provenance()
+
+    core = _parse(pkg, "docProps/core.xml")
+    if core is not None:
+        out.creator = _text(core, f"{{{DC}}}creator")
+        out.last_modified_by = _text(core, f"{{{CP}}}lastModifiedBy")
+        out.revision = _text(core, f"{{{CP}}}revision")
+
+    app = _parse(pkg, "docProps/app.xml")
+    if app is not None:
+        out.company = _text(app, f"{{{EP}}}Company")
+        out.manager = _text(app, f"{{{EP}}}Manager")
+
+    authors = _parse(pkg, "ppt/commentAuthors.xml")
+    if authors is not None:
+        out.comment_authors = [
+            (el.get("name") or "").strip()
+            for el in authors.iter()
+            if etree.QName(el).localname == "cmAuthor" and (el.get("name") or "").strip()
+        ]
+
+    out.comment_parts = sum(
+        1 for name in pkg.parts if name.startswith("ppt/comments/")
+    )
+    return out
+
+
+def _parse(pkg: Package, part_name: str):
+    if part_name not in pkg.parts:
+        return None
+    try:
+        return etree.fromstring(pkg.read(part_name))
+    except etree.XMLSyntaxError:
+        return None
+
+
+def _text(root, tag: str) -> str:
+    el = root.find(tag)
+    return (el.text or "").strip() if el is not None else ""
 
 
 # ── slide parsing ────────────────────────────────────────────────────────────
