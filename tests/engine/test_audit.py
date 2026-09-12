@@ -7,6 +7,8 @@ stops trusting every later finding. Precision is tested harder than recall.
 
 from __future__ import annotations
 
+import pathlib
+
 from slide_wright.audit import Area, Observation, Remedy, audit
 from slide_wright.gate import Severity
 from slide_wright.layout import DEFAULT_TOLERANCE_EMU, plan_alignment
@@ -714,3 +716,56 @@ class TestAHeadingIsNotTheSameAsNoTitle:
         for o in audit(deck(heading, bare)).by_area(Area.NARRATIVE):
             if "title" in o.message:
                 assert not o.is_automatable, o.message
+
+
+class TestWhatTravelsWithTheFile:
+    """`DISCLOSURE` asks what the file carries, not what the deck says.
+
+    For this product's customers that is sometimes the more urgent question: a
+    pitchbook sent to a client should not arrive naming the analyst who drafted
+    it, the partner who reviewed it, and the firm whose template it came from.
+    """
+
+    FIXTURES = pathlib.Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "third-party"
+
+    def _audit(self, name: str):
+        import pytest
+
+        deck = self.FIXTURES / name
+        if not deck.is_file():
+            pytest.skip("third-party corpus not present; run scripts/fetch_fixtures.py")
+        return audit(inspect(deck), name)
+
+    def test_it_names_the_people_rather_than_counting_them(self):
+        """The value is the list. A reader knows documents have properties."""
+        found = self._audit("eia-ieo2023-release.pptx").by_area(Area.DISCLOSURE)
+        message = next(o.message for o in found if "names" in o.message)
+        assert "Allison Coyle" in message
+        assert "Kline, Mala M." in message
+
+    def test_a_deck_naming_nobody_says_nothing(self, adversarial_deck):
+        assert audit(inspect(adversarial_deck), "corpus").by_area(Area.DISCLOSURE) == []
+
+    def test_a_roster_with_no_comments_left_is_its_own_finding(self):
+        found = self._audit("nasa-bhutan-water.pptx").by_area(Area.DISCLOSURE)
+        assert any("comments were deleted" in o.message for o in found), (
+            "somebody cleaned this file and stopped one part short; that is a "
+            "different sentence from 'the file has properties'"
+        )
+
+    def test_it_counts_in_the_singular_when_there_is_one(self):
+        """The exact sentence matters; this one is read by someone deciding."""
+        message = next(
+            o.message for o in self._audit("lo-smartart-gear.pptx").by_area(Area.DISCLOSURE)
+        )
+        assert "1 person who appears on no slide" in message
+
+    def test_a_disclosure_is_not_a_fault(self):
+        """It is something to decide, not something to fix.
+
+        It is true of nearly every real deck, so counting it would make `audit`
+        exit non-zero on everything and retire the exit code as a signal.
+        """
+        result = self._audit("lo-smartart-gear.pptx")
+        assert result.by_area(Area.DISCLOSURE), "this deck does name someone"
+        assert all(o.area is not Area.DISCLOSURE for o in result.faults)

@@ -424,3 +424,63 @@ def _text_of(pkg, notes_part: str) -> str:
             if text.strip():
                 lines.append(text)
     return "\n".join(lines)
+
+
+class TestWhatTheFileNames:
+    """Provenance: who the *file* names, as against what the deck shows.
+
+    Measured across the 26 third-party decks before any of this was written:
+    **26 name the person who last edited them**, 25 name a creator, six name a
+    company, and three carry a roster of reviewers -- 26 people between them --
+    whose comments have been deleted while their names were not.
+
+    None of it appears on a slide. All of it travels with the file.
+    """
+
+    FIXTURES = pathlib.Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "third-party"
+
+    def _deck(self, name: str):
+        import pytest
+
+        deck = self.FIXTURES / name
+        if not deck.is_file():
+            pytest.skip("third-party corpus not present; run scripts/fetch_fixtures.py")
+        return inspect(deck)
+
+    def test_reads_who_made_the_file_and_who_last_saved_it(self):
+        provenance = self._deck("eia-ieo2023-release.pptx").provenance
+        assert provenance.creator == "Allison Coyle"
+        assert provenance.last_modified_by == "Bowman, Michelle"
+
+    def test_reads_the_review_roster(self):
+        provenance = self._deck("eia-ieo2023-release.pptx").provenance
+        assert len(provenance.comment_authors) == 8
+        assert "Kline, Mala M." in provenance.comment_authors
+        assert provenance.comment_parts == 0, (
+            "this fixture is here because the comments are gone and the names are not"
+        )
+
+    def test_people_are_distinct_and_in_file_order(self):
+        provenance = self._deck("eia-ieo2023-release.pptx").provenance
+        assert provenance.people[:2] == ["Allison Coyle", "Bowman, Michelle"]
+        assert len(provenance.people) == len(set(provenance.people))
+
+    def test_an_organisation_is_not_a_person(self):
+        provenance = self._deck("nasa-bhutan-water.pptx").provenance
+        assert provenance.organisations == ["HPES ACES"]
+        assert "HPES ACES" not in provenance.people
+
+    def test_a_generated_deck_names_nobody(self, adversarial_deck):
+        """The fixture must assert only what it was built to assert.
+
+        python-pptx's default template names its own author, so every deck
+        generated here was carrying **"Steve Canny"** into the corpus until the
+        disclosure rule found it on the day it was written. A fixture that names
+        an unrelated person makes any identity rule measured against it
+        meaningless — and the whole argument for generating these decks rather
+        than committing them is that a generated deck raises no confidentiality
+        question.
+        """
+        provenance = inspect(adversarial_deck).provenance
+        assert provenance.people == []
+        assert provenance.organisations == []
