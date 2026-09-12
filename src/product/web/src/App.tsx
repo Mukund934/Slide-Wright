@@ -13,7 +13,7 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
 
-import { api } from "./api/client";
+import { api, token } from "./api/client";
 import type { Health, LockSpec } from "./api/types";
 import { Button, Pill } from "./design/primitives";
 import { reveal } from "./motion/tokens";
@@ -30,6 +30,7 @@ import { Protect, ProtectedList } from "./workspace/Protect";
 import { SlideCanvas } from "./workspace/SlideCanvas";
 import { SpeakerNotes } from "./workspace/SpeakerNotes";
 import { SourcesPanel } from "./workspace/SourcesPanel";
+import { Unlock } from "./workspace/Unlock";
 import { VerificationPanel } from "./workspace/VerificationPanel";
 
 type RightTab = "audit" | "sources" | "changes" | "history";
@@ -38,23 +39,66 @@ export default function App() {
   const workspace = useWorkspace();
   const [health, setHealth] = useState<Health | null>(null);
   const [tab, setTab] = useState<RightTab>("audit");
+  /**
+   * Whether this deployment has let us in yet.
+   *
+   * `null` while asking. A local install answers "none" and is through before
+   * anything renders; a self-hosted one (ADR-0011) answers "required" and gets
+   * the token screen until a real request has succeeded.
+   *
+   * It gates everything below deliberately. Restoring a document or fetching
+   * health before the token is in place produces a workspace that loads and
+   * then fails on the first action, which is the worst moment to find out.
+   */
+  const [entered, setEntered] = useState<boolean | null>(null);
 
   useEffect(() => {
-    api.health().then(setHealth).catch(() => setHealth(null));
+    let live = true;
+    api
+      .ping()
+      .then((answer) => {
+        if (!live) return;
+        // A token already held from earlier in this tab is not assumed good --
+        // `health` is behind the token, so its success is the proof.
+        if (answer.auth === "none") return setEntered(true);
+        if (!token()) return setEntered(false);
+        api.health().then(
+          () => live && setEntered(true),
+          () => live && setEntered(false),
+        );
+      })
+      .catch(() => {
+        // The server is not answering at all. That is not a locked door, and
+        // showing a token screen for it would send somebody hunting for a
+        // credential when the problem is that nothing is running.
+        if (live) setEntered(true);
+      });
+    return () => {
+      live = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (entered) api.health().then(setHealth).catch(() => setHealth(null));
+  }, [entered]);
 
   // Reconnect to whatever this browser had open. The workspace on disk survives
   // a reload; until now the client did not, so a refresh mid-review meant
   // retyping an absolute Windows path to get back to work.
   useEffect(() => {
-    void workspace.restore();
-  }, [workspace.restore]);
+    if (entered) void workspace.restore();
+  }, [entered, workspace.restore]);
 
   // A settled apply is the moment the review panel stops being the thing to
   // look at, so the panel follows the work rather than making the user find it.
   useEffect(() => {
     if (workspace.phase === "settled") setTab("changes");
   }, [workspace.phase]);
+
+  // Nothing renders while the question is open. A flash of the open screen
+  // followed by a token prompt reads as though something went wrong.
+  if (entered === null) return null;
+  if (entered === false) return <Unlock onUnlocked={() => setEntered(true)} />;
 
   if (!workspace.document) {
     return (
