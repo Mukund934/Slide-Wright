@@ -89,6 +89,7 @@ DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 # precisely a way to make it leave.
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
 
+
 def _find_client() -> Path | None:
     """The built client, wherever this copy of the product keeps it.
 
@@ -127,6 +128,40 @@ def _find_client() -> Path | None:
 
 
 CLIENT = _find_client()
+
+
+class ClientFiles(StaticFiles):
+    """The built client, with cache headers that survive an upgrade.
+
+    Starlette sends `ETag` and `Last-Modified` and no `Cache-Control` at all.
+    With no explicit freshness a browser is permitted to guess one -- the usual
+    heuristic is a tenth of the file's age -- and to serve `index.html` from
+    cache *without revalidating*. That is not a hypothetical: rebuilding the
+    client during this work produced a new bundle, and the page kept loading
+    the previous one because the entry point never went back to the server.
+
+    For a product distributed as a package people upgrade, that is the whole
+    upgrade path failing quietly. The user runs `pip install -U`, restarts the
+    app, and gets the version they had -- or a blank page, if the asset the
+    stale entry point names is no longer on disk.
+
+    Two rules, which is all this needs:
+
+    `index.html` is `no-cache`: keep it, but ask every time. The ETag means the
+    answer is usually a 304 and a few bytes, on a loopback connection.
+
+    Everything under `assets/` is content-hashed by Vite -- the filename changes
+    whenever the bytes do -- so those can be cached hard and forever. A stale
+    one is unreachable by construction, because nothing points at it.
+    """
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):  # type: ignore[override]
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        hashed = Path(full_path).parent.name == "assets"
+        response.headers["cache-control"] = (
+            "public, max-age=31536000, immutable" if hashed else "no-cache"
+        )
+        return response
 
 
 def create_app(*, workspace: Workspace | None = None, serve_client: bool = True) -> FastAPI:
@@ -544,7 +579,7 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
     # ── the client ───────────────────────────────────────────────────────────
 
     if serve_client and CLIENT is not None:
-        app.mount("/", StaticFiles(directory=CLIENT, html=True), name="client")
+        app.mount("/", ClientFiles(directory=CLIENT, html=True), name="client")
 
     return app
 
