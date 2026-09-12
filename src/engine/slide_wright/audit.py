@@ -173,8 +173,13 @@ class DeckAudit:
                 f"  quality gate: {len(self.gate.errors)} error(s), "
                 f"{len(self.gate.warnings)} warning(s)"
             )
-        if not self.observations:
+        # Two sentences, because there are two true things to say. A deck can
+        # have nothing wrong with it and still carry the name of everyone who
+        # reviewed it, and printing only the first would be the more comforting
+        # of the two answers rather than the complete one.
+        if not self.faults:
             lines += ["", "  No structural issues found."]
+        if not self.observations:
             return "\n".join(lines)
 
         for area in Area:
