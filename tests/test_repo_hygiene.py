@@ -314,3 +314,65 @@ def test_no_source_file_is_secretly_binary():
         "these text files hold a null byte, so git treats them as binary: "
         + "; ".join(offenders)
     )
+
+
+class TestVersionsAgree:
+    """The version a package declares and the version it reports.
+
+    Each distribution states its version twice -- in `pyproject.toml`, which is
+    what the wheel is named after, and in `__init__.py`, which is what
+    `/api/health` reports and what a bug report will quote. Nothing made them
+    the same number.
+
+    A release where those disagree is not a cosmetic problem: the user installs
+    0.2.0 and the app tells them it is 0.1.0, so every report against it names
+    the wrong code. And the two distributions are versioned together on purpose
+    -- the API imports the engine directly (ADR-0010), and a mismatched pair has
+    never been tested.
+    """
+
+    PACKAGES = {
+        "engine": (
+            REPO / "src" / "engine" / "pyproject.toml",
+            REPO / "src" / "engine" / "slide_wright" / "__init__.py",
+        ),
+        "api": (
+            REPO / "src" / "product" / "api" / "pyproject.toml",
+            REPO / "src" / "product" / "api" / "slide_wright_api" / "__init__.py",
+        ),
+    }
+
+    @staticmethod
+    def _declared(pyproject: Path) -> str:
+        match = re.search(
+            r'^version\s*=\s*"([^"]+)"', pyproject.read_text(encoding="utf-8"), re.M
+        )
+        assert match, f"no version in {pyproject}"
+        return match.group(1)
+
+    @staticmethod
+    def _reported(init: Path) -> str:
+        match = re.search(
+            r'^__version__\s*=\s*"([^"]+)"', init.read_text(encoding="utf-8"), re.M
+        )
+        assert match, f"no __version__ in {init}"
+        return match.group(1)
+
+    @pytest.mark.parametrize("name", sorted(PACKAGES))
+    def test_the_package_reports_the_version_it_declares(self, name: str) -> None:
+        pyproject, init = self.PACKAGES[name]
+        declared, reported = self._declared(pyproject), self._reported(init)
+        assert declared == reported, (
+            f"{name}: pyproject.toml says {declared} and __init__.py says "
+            f"{reported}. A user installing {declared} would be told they are "
+            f"running {reported}."
+        )
+
+    def test_both_distributions_are_released_together(self) -> None:
+        engine = self._declared(self.PACKAGES["engine"][0])
+        api = self._declared(self.PACKAGES["api"][0])
+        assert engine == api, (
+            f"engine is {engine} and the API is {api}. They ship as a pair "
+            "because the API imports the engine directly (ADR-0010); a "
+            "mismatched pair has never been tested."
+        )
