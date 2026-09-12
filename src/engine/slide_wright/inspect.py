@@ -250,6 +250,25 @@ class SlideInfo:
         return [s for s in self.shapes if s.kind == kind]
 
 
+@dataclass(frozen=True)
+class Author:
+    """Someone `ppt/authors.xml` names, and how far it identifies them.
+
+    The legacy roster carried a display name and initials. This one carries a
+    work email address and a directory object id:
+
+        userId="S::Michelle.Bowman@eia.gov::4561ef23-79be-43e1-9ac3-2223a28f3e32"
+
+    That is a different order of disclosure -- a contact somebody can write to
+    and a key into an organisation's directory, rather than a name on a page --
+    so it is recorded separately rather than folded in with the names.
+    """
+
+    name: str
+    email: str = ""
+    identifier: str = ""
+
+
 @dataclass
 class Provenance:
     """Who and what the *file* names, as against what the deck shows.
@@ -281,12 +300,31 @@ class Provenance:
     #: How many comment parts survive. Zero with a non-empty roster above means
     #: the comments were deleted and the names were left behind.
     comment_parts: int = 0
+    #: Everyone `ppt/authors.xml` names -- the 2021 comment roster, which is a
+    #: different part from `commentAuthors.xml` and carries much more.
+    #:
+    #: The first version of this module read only the legacy part, and missed
+    #: this one on two real decks, because the scan that found the legacy part
+    #: searched part *names* for the word "comment" and `ppt/authors.xml` does
+    #: not contain it.
+    modern_authors: list[Author] = field(default_factory=list)
+    #: `ppt/changesInfos/*` -- PowerPoint's co-authoring history, recording who
+    #: changed what. One real deck here carries 9.7 KB of it.
+    revision_history_parts: int = 0
+    #: External relationship targets naming a path on somebody's machine.
+    local_links: list[str] = field(default_factory=list)
+
+    @property
+    def contacts(self) -> list[Author]:
+        """Authors the file can identify beyond a display name."""
+        return [a for a in self.modern_authors if a.email or a.identifier]
 
     @property
     def people(self) -> list[str]:
         """Every distinct person the file names, in the order they appear."""
         seen: list[str] = []
-        for name in [self.creator, self.last_modified_by, *self.comment_authors]:
+        modern = [a.name for a in self.modern_authors]
+        for name in [self.creator, self.last_modified_by, *self.comment_authors, *modern]:
             cleaned = name.strip()
             if cleaned and cleaned not in seen:
                 seen.append(cleaned)
@@ -388,7 +426,72 @@ def _read_provenance(pkg: Package) -> Provenance:
     out.comment_parts = sum(
         1 for name in pkg.parts if name.startswith("ppt/comments/")
     )
+
+    modern = _parse(pkg, "ppt/authors.xml")
+    if modern is not None:
+        for el in modern.iter():
+            if etree.QName(el).localname != "author":
+                continue
+            name = (el.get("name") or "").strip()
+            if not name:
+                continue
+            out.modern_authors.append(
+                Author(name=name, **_identity(el.get("userId") or ""))
+            )
+
+    out.revision_history_parts = sum(
+        1 for name in pkg.parts if name.startswith("ppt/changesInfos/")
+    )
+    out.local_links = _local_links(pkg)
     return out
+
+
+#: `S::someone@example.com::4561ef23-...` is the shape PowerPoint writes for an
+#: Azure-AD signed-in author. Anything else is kept whole rather than guessed at.
+_USER_ID = re.compile(r"^[A-Za-z]::(?P<email>[^:]*)::(?P<id>.+)$")
+
+
+def _identity(user_id: str) -> dict[str, str]:
+    match = _USER_ID.match(user_id.strip())
+    if not match:
+        return {"identifier": user_id.strip()}
+    email = match.group("email")
+    return {
+        "email": email if "@" in email else "",
+        "identifier": match.group("id"),
+    }
+
+
+#: A relationship target that names a drive or a UNC share, however it is spelled.
+_LOCAL_TARGET = re.compile(r"^(?:file:///)?(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def _local_links(pkg: Package) -> list[str]:
+    """External links pointing at a path on whoever last edited the deck.
+
+    Eight chart data links in one real deck read
+    `file:///C:\\Users\\kanek\\Desktop\\Comparative%20analysis.xlsx`. That
+    discloses a user account, where they keep their work, and the names of two
+    workbooks that were never shipped with the deck -- and it tells a recipient
+    the chart's source is somewhere they cannot reach.
+
+    It is the product's own subject matter: ADR-0009 is about chart data links
+    surviving an edit, and nothing had ever asked where they point.
+    """
+    found: list[str] = []
+    for name in pkg.parts:
+        if not name.endswith(".rels"):
+            continue
+        root = _parse(pkg, name)
+        if root is None:
+            continue
+        for rel in root.iter():
+            if rel.get("TargetMode") != "External":
+                continue
+            target = (rel.get("Target") or "").strip()
+            if target and _LOCAL_TARGET.match(target) and target not in found:
+                found.append(target)
+    return found
 
 
 def _parse(pkg: Package, part_name: str):

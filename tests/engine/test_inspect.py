@@ -484,3 +484,59 @@ class TestWhatTheFileNames:
         provenance = inspect(minimal_deck).provenance
         assert provenance.people == []
         assert provenance.organisations == []
+
+
+class TestTheOtherAuthorList:
+    """`ppt/authors.xml` -- the 2021 roster, and a different part entirely.
+
+    The first version of this area read `ppt/commentAuthors.xml` and stopped
+    there. It missed this one on two real decks for a reason worth writing down:
+    the scan that found the legacy part searched part *names* for the word
+    "comment", and `ppt/authors.xml` does not contain it. The sweep that found
+    it asked the contents instead.
+
+    It matters because of what it holds. The legacy roster carries a display
+    name and initials; this one carries a work email address and a directory
+    object id.
+    """
+
+    FIXTURES = pathlib.Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "third-party"
+
+    def _deck(self, name: str):
+        import pytest
+
+        deck = self.FIXTURES / name
+        if not deck.is_file():
+            pytest.skip("third-party corpus not present; run scripts/fetch_fixtures.py")
+        return inspect(deck)
+
+    def test_it_reads_the_modern_roster_too(self):
+        authors = self._deck("nasa-es6-exit.pptx").provenance.modern_authors
+        assert len(authors) == 3
+        assert {a.name for a in authors} == {
+            "Silva, Herbert P. (JSC-ES611)",
+            "Puccini, Claire L. (JSC-ES611)",
+            "St Clair, Raven N. (JSC-AH712)",
+        }
+
+    def test_an_address_is_pulled_out_of_the_user_id(self):
+        """`S::someone@example.com::4561ef23-...` is what PowerPoint writes."""
+        author = self._deck("eia-ieo2023-release.pptx").provenance.modern_authors[0]
+        assert author.email == "Michelle.Bowman@eia.gov"
+        assert author.identifier == "4561ef23-79be-43e1-9ac3-2223a28f3e32"
+
+    def test_a_modern_author_is_one_of_the_people_the_file_names(self):
+        provenance = self._deck("nasa-es6-exit.pptx").provenance
+        assert "Silva, Herbert P. (JSC-ES611)" in provenance.people
+
+    def test_it_counts_the_co_authoring_history(self):
+        assert self._deck("nasa-bhutan-water.pptx").provenance.revision_history_parts == 1
+
+    def test_it_finds_links_pointing_at_somebody_machine(self):
+        """Eight chart data links in one real deck name a Desktop folder."""
+        links = self._deck("nasa-bhutan-water.pptx").provenance.local_links
+        assert len(links) == 2, "the same target eight times is one link, not eight"
+        assert all("kanek" in link for link in links)
+
+    def test_a_deck_linking_nowhere_local_says_nothing(self):
+        assert self._deck("eia-ieo2023-release.pptx").provenance.local_links == []
