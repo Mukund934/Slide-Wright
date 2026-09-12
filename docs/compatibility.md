@@ -50,6 +50,8 @@ Measured over **17 deck(s)** on this machine.
 | Animation timing | 6 of 17 decks | PRESERVED | not refused |
 | Slide transitions | 3 of 17 decks | PRESERVED | not refused |
 | Comments | 1 of 17 decks | PRESERVED | not refused |
+| Modern comments | no deck measured here | UNKNOWN — nothing to measure | UNKNOWN |
+| Revision history | 1 of 17 decks | PRESERVED | not refused |
 | Custom XML | 4 of 17 decks | PRESERVED | not refused |
 | Macros (VBA) | no deck measured here | UNKNOWN — nothing to measure | REFUSED |
 
@@ -62,6 +64,7 @@ No deck available here contains these, so the engine's behaviour with them is un
 - Equations (OMML)
 - Ink annotations
 - 3D models
+- Modern comments
 - Macros (VBA)
 
 ## Refusals, and why
