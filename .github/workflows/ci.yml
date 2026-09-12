@@ -265,3 +265,69 @@ jobs:
             exit 1
           fi
           echo "no secret-shaped files tracked"
+
+  container:
+    name: Container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Built here because it cannot be built where it is written: the author's
+      # machine has no Docker, so an unbuilt Dockerfile would be a deployment
+      # artifact nobody had ever run. This job is what makes it verified rather
+      # than plausible.
+      - name: Build
+        run: docker build -t slide-wright:ci .
+
+      - name: It refuses to start unconfigured
+        run: |
+          if docker run --rm slide-wright:ci; then
+            echo "FAIL the container started with no mode, hostname or token"
+            exit 1
+          fi
+          echo "refused, as ADR-0011 requires"
+
+      - name: It refuses to start without a token
+        run: |
+          if docker run --rm -e SLIDE_WRIGHT_MODE=self-hosted slide-wright:ci; then
+            echo "FAIL the container started unauthenticated"
+            exit 1
+          fi
+          echo "refused"
+
+      - name: Start it, properly configured
+        run: |
+          mkdir -p decks
+          python -m pip install --quiet -e "src/engine"
+          python -c "
+          from pathlib import Path
+          from slide_wright.corpus.synthesize import build_adversarial
+          build_adversarial(Path('decks/ci.pptx'))
+          "
+          echo "SW_TOKEN=$(python -c 'import secrets;print(secrets.token_urlsafe(32))')" >> $GITHUB_ENV
+
+      - name: Run
+        run: |
+          docker run -d --name sw -p 8787:8787 \
+            -e SLIDE_WRIGHT_MODE=self-hosted \
+            -e SLIDE_WRIGHT_HOSTNAME=slidewright.ci \
+            -e SLIDE_WRIGHT_TOKEN="$SW_TOKEN" \
+            -v "$PWD/decks:/decks" \
+            slide-wright:ci
+          for _ in $(seq 1 40); do
+            if curl -fsS -H "Host: slidewright.ci" http://127.0.0.1:8787/api/ping >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          docker logs sw
+
+      - name: What it serves, and what it refuses
+        run: python scripts/assert_container_enforces.py
+
+      - name: The health check the orchestrator will run
+        run: docker inspect --format '{{.State.Health.Status}}' sw || true
+
+      - name: Stop
+        if: always()
+        run: docker rm -f sw || true
