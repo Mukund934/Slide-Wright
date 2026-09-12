@@ -14,7 +14,7 @@ import webbrowser
 
 import uvicorn
 
-from slide_wright_api.app import WEB_DIST, create_app
+from slide_wright_api.app import CLIENT, create_app
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8787
@@ -35,17 +35,22 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     url = f"http://{HOST}:{args.port}"
-    built = WEB_DIST.is_dir()
+    built = CLIENT is not None
 
     print(f"Slide-Wright — {url}")
     print("  the document does not leave this machine (ADR-0008)")
     if not built:
-        # Saying this now is the difference between "the app is broken" and
-        # "the client has not been built yet", which are one command apart.
+        # Which of the two situations this is matters, because only one of
+        # them is the user's to fix. A source checkout is one command away
+        # from an interface; an installed copy that lands here is a wheel
+        # built without its client, and no command the user runs repairs it.
         print()
-        print("  the client is not built, so only /api is served.")
-        print("  build it:  cd src/product/web && npm install && npm run build")
-        print("  or develop against it:  npm run dev  (http://localhost:5173)")
+        print("  no built client found, so only /api is served.")
+        print("  in a source checkout, build it:")
+        print("    npm --prefix src/product/web install")
+        print("    npm --prefix src/product/web run build")
+        print("  in an installed copy this should not happen -- the wheel")
+        print("  carries the client. Please report it.")
 
     if built and not args.no_browser:
         webbrowser.open(url)
