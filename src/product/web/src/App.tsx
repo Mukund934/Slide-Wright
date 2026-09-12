@@ -74,6 +74,7 @@ export default function App() {
         health={health}
         documentId={workspace.document.id}
         version={workspace.document.versions.at(-1)?.number ?? 0}
+        onClose={workspace.close}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -261,12 +262,14 @@ function TopBar({
   health,
   documentId,
   version,
+  onClose,
 }: {
   name: string;
   workspacePath: string;
   health: Health | null;
   documentId: string;
   version: number;
+  onClose: () => void;
 }) {
   return (
     <header className="flex h-10 shrink-0 items-center justify-between border-b border-line bg-panel px-3">
@@ -284,6 +287,18 @@ function TopBar({
         <span className="text-evidence hidden text-ink-faint lg:inline">
           engine {health?.engine ?? "…"}
         </span>
+        {/* The way back to the open screen, which there was not one of.
+            `DELETE /api/documents/{id}` has been a route throughout and
+            `api.close` has sat in the service layer with no caller, so opening
+            the wrong deck was a dead end: no control closed it, and a reload
+            restored it from the remembered id.
+
+            It says "open another" rather than "close" because nothing is being
+            discarded — every version stays in the workspace beside the deck —
+            and "close" invites the user to wonder whether that is true. */}
+        <Button onClick={onClose} title="Put this deck down and open a different one">
+          open another
+        </Button>
         <Export documentId={documentId} version={version} />
       </div>
     </header>
