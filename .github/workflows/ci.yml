@@ -123,24 +123,19 @@ jobs:
           python -m pip wheel --no-deps --no-build-isolation -w wheelout src/product/api
           python scripts/assert_wheel_has_client.py wheelout
 
-      # ADR-0010: bound to loopback, with no flag to change it. Matched on the
-      # argparse call rather than the string, because the module's own docstring
-      # explains that --host is deliberately absent.
-      - name: Assert the API cannot be bound to a public interface
-        run: |
-          if grep -qE 'add_argument\( *["'"'"']--host' src/product/api/slide_wright_api/__main__.py; then
-            echo "FAIL the app exposes a --host flag"
-            exit 1
-          fi
-          if ! grep -q 'HOST = "127.0.0.1"' src/product/api/slide_wright_api/__main__.py; then
-            echo "FAIL the app no longer pins loopback"
-            exit 1
-          fi
-          if grep -nE 'host *= *["'"'"'](0\.0\.0\.0|::)' src/product/api/slide_wright_api/*.py; then
-            echo "FAIL something binds a public interface"
-            exit 1
-          fi
-          echo "loopback binding intact"
+      # ADR-0011. This used to be three greps: does __main__.py still contain
+      # HOST = "127.0.0.1", is --host still absent, does nothing bind 0.0.0.0.
+      # They were real safeguards with one weakness -- they protected the
+      # promise by making a server impossible to *express*, so the first time
+      # somebody legitimately needed one, the only move was to delete the guard.
+      #
+      # The mode is explicit now, so the guard runs the resolver instead of
+      # matching text: nothing configured is local on loopback with no token,
+      # local refuses to be pointed elsewhere rather than ignoring the attempt,
+      # and self-hosted will not start without authentication. A grep can be
+      # satisfied by a comment; this cannot.
+      - name: Assert the local mode cannot be configured away
+        run: python scripts/assert_local_mode_is_sealed.py
 
   fidelity-corpus:
     name: Fidelity corpus integrity
