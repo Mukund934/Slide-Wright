@@ -20,6 +20,7 @@ from __future__ import annotations
 import io
 import struct
 import zlib
+import zipfile
 from pathlib import Path
 
 from pptx import Presentation
@@ -51,6 +52,7 @@ def build_adversarial(out_path: str | Path) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     _anonymise(prs)
     prs.save(str(out_path))
+    _add_comment(out_path)            # ppt/comments + ppt/commentAuthors.xml
     return out_path
 
 
@@ -77,6 +79,103 @@ def _anonymise(prs: Presentation) -> None:
     core.category = ""
     core.keywords = ""
     core.revision = 1
+
+
+COMMENT_NS = (
+    b' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+    b' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+    b' xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+)
+
+COMMENT_AUTHORS = (
+    b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    b"<p:cmAuthorLst" + COMMENT_NS + b">"
+    b'<p:cmAuthor id="1" name="Corpus Reviewer" initials="CR" lastIdx="1" clrIdx="0"/>'
+    b"</p:cmAuthorLst>"
+)
+
+COMMENT = (
+    b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    b"<p:cmLst" + COMMENT_NS + b">"
+    b'<p:cm authorId="1" dt="2026-09-12T00:00:00.000" idx="1">'
+    b'<p:pos x="1200" y="700"/>'
+    b"<p:text>Is this the final figure?</p:text>"
+    b"</p:cm></p:cmLst>"
+)
+
+CT_COMMENTS = (
+    '<Override PartName="/ppt/comments/comment1.xml" ContentType='
+    '"application/vnd.openxmlformats-officedocument.presentationml.comments+xml"/>'
+    '<Override PartName="/ppt/commentAuthors.xml" ContentType='
+    '"application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml"/>'
+)
+
+REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+def _add_comment(path: Path) -> None:
+    """Put a review comment on slide 1, by rewriting the saved package.
+
+    python-pptx cannot write one, and no deck in the corpus has one -- which is
+    why `docs/compatibility.md` has read **UNKNOWN** for Comments since the
+    table existed, and why the only way to change that is to add a deck that
+    contains one. Three of the real fixtures carry `ppt/commentAuthors.xml` with
+    no comment beside it, which says what usually happens to comments before a
+    deck is published.
+
+    What is evidenced and what is not, stated plainly because this is the one
+    fixture here written by hand rather than produced by a library:
+
+      * the namespace, the content type and the relationship type are taken from
+        `nasa-bhutan-water.pptx`'s own `commentAuthors.xml`, which PowerPoint
+        wrote;
+      * `p:cmLst` / `p:cm` / `p:pos` / `p:text` are the legacy comment schema,
+        the sibling of that part in the same namespace;
+      * **no copy of PowerPoint has opened this file.** The claim the
+        compatibility table makes about it is the claim it makes about every
+        row -- an edit ran on this machine and the parts carrying the construct
+        came back byte-for-byte -- and that does not depend on PowerPoint
+        rendering the comment.
+
+    A legacy comment anchors to a position on the slide rather than to a range
+    of text, so an edit cannot leave one pointing at the wrong words. What an
+    engine can do is drop the part, and that is what this makes measurable.
+    """
+    entries = []
+    with zipfile.ZipFile(path) as src:
+        for item in src.infolist():
+            entries.append((item, src.read(item.filename)))
+
+    def patch(name: str, mutate) -> None:
+        for index, (item, data) in enumerate(entries):
+            if item.filename == name:
+                entries[index] = (item, mutate(data.decode("utf-8")).encode("utf-8"))
+                return
+        raise AssertionError(f"{name} is not in the package")
+
+    patch("[Content_Types].xml", lambda x: x.replace("</Types>", CT_COMMENTS + "</Types>"))
+    patch(
+        "ppt/_rels/presentation.xml.rels",
+        lambda x: x.replace(
+            "</Relationships>",
+            f'<Relationship Id="rIdCommentAuthors" Type="{REL_NS}/commentAuthors"'
+            ' Target="commentAuthors.xml"/></Relationships>',
+        ),
+    )
+    patch(
+        "ppt/slides/_rels/slide1.xml.rels",
+        lambda x: x.replace(
+            "</Relationships>",
+            f'<Relationship Id="rIdComment1" Type="{REL_NS}/comments"'
+            ' Target="../comments/comment1.xml"/></Relationships>',
+        ),
+    )
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as out:
+        for item, data in entries:
+            out.writestr(item, data)
+        out.writestr("ppt/commentAuthors.xml", COMMENT_AUTHORS)
+        out.writestr("ppt/comments/comment1.xml", COMMENT)
 
 
 # ── slides ───────────────────────────────────────────────────────────────────
