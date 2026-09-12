@@ -89,7 +89,44 @@ DEV_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 # precisely a way to make it leave.
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
 
-WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
+def _find_client() -> Path | None:
+    """The built client, wherever this copy of the product keeps it.
+
+    There are two, because the product is obtained two ways and they do not
+    put the same files in the same place.
+
+    *Installed* — a wheel carries the client inside the package, at
+    `slide_wright_api/client/`, put there at build time by `setup.py`. This is
+    the case that matters to a user: they run `pip install`, and a Python
+    package is the only thing they should need.
+
+    *A source checkout* — the client is built by Vite into
+    `src/product/web/dist/`, which is where `npm run build` puts it and where
+    the dev loop expects it.
+
+    Only the first existed as a code path before, and only the second existed
+    on disk, so an installed copy served no interface at all: `parents[2]`
+    resolves inside site-packages, where there is no `web/dist` and never will
+    be. The app then reported "the client is not built", which named a build
+    step the user could not have run and hid a packaging defect behind it.
+
+    Presence is decided by `index.html` rather than by the directory. An empty
+    `dist/` -- a build that was interrupted, or a `dist` left behind by a
+    `git clean` that missed it -- is a directory, so the old check mounted a
+    static handler over nothing and served 404s from the product's own root.
+    """
+    packaged = Path(__file__).resolve().parent / "client"
+    if (packaged / "index.html").is_file():
+        return packaged
+
+    source = Path(__file__).resolve().parents[2] / "web" / "dist"
+    if (source / "index.html").is_file():
+        return source
+
+    return None
+
+
+CLIENT = _find_client()
 
 
 def create_app(*, workspace: Workspace | None = None, serve_client: bool = True) -> FastAPI:
@@ -506,8 +543,8 @@ def create_app(*, workspace: Workspace | None = None, serve_client: bool = True)
 
     # ── the client ───────────────────────────────────────────────────────────
 
-    if serve_client and WEB_DIST.is_dir():
-        app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="client")
+    if serve_client and CLIENT is not None:
+        app.mount("/", StaticFiles(directory=CLIENT, html=True), name="client")
 
     return app
 
