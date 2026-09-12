@@ -41,6 +41,11 @@ const AREA_ORDER: Area[] = [
   "evidence",
   "structure",
   "accessibility",
+  // Last, because it is not a complaint about the deck. It states what the
+  // file carries — who it names, what a deleted review left behind — and it is
+  // true of nearly every real deck, so leading with it would teach people to
+  // scroll past the findings that are actually about their work.
+  "disclosure",
 ];
 
 const TEMPLATE_PLACEHOLDER = "C:\Users\you\House.potx";
@@ -52,6 +57,10 @@ const AREA_LABEL: Record<Area, string> = {
   evidence: "Evidence",
   structure: "Structure",
   accessibility: "Accessibility",
+  // "What travels with it", not "Disclosure". The reader is someone about to
+  // send a deck outside their firm, and the question they need asked is about
+  // the file leaving, not about a compliance category.
+  disclosure: "What travels with it",
 };
 
 export function AuditPanel({

@@ -178,7 +178,12 @@ export type Area =
   | "consistency"
   | "evidence"
   | "layout"
-  | "accessibility";
+  | "accessibility"
+  /**
+   * What the file carries that the deck does not show — who it names, what a
+   * deleted review left behind. Every other area asks what a reader sees.
+   */
+  | "disclosure";
 
 /** What can correct a finding without a person deciding. "" means nothing can. */
 export type Remedy = "" | "conformance" | "alignment";
