@@ -37,8 +37,8 @@ them, and it is worth being precise about which.
 
 | # | Mechanism | Where |
 |---|---|---|
-| 1 | Bound to `127.0.0.1`, with no flag to change it | `__main__.py` — `HOST` is a module constant and `--host` is deliberately absent |
-| 2 | Answers only to `localhost`/`127.0.0.1`/`::1` by Host header, else `421` | `app.py` — `only_answer_to_loopback`, before every route |
+| 1 | Bound to `127.0.0.1`, with no flag to change it, and the local mode cannot be configured on to anything else | `deployment.py` — `local` *refuses* a bind address rather than ignoring one; `--host` is deliberately absent |
+| 2 | Answers only to `localhost`/`127.0.0.1`/`::1` by Host header, else `421` | `app.py` — `only_answer_to_its_own_name`, before every route |
 | 3 | Decks are opened **by path**, never uploaded | `POST /api/documents` takes `{path}` |
 | 4 | No authentication, because there is one trusted local user | `app.py` module docstring states this as a decision |
 | 5 | No outbound call except the optional model provider | asserted by test |
@@ -46,8 +46,11 @@ them, and it is worth being precise about which.
 | 7 | The built client loads nothing from an external origin | CI step, `grep` over `dist/` |
 | 8 | Durable state is version files on local disk beside the deck | `session.py`, `workspace.py` |
 
-Three of these are also CI gates that fail the build: the loopback pin, the
-absence of `--host`, and the absence of any `0.0.0.0` bind.
+Mechanisms 1, 2 and 7 are also CI gates that fail the build. Since ADR-0011
+the first two are checked by *running the resolver* rather than by grepping
+for a constant — `scripts/assert_local_mode_is_sealed.py` asserts that nothing
+configured is local on loopback with no token, and that local refuses every
+setting that does not belong to it. A grep can be satisfied by a comment.
 
 ### What the evidence for the constraint actually is
 
@@ -153,10 +156,12 @@ crosses the customer's trust boundary.
 
 **Preserves the promise:** yes — and this is the important point. ADR-0008's
 constraint is about *whose* machine, not about *whether there is a server*.
-**Missing:** authentication, per-user session isolation, a configurable bind
-address, a container image, and a way to turn the loopback pin off **only** in
-this mode.
-**Effort:** the smallest of the three non-local options.
+**Built:** the mode, the bearer token, the container image, and a way to leave
+loopback that exists **only** in this mode (ADR-0011).
+**Still missing:** per-user identity, and the session isolation that only becomes
+meaningful once there is more than one principal. One shared token is a coherent
+product for a team's own server; accounts are a different product.
+**Deployable today:** yes, with `docker run` and a volume of decks.
 
 ### C. Vendor-hosted multi-tenant SaaS
 
