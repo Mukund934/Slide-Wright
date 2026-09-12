@@ -225,6 +225,9 @@ def audit(deck: DeckInfo, name: str = "") -> DeckAudit:
         _table_shape,
         _names_the_file_carries,
         _orphaned_review_roster,
+        _contact_details,
+        _co_authoring_history,
+        _links_to_somebody_else_machine,
     ):
         rule(deck, result)
     return result
@@ -781,4 +784,87 @@ def _orphaned_review_roster(deck: DeckInfo, out: DeckAudit) -> None:
         "the file still lists everyone who reviewed it",
         "this is the residue of a review, not part of the deck; remove "
         "ppt/commentAuthors.xml if it should not travel",
+    ))
+
+
+def _contact_details(deck: DeckInfo, out: DeckAudit) -> None:
+    """Authors the file identifies beyond a display name.
+
+    `ppt/commentAuthors.xml` carries a name and initials. `ppt/authors.xml` --
+    the 2021 roster, a different part that the first version of this area did
+    not read -- carries a work email address and a directory object id:
+
+        userId="S::Michelle.Bowman@eia.gov::4561ef23-79be-43e1-9ac3-2223a28f3e32"
+
+    Two of the 26 third-party decks here have one, naming four people between
+    them with `@eia.gov` and `@ndc.nasa.gov` addresses. Kept apart from the
+    finding that lists names, because a contact somebody can write to and a key
+    into an organisation's directory is a different thing to decide about.
+
+    **Only author parts are read.** An address printed on a slide -- the corpus
+    has `AnnualEnergyOutlook@eia.gov` on a page -- was put there to be read, and
+    flagging it would be reporting the deck's own contents back to its author.
+    """
+    contacts = deck.provenance.contacts
+    if not contacts:
+        return
+
+    named = "; ".join(c.email or c.identifier for c in contacts)
+    if len(named) > 160:
+        named = named[:157] + "..."
+    counted = "one author" if len(contacts) == 1 else f"{len(contacts)} authors"
+    out.observations.append(Observation(
+        Area.DISCLOSURE, [],
+        f"the file carries a contact address or directory id for {counted}: {named}",
+        "this identifies them outside the document; PowerPoint writes it when a "
+        "signed-in user comments, and removing the comments does not remove it",
+    ))
+
+
+def _co_authoring_history(deck: DeckInfo, out: DeckAudit) -> None:
+    """`ppt/changesInfos/*` -- a record of who changed what, kept in the file.
+
+    One real deck here carries 9.7 KB of it, naming an editor and their email
+    address. It is not a comment, not a property and not on a slide, so nothing
+    that reads any of those would find it.
+    """
+    parts = deck.provenance.revision_history_parts
+    if not parts:
+        return
+    counted = "one part" if parts == 1 else f"{parts} parts"
+    out.observations.append(Observation(
+        Area.DISCLOSURE, [],
+        f"the file keeps {counted} of co-authoring history, recording who "
+        "changed what and when",
+        "it is the residue of editing together, not part of the deck; it is not "
+        "removed by deleting comments",
+    ))
+
+
+def _links_to_somebody_else_machine(deck: DeckInfo, out: DeckAudit) -> None:
+    """External links naming a path on whoever last edited the deck.
+
+    Eight chart data links in one real deck read
+    `file:///C:/Users/kanek/Desktop/Comparative%20analysis.xlsx`. That discloses
+    a user account, where they keep their work, and the names of two workbooks
+    that were never shipped -- and it tells a recipient the chart's source is
+    somewhere they cannot reach.
+
+    Squarely this product's subject: ADR-0009 is about chart data links
+    surviving an edit, and nothing had asked where they point.
+    """
+    links = deck.provenance.local_links
+    if not links:
+        return
+
+    shown = "; ".join(links[:2])
+    if len(shown) > 150:
+        shown = shown[:147] + "..."
+    counted = "one link" if len(links) == 1 else f"{len(links)} links"
+    out.observations.append(Observation(
+        Area.DISCLOSURE, [],
+        f"{counted} point at a path on somebody's machine rather than at a "
+        f"shared location: {shown}",
+        "the source is unreachable to anyone else, and the path names the "
+        "account it was written from",
     ))

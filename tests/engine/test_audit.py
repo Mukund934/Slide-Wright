@@ -775,3 +775,53 @@ class TestWhatTravelsWithTheFile:
         result = self._audit("lo-smartart-gear.pptx")
         assert result.by_area(Area.DISCLOSURE), "this deck does name someone"
         assert all(o.area is not Area.DISCLOSURE for o in result.faults)
+
+
+class TestTheThreeThingsTheFirstPassMissed:
+    """Everything the name-based scan could not see.
+
+    Yesterday's rules read `docProps` and `ppt/commentAuthors.xml`. Sweeping the
+    *contents* of every part instead found three more, each in a place a scan
+    for the word "comment" would never reach.
+    """
+
+    FIXTURES = pathlib.Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "third-party"
+
+    def _found(self, name: str):
+        import pytest
+
+        deck = self.FIXTURES / name
+        if not deck.is_file():
+            pytest.skip("third-party corpus not present; run scripts/fetch_fixtures.py")
+        return audit(inspect(deck), name).by_area(Area.DISCLOSURE)
+
+    def test_a_contact_address_is_its_own_finding(self):
+        found = self._found("nasa-es6-exit.pptx")
+        message = next(o.message for o in found if "contact address" in o.message)
+        assert "3 authors" in message
+        assert "hpsilva@ndc.nasa.gov" in message
+
+    def test_an_address_printed_on_a_slide_is_not_flagged(self):
+        """It was put there to be read.
+
+        `eia-aeo2023-release` prints `AnnualEnergyOutlook@eia.gov` on a page and
+        has no author part. Reporting it would be handing the deck's own
+        contents back to its author as a warning, which is how an audit teaches
+        people to stop reading it.
+        """
+        found = self._found("eia-aeo2023-release.pptx")
+        assert not [o for o in found if "contact address" in o.message]
+
+    def test_co_authoring_history_is_reported(self):
+        found = self._found("nasa-bhutan-water.pptx")
+        message = next(o.message for o in found if "co-authoring" in o.message)
+        assert "one part" in message, "the sentence is read by a person, not a parser"
+
+    def test_a_link_into_somebody_home_directory_is_reported(self):
+        found = self._found("nasa-bhutan-water.pptx")
+        message = next(o.message for o in found if "somebody's machine" in o.message)
+        assert "2 links" in message
+        assert "kanek" in message
+
+    def test_none_of_them_fire_on_a_deck_that_has_none(self, minimal_deck):
+        assert audit(inspect(minimal_deck), "control").by_area(Area.DISCLOSURE) == []
