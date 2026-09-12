@@ -55,6 +55,43 @@ function mount(nextAudit: Audit, nextPlan: TidyPlan = plan(), onTidy = vi.fn()) 
 
 beforeEach(() => vi.clearAllMocks());
 
+describe("what travels with the file", () => {
+  /**
+   * A disclosure is not a complaint about the deck — it says what the file
+   * carries once it leaves. The label is written for the person about to send
+   * it, which is why it is a sentence rather than a compliance category.
+   */
+  it("groups it under a heading about the file leaving", async () => {
+    mount(
+      audit({
+        observations: [
+          observation({
+            area: "disclosure",
+            where: "deck",
+            message: "the file names 10 people who appear on no slide: Allison Coyle",
+          }),
+        ],
+      }),
+    );
+    expect(await screen.findByText(/What travels with it/)).toBeInTheDocument();
+    expect(screen.getByText(/Allison Coyle/)).toBeInTheDocument();
+  });
+
+  it("puts it after the findings that are about the work", async () => {
+    mount(
+      audit({
+        observations: [
+          observation({ area: "disclosure", message: "the file names 1 person" }),
+          observation({ area: "narrative", message: "no slide title makes a claim" }),
+        ],
+      }),
+    );
+    await screen.findByText(/no slide title makes a claim/);
+    const body = document.body.textContent ?? "";
+    expect(body.indexOf("Narrative")).toBeLessThan(body.indexOf("What travels with it"));
+  });
+});
+
 describe("the deck's own numbers", () => {
   /**
    * A deck that reads as 983 words and carries 2,708 more underneath is being
