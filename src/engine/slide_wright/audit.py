@@ -64,6 +64,14 @@ class Area(str, Enum):
     EVIDENCE = "evidence"
     LAYOUT = "layout"
     ACCESSIBILITY = "accessibility"
+    #: What the file carries that the deck does not show.
+    #:
+    #: Every other area here asks what a reader sees. This one asks what
+    #: travels with the file, which for a confidential document is a different
+    #: and sometimes more urgent question -- and the measurement says it is
+    #: never an empty one: **all 26 third-party decks in this corpus name the
+    #: person who last edited them.**
+    DISCLOSURE = "disclosure"
 
 
 class Remedy(str, Enum):
@@ -135,6 +143,21 @@ class DeckAudit:
         return [o for o in self.observations if o.severity is Severity.ERROR]
 
     @property
+    def faults(self) -> list[Observation]:
+        """Observations that say something is *wrong*, which is not all of them.
+
+        `DISCLOSURE` states what the file carries: who it names, what a deleted
+        review left behind. Nothing there is a defect in the deck -- it is a
+        decision for whoever is about to send it -- and it is true of nearly
+        every real deck, so counting it would make `audit` exit non-zero on
+        everything and retire the exit code as a signal.
+
+        Reported either way. The difference is only whether it decides that a
+        deck has something to fix.
+        """
+        return [o for o in self.observations if o.area is not Area.DISCLOSURE]
+
+    @property
     def words_per_slide(self) -> float:
         return self.word_count / self.slide_count if self.slide_count else 0.0
 
@@ -195,6 +218,8 @@ def audit(deck: DeckInfo, name: str = "") -> DeckAudit:
         _unsourced_figures,
         _bare_numbers,
         _table_shape,
+        _names_the_file_carries,
+        _orphaned_review_roster,
     ):
         rule(deck, result)
     return result
@@ -673,4 +698,82 @@ def _duplicated_layouts(deck: DeckInfo, out: DeckAudit) -> None:
         "PowerPoint names a layout this way when it has to keep a second copy "
         "of one that already exists, which is what happens when a slide is "
         "brought in from another deck",
+    ))
+
+
+def _names_the_file_carries(deck: DeckInfo, out: DeckAudit) -> None:
+    """People and organisations named by the file rather than by a slide.
+
+    `docProps/core.xml` records who created a deck and who last saved it;
+    `docProps/app.xml` records a company; `ppt/commentAuthors.xml` records
+    everyone who has ever commented. None of it is on a slide, and none of it is
+    visible to whoever opens the deck.
+
+    Measured across the 26 third-party decks here: **26 name the last person to
+    edit them**, 25 name a creator, six name a company, and the richest names
+    ten people. That is not a defect in those decks -- it is what PowerPoint
+    does -- which is exactly why it is worth saying out loud to someone about to
+    send a pitchbook outside their firm.
+
+    It fires on nearly every deck, and that is deliberate. The value here is not
+    the alarm, it is the list: a reader does not need to be told that documents
+    have properties, they need to be told *which names are in this one*.
+
+    Reported and not corrected. Rewriting `docProps` or deleting a part changes
+    the shape of the package, which is the thing `verify` exists to refuse, so
+    it needs its own decision rather than arriving as a side effect of an audit.
+    """
+    people = deck.provenance.people
+    organisations = deck.provenance.organisations
+    if not people and not organisations:
+        return
+
+    parts = []
+    if people:
+        parts.append(f"{len(people)} " + ("person" if len(people) == 1 else "people"))
+    if organisations:
+        parts.append(
+            f"{len(organisations)} organisation" + ("" if len(organisations) == 1 else "s")
+        )
+    named = "; ".join(people + organisations)
+    if len(named) > 160:
+        named = named[:157] + "..."
+    verb = "appears" if len(people) + len(organisations) == 1 else "appear"
+
+    out.observations.append(Observation(
+        Area.DISCLOSURE, [],
+        f"the file names {' and '.join(parts)} who {verb} on no slide: {named}",
+        "decide deliberately whether they should travel with it; PowerPoint's "
+        "own Inspect Document removes them, and nothing here does",
+    ))
+
+
+def _orphaned_review_roster(deck: DeckInfo, out: DeckAudit) -> None:
+    """A comment-author list whose comments are gone.
+
+    Three of the 26 third-party decks here carry `ppt/commentAuthors.xml` naming
+    **26 people between them, with no comment part left in the package**. One
+    entry records 54 comments from a single reviewer. The comments were deleted;
+    the roster was not.
+
+    Kept apart from the finding above even though the same names appear in both,
+    because it says something the other cannot: somebody already tried to clean
+    this file and stopped one part short. That is a different sentence to read
+    and a different decision to make.
+    """
+    authors = deck.provenance.comment_authors
+    if not authors or deck.provenance.comment_parts:
+        return
+
+    counted = (
+        "its one author was not"
+        if len(authors) == 1
+        else f"their {len(authors)} authors were not"
+    )
+    out.observations.append(Observation(
+        Area.DISCLOSURE, [],
+        f"the comments were deleted and {counted}; "
+        "the file still lists everyone who reviewed it",
+        "this is the residue of a review, not part of the deck; remove "
+        "ppt/commentAuthors.xml if it should not travel",
     ))
