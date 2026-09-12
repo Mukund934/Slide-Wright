@@ -13,6 +13,7 @@ to write one by hand.
 
 from __future__ import annotations
 
+import re
 import shutil
 import zipfile
 
@@ -265,3 +266,35 @@ class TestTheCommentsRowIsEarned:
             if "comment" in d.name.lower() and d.status != "identical"
         ]
         assert moved == [], "an edit must not touch a comment it was never asked about"
+
+
+class TestModernCommentsStayUnknown:
+    """Listed, not measured, and that is the honest state.
+
+    The 2021 comment schema is a different part from the legacy one, and no deck
+    on this machine has either the part or a sample to copy -- two decks carry
+    `ppt/authors.xml`, its author list, and none carries a comment written
+    against it. The legacy fixture here was defensible because a real
+    PowerPoint-written sibling existed in the same namespace to copy the
+    declarations from; there is no equivalent for this, so inventing one would
+    put a row in the table that rests on a guess.
+
+    Listed rather than omitted, because the module says why: a construct missing
+    from a compatibility table reads as one that was considered and found fine.
+    """
+
+    def test_it_is_a_construct_the_table_knows_about(self):
+        assert any(c.name == "Modern comments" for c in CONSTRUCTS)
+
+    def test_it_has_no_verdict_because_nothing_was_measured(self):
+        construct = next(c for c in CONSTRUCTS if c.name == "Modern comments")
+        assert Row(construct=construct).verdict == UNKNOWN
+        assert Row(construct=construct).editing == UNKNOWN
+
+    def test_the_legacy_row_does_not_answer_for_it(self):
+        """Two constructs, two parts, two questions."""
+        legacy = next(c for c in CONSTRUCTS if c.name == "Comments")
+        modern = next(c for c in CONSTRUCTS if c.name == "Modern comments")
+        assert legacy.part != modern.part
+        assert not re.search(legacy.part, "ppt/comments/modernComment_abc.xml")
+        assert re.search(modern.part, "ppt/comments/modernComment_abc.xml")

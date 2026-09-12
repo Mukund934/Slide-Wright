@@ -87,7 +87,13 @@ CONSTRUCTS = (
     Construct("3D models", marker="model3D"),
     Construct("Animation timing", marker="<p:timing>"),
     Construct("Slide transitions", marker="<p:transition"),
-    Construct("Comments", part=r"^ppt/comments"),
+    Construct("Comments", part=r"^ppt/comments/comment\d+\.xml$"),
+    Construct(
+        "Modern comments",
+        part=r"^ppt/comments/modernComment",
+        note="the 2021 schema, a different part from the legacy one",
+    ),
+    Construct("Revision history", part=r"^ppt/changesInfos/"),
     Construct("Custom XML", part=r"^customXml/"),
     Construct(
         "Macros (VBA)",
