@@ -14,6 +14,7 @@ Engineering documentation, safe to share. Strategy, pricing, customer research a
 | [05-security](architecture/05-security.md) | Tenant isolation, OOXML threats, provider exposure |
 | [06-ux-architecture](architecture/06-ux-architecture.md) | The deck is the interface |
 | [07-design-language](architecture/07-design-language.md) | One attention colour, and it means *this changed* |
+| [08-deployment-models](architecture/08-deployment-models.md) | Local, customer-hosted, vendor-hosted — what each costs the promise |
 
 ## Decisions
 
